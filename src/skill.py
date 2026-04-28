@@ -121,33 +121,61 @@ def compute_skill_metrics(
     }
 
 
+def _regression_params(
+    df_e: pd.DataFrame,
+    pearson_r: float,
+    forecast_norm: float,
+) -> tuple[float, float, float]:
+    """Return (mu, sigma, T) for the conditional regression model.
+
+    After normalising SEAS5 to match ERA5 mean/std, the conditional distribution of
+    observations given the forecast is:
+      E[obs | f] = (1-r)·μ_ERA5 + r·f   — regression toward climatology
+      std[obs | f] = σ_ERA5 · √(1-r²)   — tighter than raw ERA5 when r > 0
+
+    Correctly limits: r=0 → climatological 33%; r=1 → perfect prediction (zero width).
+    The additive error model (centering at f regardless of r) over-uses the forecast
+    and gives too-little variation between different skill levels.
+    """
+    era5_mean = float(df_e["obs_mean"].mean())
+    era5_std = float(df_e["obs_mean"].std(ddof=1))
+    T = float(df_e["obs_mean"].quantile(1 / 3))
+    mu = (1 - pearson_r) * era5_mean + pearson_r * forecast_norm
+    sigma = era5_std * float(np.sqrt(max(1 - pearson_r ** 2, 0)))
+    return mu, sigma, T
+
+
 def compute_prob_lower_tercile(
     df_e: pd.DataFrame,
-    skill: dict[str, float],
-    current_forecast_mean: float,
+    pearson_r: float,
+    current_forecast_norm: float,
 ) -> float:
-    """P(obs < lower ERA5 tercile) using the Gaussian error model.
-
-    After normalization bias ≈ 0, so the bell curve peaks at current_forecast_mean.
-    """
-    T = float(df_e["obs_mean"].quantile(1 / 3))
-    mu = current_forecast_mean + skill["bias"]
-    sigma = max(skill["sigma"], 1e-9)
+    """P(obs < lower ERA5 tercile) using the conditional regression model."""
+    mu, sigma, T = _regression_params(df_e, pearson_r, current_forecast_norm)
+    if sigma < 1e-9:
+        return 0.0 if current_forecast_norm >= T else 1.0
     return float(norm.cdf(T, loc=mu, scale=sigma))
 
 
 def compute_hist_probs(
     df_s_norm: pd.DataFrame,
     df_e: pd.DataFrame,
-    sigma: float,
+    pearson_r: float,
 ) -> pd.Series:
-    """P(lower tercile) for each historical overlap year using the same Gaussian model.
+    """P(lower tercile) for each historical overlap year using the regression model.
 
     Returns a Series indexed by season_year.
     """
+    era5_mean = float(df_e["obs_mean"].mean())
+    era5_std = float(df_e["obs_mean"].std(ddof=1))
     T = float(df_e["obs_mean"].quantile(1 / 3))
+    sigma = era5_std * float(np.sqrt(max(1 - pearson_r ** 2, 0)))
     df = df_s_norm.merge(df_e, on="season_year", how="inner")
-    probs = norm.cdf(T, loc=df["forecast_mean"].values, scale=max(sigma, 1e-9))
+    mu_vals = (1 - pearson_r) * era5_mean + pearson_r * df["forecast_mean"].values
+    if sigma < 1e-9:
+        probs = (mu_vals < T).astype(float)
+    else:
+        probs = norm.cdf(T, loc=mu_vals, scale=sigma)
     return pd.Series(probs, index=df["season_year"].values)
 
 
@@ -203,7 +231,7 @@ def run_all_combinations(
             hist_probs_series: pd.Series = pd.Series(dtype=float)
             hist_F: np.ndarray = np.array([])
             if skill is not None:
-                hist_probs_series = compute_hist_probs(df_s, df_e, skill["sigma"])
+                hist_probs_series = compute_hist_probs(df_s, df_e, skill["pearson_r"])
                 overlap_years = set(df_e["season_year"].values)
                 hist_F = df_s[df_s["season_year"].isin(overlap_years)]["forecast_mean"].values
 
@@ -226,7 +254,7 @@ def run_all_combinations(
 
             forecast_percentile = None
             if skill is not None and current_forecast_mean is not None:
-                prob = compute_prob_lower_tercile(df_e, skill, current_forecast_mean)
+                prob = compute_prob_lower_tercile(df_e, skill["pearson_r"], current_forecast_mean)
                 forecast_rp = empirical_rp(current_forecast_mean, hist_F, higher_is_more_extreme=False)
                 if len(hist_probs_series) > 0:
                     prob_rp = empirical_rp(prob, hist_probs_series.values, higher_is_more_extreme=True)
@@ -254,16 +282,26 @@ def run_all_combinations(
                     "hist_prob": hist_prob_val,
                 })
 
+            # Regression conditional std and ERA5 stats for bell curve display
+            era5_mean = float(df_e["obs_mean"].mean()) if not df_e.empty else None
+            era5_std = float(df_e["obs_mean"].std(ddof=1)) if len(df_e) > 1 else None
+            sigma_regression = (
+                era5_std * float(np.sqrt(max(1 - skill["pearson_r"] ** 2, 0)))
+                if skill is not None and era5_std is not None
+                else None
+            )
+
             skill_rows.append({
                 "pcode": pcode,
                 "country_name": country_name,
                 "issued_month": issued_month,
                 "trimester": trimester_name,
                 "n_years": skill["n_years"] if skill else None,
-                "bias": skill["bias"] if skill else None,
-                "sigma": skill["sigma"] if skill else None,
-                "rmse": skill["rmse"] if skill else None,
                 "pearson_r": skill["pearson_r"] if skill else None,
+                "rmse": skill["rmse"] if skill else None,
+                "sigma": sigma_regression,   # conditional regression std: ERA5_std·√(1-r²)
+                "era5_mean": era5_mean,
+                "era5_std": era5_std,
                 "lower_tercile_mm": lower_tercile_mm,
                 "current_forecast_year": current_forecast_year,
                 "current_forecast_mean": current_forecast_mean,

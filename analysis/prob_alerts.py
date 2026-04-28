@@ -186,19 +186,22 @@ def _(mo):
     mo.md(r"""
     ### Current forecast probability
 
-    **Statistical model:** SEAS5 forecasts are first normalized to have the same mean and
-    standard deviation as ERA5 over the historical overlap period. The residual errors
-    (ERA5 − SEAS5_normalized) have zero mean by construction; their standard deviation
-    **σ** captures remaining uncertainty — smaller σ means more skillful.
+    **Statistical model:** SEAS5 forecasts are first normalized to match ERA5 mean and
+    std. The conditional distribution of actual rainfall given normalized forecast **F** is
+    then modelled using **linear regression**:
 
-    For the current normalized forecast value **F**, likely actual rainfall is modelled as
-    **N(F, σ²)** — the bell curve peaks exactly at F. A skillful forecast (small σ) gives a
-    decisive probability; a poor-skill forecast (large σ) gives a probability near the
-    climatological baseline of 33%.
+    > E[obs | F] = (1 − r) · μ_ERA5 + r · F
+    > std[obs | F] = σ_ERA5 · √(1 − r²)
 
-    Return periods are computed empirically against all historical seasons for this
-    (issued month, trimester) combination. `is_predictive` = ERA5 data for the current
-    forecast period is not yet available (about timing, not skill quality).
+    The bell curve is centred at a **weighted blend** of the forecast and the climatological
+    mean — the lower the skill r, the more the centre is pulled toward climatology.
+    At r = 0 the forecast is ignored entirely (P = 33%); at r = 1 the forecast is taken
+    at face value (zero uncertainty). This gives much stronger differentiation by skill
+    than an additive error model would.
+
+    The **purple line** shows the raw SEAS5 forecast (F); the **bell curve centre** shows
+    where the model expects observations to cluster. Return periods are computed
+    empirically. `is_predictive` = ERA5 not yet available (timing, not skill quality).
     """)
     return
 
@@ -245,20 +248,22 @@ def _(
         _ax.set_axis_off()
     else:
         _r = _row.iloc[0]
-        _sigma = max(float(_r["sigma"]), 1e-9)
-        _F = float(_r["current_forecast_mean"])
+        _r_val = float(_r["pearson_r"])
+        _sigma = max(float(_r["sigma"]), 1e-9)   # ERA5_std · √(1-r²)
+        _era5_mean = float(_r["era5_mean"])
+        _F = float(_r["current_forecast_mean"])   # raw normalized SEAS5 forecast
+        _mu = (1 - _r_val) * _era5_mean + _r_val * _F  # regression-shrunk centre
         _T = float(np.percentile(_era5_vals, 100 / 3))
         _prob = float(_r["prob_lower_tercile"])
         _is_pred = bool(_r["is_predictive"])
         _year = int(_r["current_forecast_year"])
-        _r_val = float(_r["pearson_r"])
         _forecast_rp = _r["forecast_rp"]
         _prob_rp = _r["prob_rp"]
 
-        _x_min = min(float(_era5_vals.min()), _F - 4 * _sigma)
-        _x_max = max(float(_era5_vals.max()), _F + 4 * _sigma)
+        _x_min = min(float(_era5_vals.min()), _mu - 4 * _sigma)
+        _x_max = max(float(_era5_vals.max()), _mu + 4 * _sigma)
         _x = np.linspace(_x_min, _x_max, 500)
-        _pdf = norm.pdf(_x, loc=_F, scale=_sigma)
+        _pdf = norm.pdf(_x, loc=_mu, scale=_sigma)
 
         _ax.plot(_x, _pdf, color="k", linewidth=2)
         _low_mask = _x <= _T
@@ -295,6 +300,12 @@ def _(
         if not _is_pred:
             _forecast_label += " [ERA5 now available]"
         _ax.axvline(_F, color="mediumorchid", linestyle="--", label=_forecast_label)
+        # Show the regression-shrunk centre (may differ from F when r < 1)
+        if abs(_mu - _F) > 0.001:
+            _ax.axvline(
+                _mu, color="steelblue", linestyle=":",
+                label=f"Conditional E[obs] ({_mu:.3f}) — r={_r_val:.2f} shrinkage",
+            )
 
         _rp_lines = []
         if pd.notna(_forecast_rp):
@@ -322,7 +333,7 @@ def _(
         _issued_str = calendar.month_abbr[issued_month]
         _ax.set_title(
             f"{_r['country_name']} — issued {_issued_str}, valid {trimester}  |  "
-            f"σ = {_sigma:.3f}  r = {_r_val:.2f}"
+            f"r = {_r_val:.2f}  σ_cond = {_sigma:.3f}"
         )
         _ax.set_xlabel("Normalized mean daily rainfall (mm/day)")
         _ax.set_ylabel("Probability density")
@@ -473,25 +484,16 @@ def _(mo):
 
 
 @app.cell
-def _(df_paired, df_skill, issued_month, np, pd, plt, trimester):
-    # ERA5 climatological mean per (pcode, trimester) for normalisation
-    _era5_means = (
-        df_paired[
-            (df_paired["trimester"] == trimester)
-            & df_paired["obs_mean"].notna()
-        ]
-        .groupby("pcode")["obs_mean"]
-        .mean()
-    )
-
+def _(df_skill, issued_month, np, pd, plt, trimester):
     _df_val = df_skill[
         (df_skill["issued_month"] == issued_month)
         & (df_skill["trimester"] == trimester)
         & df_skill["pearson_r"].notna()
         & df_skill["sigma"].notna()
+        & df_skill["era5_mean"].notna()
     ].copy()
 
-    _df_val["era5_mean"] = _df_val["pcode"].map(_era5_means)
+    # sigma is already ERA5_std·√(1-r²); normalise by ERA5 mean for comparability
     _df_val["sigma_norm"] = _df_val["sigma"] / _df_val["era5_mean"]
 
     _fig_val, _ax = plt.subplots(figsize=(8, 5), dpi=150)
@@ -503,17 +505,12 @@ def _(df_paired, df_skill, issued_month, np, pd, plt, trimester):
         _r_vals = _df_val["pearson_r"].values
         _sn_vals = _df_val["sigma_norm"].values
 
-        # Theoretical curve using median CV_ERA5 across countries
-        _cv_era5_vals = _df_val["era5_mean"].apply(
-            lambda mu: _df_val.loc[_df_val["era5_mean"] == mu, "sigma"].values[0] / mu
-            if pd.notna(mu) and mu > 0 else np.nan
-        )
-        # CV_ERA5 = sigma_ERA5 / mu_ERA5; sigma_ERA5 = sigma / sqrt(2*(1-r))
-        _sigma_era5 = _df_val["sigma"] / np.sqrt(np.clip(2 * (1 - _r_vals), 1e-9, None))
-        _cv_era5 = _sigma_era5 / _df_val["era5_mean"]
+        # Theoretical curve: σ_norm = CV_ERA5 · √(1-r²)  (regression conditional std)
+        # sigma is now ERA5_std·√(1-r²), so CV_ERA5 = sigma / (era5_mean·√(1-r²))
+        _cv_era5 = _df_val["era5_std"] / _df_val["era5_mean"]
         _median_cv = float(np.nanmedian(_cv_era5.values))
         _r_curve = np.linspace(-0.6, 1.0, 300)
-        _sn_curve = _median_cv * np.sqrt(np.clip(2 * (1 - _r_curve), 0, None))
+        _sn_curve = _median_cv * np.sqrt(np.clip(1 - _r_curve ** 2, 0, None))
         _ax.plot(
             _r_curve, _sn_curve, color="grey", linestyle="--", linewidth=1,
             label=f"theoretical (median CV_ERA5 = {_median_cv:.2f})", zorder=1,
