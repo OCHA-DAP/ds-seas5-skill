@@ -224,11 +224,15 @@ def run_all_combinations(
             forecast_rp = None
             prob_rp = None
 
+            forecast_percentile = None
             if skill is not None and current_forecast_mean is not None:
                 prob = compute_prob_lower_tercile(df_e, skill, current_forecast_mean)
                 forecast_rp = empirical_rp(current_forecast_mean, hist_F, higher_is_more_extreme=False)
                 if len(hist_probs_series) > 0:
                     prob_rp = empirical_rp(prob, hist_probs_series.values, higher_is_more_extreme=True)
+                if len(hist_F) > 0:
+                    # Percentile of current forecast among historical (0=driest, 100=wettest)
+                    forecast_percentile = float(100.0 * np.sum(hist_F <= current_forecast_mean) / len(hist_F))
 
             # Paired yearly rows (one per season_year, outer join so current year included)
             df_merged = df_s.merge(df_e, on="season_year", how="outer")
@@ -267,6 +271,7 @@ def run_all_combinations(
                 "prob_lower_tercile": prob,
                 "forecast_rp": forecast_rp,
                 "prob_rp": prob_rp,
+                "forecast_percentile": forecast_percentile,
             })
 
             if progress is not None:

@@ -375,6 +375,78 @@ def _(calendar, df_paired, df_skill, issued_month, pcode, pd, plt, trimester):
 
 @app.cell
 def _(mo):
+    mo.md(r"""
+    ### Bell curve validation: skill vs residual error
+
+    Each point below is one country for the selected (issued month, trimester).
+    **`is_predictive`** means ERA5 data for the current forecast period isn't available yet
+    — it's about *timing*, not skill quality. A combo can have negative correlation
+    (historically worse than climatology) and still have a current unverified forecast.
+
+    The residual σ should decrease as correlation increases. When r = 1, σ → 0 (perfect
+    forecast). When r = 0, σ = ERA5 std (no skill, bell curve reverts to climatology).
+    When r < 0, σ > ERA5 std (forecast is anti-correlated and widens the uncertainty).
+    """)
+    return
+
+
+@app.cell
+def _(df_skill, issued_month, np, pd, plt, trimester):
+    _df_val = df_skill[
+        (df_skill["issued_month"] == issued_month)
+        & (df_skill["trimester"] == trimester)
+        & df_skill["pearson_r"].notna()
+        & df_skill["sigma"].notna()
+    ].copy()
+
+    _fig_val, _ax = plt.subplots(figsize=(8, 5), dpi=150)
+
+    if _df_val.empty:
+        _ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=_ax.transAxes)
+        _ax.set_axis_off()
+    else:
+        _r_vals = _df_val["pearson_r"].values
+        _s_vals = _df_val["sigma"].values
+
+        # Theoretical curve: sigma = era5_std * sqrt(2*(1-r))
+        # After normalization, sigma_era5 = sigma / sqrt(2*(1-r)), so we back it out
+        # as the median sigma_era5 across the set
+        _r_curve = np.linspace(-0.6, 1.0, 200)
+        _era5_stds = _s_vals / np.sqrt(np.clip(2 * (1 - _r_vals), 1e-9, None))
+        _median_era5_std = float(np.median(_era5_stds))
+        _sigma_curve = _median_era5_std * np.sqrt(np.clip(2 * (1 - _r_curve), 0, None))
+        _ax.plot(_r_curve, _sigma_curve, color="grey", linestyle="--", linewidth=1,
+                 label=f"theoretical (σ_ERA5 = {_median_era5_std:.3f})", zorder=1)
+
+        _ax.axvline(0, color="grey", linewidth=0.5, alpha=0.5)
+
+        _sc = _ax.scatter(_r_vals, _s_vals, c=_df_val["prob_lower_tercile"].fillna(0.33),
+                          cmap="RdYlBu_r", vmin=0.1, vmax=0.6, s=60, zorder=3)
+        plt.colorbar(_sc, ax=_ax, label="P(lower tercile)", shrink=0.8)
+
+        for _, _pt in _df_val.iterrows():
+            if pd.notna(_pt["pearson_r"]) and pd.notna(_pt["sigma"]):
+                _ax.annotate(
+                    _pt["country_name"].split(" ")[0],  # first word of name
+                    (_pt["pearson_r"], _pt["sigma"]),
+                    xytext=(4, 3), textcoords="offset points",
+                    fontsize=7, color="k",
+                )
+
+        _ax.set_xlabel("Pearson r (historical correlation)")
+        _ax.set_ylabel("Residual σ (mm/day) — bell curve width")
+        _ax.set_title(f"Skill validation — all countries, issued {issued_month}, valid {trimester}")
+        _ax.spines["top"].set_visible(False)
+        _ax.spines["right"].set_visible(False)
+        _ax.legend(fontsize=8)
+        plt.tight_layout()
+
+    _fig_val
+    return
+
+
+@app.cell
+def _(mo):
     mo.md("""
     ## Ranked drought alert table
     """)
@@ -430,10 +502,14 @@ def _(df_skill, mo, pd, rank_issued_month_dd, rank_trimester_dd):
     _df_rank["prob_rp"] = _df_rank["prob_rp"].apply(
         lambda x: f"1-in-{x:.0f}" if pd.notna(x) else "—"
     )
+    _df_rank["fcst_pctile_%"] = _df_rank["forecast_percentile"].apply(
+        lambda x: f"{x:.0f}%" if pd.notna(x) else "—"
+    )
 
     _display = _df_rank[
-        ["rank", "country_name", "pcode", "prob_%", "forecast_rp", "prob_rp",
-         "pearson_r", "n_years", "current_forecast_year", "is_predictive"]
+        ["rank", "country_name", "pcode", "prob_%", "fcst_pctile_%",
+         "forecast_rp", "prob_rp", "pearson_r", "n_years",
+         "current_forecast_year", "is_predictive"]
     ].reset_index(drop=True)
 
     mo.ui.table(_display)
