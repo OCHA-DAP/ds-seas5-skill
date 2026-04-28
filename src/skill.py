@@ -78,10 +78,7 @@ def aggregate_era5_trimester(
 def normalize_seas5(df_s: pd.DataFrame, df_e: pd.DataFrame) -> pd.DataFrame:
     """Scale SEAS5 so its mean and std match ERA5 over the historical overlap.
 
-    Transformation is fit on overlap years only, then applied to ALL SEAS5 years
-    (including the current forecast). After normalization:
-      - mean(SEAS5_norm[overlap]) = mean(ERA5[overlap])  →  bias ≡ 0
-      - std(SEAS5_norm[overlap])  = std(ERA5[overlap])   →  same spread as obs
+    Applied to ALL SEAS5 years (including current forecast) using overlap stats.
     Returns a copy of df_s with forecast_mean replaced by the normalized values.
     """
     df_overlap = df_s.merge(df_e, on="season_year", how="inner")
@@ -102,10 +99,9 @@ def compute_skill_metrics(
     df_s: pd.DataFrame,
     df_e: pd.DataFrame,
 ) -> dict[str, float] | None:
-    """Compute bias, sigma, RMSE, and Pearson r from matched historical pairs.
+    """Compute Pearson r, RMSE, and n from matched historical pairs.
 
     Returns None if fewer than MIN_YEARS overlapping years exist.
-    When called on normalized SEAS5, bias will be ~0 by construction.
     """
     df = df_s.merge(df_e, on="season_year", how="inner")
     if len(df) < MIN_YEARS:
@@ -113,70 +109,10 @@ def compute_skill_metrics(
 
     errors = df["obs_mean"] - df["forecast_mean"]
     return {
-        "bias": float(errors.mean()),
-        "sigma": float(errors.std(ddof=1)),
         "rmse": float(np.sqrt((errors**2).mean())),
         "pearson_r": float(df[["forecast_mean", "obs_mean"]].corr().iloc[0, 1]),
         "n_years": len(df),
     }
-
-
-def _regression_params(
-    df_e: pd.DataFrame,
-    pearson_r: float,
-    forecast_norm: float,
-) -> tuple[float, float, float]:
-    """Return (mu, sigma, T) for the conditional regression model.
-
-    After normalising SEAS5 to match ERA5 mean/std, the conditional distribution of
-    observations given the forecast is:
-      E[obs | f] = (1-r)·μ_ERA5 + r·f   — regression toward climatology
-      std[obs | f] = σ_ERA5 · √(1-r²)   — tighter than raw ERA5 when r > 0
-
-    Correctly limits: r=0 → climatological 33%; r=1 → perfect prediction (zero width).
-    The additive error model (centering at f regardless of r) over-uses the forecast
-    and gives too-little variation between different skill levels.
-    """
-    era5_mean = float(df_e["obs_mean"].mean())
-    era5_std = float(df_e["obs_mean"].std(ddof=1))
-    T = float(df_e["obs_mean"].quantile(1 / 3))
-    mu = (1 - pearson_r) * era5_mean + pearson_r * forecast_norm
-    sigma = era5_std * float(np.sqrt(max(1 - pearson_r ** 2, 0)))
-    return mu, sigma, T
-
-
-def compute_prob_lower_tercile(
-    df_e: pd.DataFrame,
-    pearson_r: float,
-    current_forecast_norm: float,
-) -> float:
-    """P(obs < lower ERA5 tercile) using the conditional regression model."""
-    mu, sigma, T = _regression_params(df_e, pearson_r, current_forecast_norm)
-    if sigma < 1e-9:
-        return 0.0 if current_forecast_norm >= T else 1.0
-    return float(norm.cdf(T, loc=mu, scale=sigma))
-
-
-def compute_hist_probs(
-    df_s_norm: pd.DataFrame,
-    df_e: pd.DataFrame,
-    pearson_r: float,
-) -> pd.Series:
-    """P(lower tercile) for each historical overlap year using the regression model.
-
-    Returns a Series indexed by season_year.
-    """
-    era5_mean = float(df_e["obs_mean"].mean())
-    era5_std = float(df_e["obs_mean"].std(ddof=1))
-    T = float(df_e["obs_mean"].quantile(1 / 3))
-    sigma = era5_std * float(np.sqrt(max(1 - pearson_r ** 2, 0)))
-    df = df_s_norm.merge(df_e, on="season_year", how="inner")
-    mu_vals = (1 - pearson_r) * era5_mean + pearson_r * df["forecast_mean"].values
-    if sigma < 1e-9:
-        probs = (mu_vals < T).astype(float)
-    else:
-        probs = norm.cdf(T, loc=mu_vals, scale=sigma)
-    return pd.Series(probs, index=df["season_year"].values)
 
 
 def empirical_rp(
@@ -208,11 +144,17 @@ def run_all_combinations(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Compute skill for all 144 (issued_month × trimester) combinations.
 
-    SEAS5 is normalized to ERA5 space before any skill calculation.
+    Pipeline:
+      1. Aggregate to yearly trimester means
+      2. log1p-transform → makes precipitation closer to Gaussian
+      3. Normalize SEAS5 in log-space to match ERA5 mean and std
+      4. Fit regression: E[log_obs | log_forecast] = (1-r)·μ_ERA5 + r·f
+      5. Empirical sigma = std of actual regression residuals (not theoretical)
+      6. Probability = Φ((T_log − μ_conditional) / σ_empirical)
 
     Returns:
         df_skill: one row per combo with skill metrics, probabilities, and RPs
-        df_paired: historical (season_year, forecast_mean, obs_mean, hist_prob) per combo
+        df_paired: historical (season_year, forecast_mean_log, obs_mean_log) per combo
     """
     skill_rows: list[dict] = []
     paired_rows: list[dict] = []
@@ -220,57 +162,90 @@ def run_all_combinations(
     for issued_month in range(1, 13):
         for trimester_name, valid_months in TRIMESTERS.items():
             df_s_raw = aggregate_seas5_trimester(df_seas5, issued_month, valid_months)
-            df_e = aggregate_era5_trimester(df_era5, valid_months)
+            df_e_raw = aggregate_era5_trimester(df_era5, valid_months)
 
-            # Normalize SEAS5 to ERA5 space before all further calculations
-            df_s = normalize_seas5(df_s_raw, df_e)
+            # log1p-transform (handles near-zero values; makes distribution more Gaussian)
+            df_s_log = df_s_raw.assign(
+                forecast_mean=np.log1p(df_s_raw["forecast_mean"].clip(lower=0))
+            )
+            df_e_log = df_e_raw.assign(
+                obs_mean=np.log1p(df_e_raw["obs_mean"].clip(lower=0))
+            )
 
-            skill = compute_skill_metrics(df_s, df_e)
+            # Normalize SEAS5 in log-space
+            df_s_norm = normalize_seas5(df_s_log, df_e_log)
 
-            # Historical probabilities and overlap forecasts for RP calculation
-            hist_probs_series: pd.Series = pd.Series(dtype=float)
-            hist_F: np.ndarray = np.array([])
-            if skill is not None:
-                hist_probs_series = compute_hist_probs(df_s, df_e, skill["pearson_r"])
-                overlap_years = set(df_e["season_year"].values)
-                hist_F = df_s[df_s["season_year"].isin(overlap_years)]["forecast_mean"].values
+            skill = compute_skill_metrics(df_s_norm, df_e_log)
 
-            # Current forecast (normalized value)
+            # ERA5 log-space stats
+            era5_mean_log = float(df_e_log["obs_mean"].mean()) if not df_e_log.empty else None
+            era5_std_log = float(df_e_log["obs_mean"].std(ddof=1)) if len(df_e_log) > 1 else None
+
+            # Current (latest) forecast in log-space
             current_forecast_year = None
-            current_forecast_mean = None
+            current_forecast_mean_log = None
             is_predictive = False
-            if not df_s.empty:
-                current_forecast_year = int(df_s["season_year"].max())
-                current_forecast_mean = float(
-                    df_s.loc[df_s["season_year"] == current_forecast_year, "forecast_mean"].iloc[0]
+            if not df_s_norm.empty:
+                current_forecast_year = int(df_s_norm["season_year"].max())
+                current_forecast_mean_log = float(
+                    df_s_norm.loc[
+                        df_s_norm["season_year"] == current_forecast_year, "forecast_mean"
+                    ].iloc[0]
                 )
-                is_predictive = current_forecast_year not in df_e["season_year"].values
+                is_predictive = current_forecast_year not in df_e_log["season_year"].values
 
-            # Probability and RPs
-            lower_tercile_mm = float(df_e["obs_mean"].quantile(1 / 3)) if not df_e.empty else None
+            # Skill + empirical regression sigma + probabilities
+            sigma_empirical = None
+            sigma_theoretical = None
             prob = None
             forecast_rp = None
             prob_rp = None
-
             forecast_percentile = None
-            if skill is not None and current_forecast_mean is not None:
-                prob = compute_prob_lower_tercile(df_e, skill["pearson_r"], current_forecast_mean)
-                forecast_rp = empirical_rp(current_forecast_mean, hist_F, higher_is_more_extreme=False)
-                if len(hist_probs_series) > 0:
-                    prob_rp = empirical_rp(prob, hist_probs_series.values, higher_is_more_extreme=True)
-                if len(hist_F) > 0:
-                    # Percentile of current forecast among historical (0=driest, 100=wettest)
-                    forecast_percentile = float(100.0 * np.sum(hist_F <= current_forecast_mean) / len(hist_F))
+            hist_probs_series: pd.Series = pd.Series(dtype=float)
+            hist_F: np.ndarray = np.array([])
 
-            # Paired yearly rows (one per season_year, outer join so current year included)
-            df_merged = df_s.merge(df_e, on="season_year", how="outer")
+            if skill is not None and era5_mean_log is not None and era5_std_log is not None:
+                r = skill["pearson_r"]
+                T_log = float(df_e_log["obs_mean"].quantile(1 / 3))
+
+                # Theoretical sigma (bivariate log-normal assumption)
+                sigma_theoretical = era5_std_log * float(np.sqrt(max(1 - r ** 2, 0)))
+
+                # Empirical sigma from actual regression residuals — this is the
+                # real test: deviations from sigma_theoretical indicate non-log-normality
+                df_overlap = df_s_norm.merge(df_e_log, on="season_year", how="inner")
+                E_hat = (1 - r) * era5_mean_log + r * df_overlap["forecast_mean"].values
+                residuals = df_overlap["obs_mean"].values - E_hat
+                sigma_empirical = float(residuals.std(ddof=1))
+                sigma_use = max(sigma_empirical, 1e-9)
+
+                # Historical probabilities (using empirical sigma)
+                hist_F = df_overlap["forecast_mean"].values
+                mu_hist = (1 - r) * era5_mean_log + r * hist_F
+                hist_probs_arr = norm.cdf(T_log, loc=mu_hist, scale=sigma_use)
+                hist_probs_series = pd.Series(
+                    hist_probs_arr.astype(float), index=df_overlap["season_year"].values
+                )
+
+                if current_forecast_mean_log is not None:
+                    mu_current = (1 - r) * era5_mean_log + r * current_forecast_mean_log
+                    prob = float(norm.cdf(T_log, loc=mu_current, scale=sigma_use))
+                    forecast_rp = empirical_rp(
+                        current_forecast_mean_log, hist_F, higher_is_more_extreme=False
+                    )
+                    if len(hist_probs_series) > 0:
+                        prob_rp = empirical_rp(
+                            prob, hist_probs_series.values, higher_is_more_extreme=True
+                        )
+                    if len(hist_F) > 0:
+                        forecast_percentile = float(
+                            100.0 * np.sum(hist_F <= current_forecast_mean_log) / len(hist_F)
+                        )
+
+            # Paired yearly rows (log-space values; notebook converts with expm1 for display)
+            df_merged = df_s_norm.merge(df_e_log, on="season_year", how="outer")
             for _, row in df_merged.iterrows():
                 yr = int(row["season_year"])
-                hist_prob_val = (
-                    float(hist_probs_series.loc[yr])
-                    if yr in hist_probs_series.index
-                    else None
-                )
                 paired_rows.append({
                     "pcode": pcode,
                     "country_name": country_name,
@@ -279,16 +254,12 @@ def run_all_combinations(
                     "season_year": yr,
                     "forecast_mean": float(row["forecast_mean"]) if pd.notna(row.get("forecast_mean")) else None,
                     "obs_mean": float(row["obs_mean"]) if pd.notna(row.get("obs_mean")) else None,
-                    "hist_prob": hist_prob_val,
+                    "hist_prob": float(hist_probs_series.loc[yr]) if yr in hist_probs_series.index else None,
                 })
 
-            # Regression conditional std and ERA5 stats for bell curve display
-            era5_mean = float(df_e["obs_mean"].mean()) if not df_e.empty else None
-            era5_std = float(df_e["obs_mean"].std(ddof=1)) if len(df_e) > 1 else None
-            sigma_regression = (
-                era5_std * float(np.sqrt(max(1 - skill["pearson_r"] ** 2, 0)))
-                if skill is not None and era5_std is not None
-                else None
+            lower_tercile_mm = (
+                float(np.expm1(df_e_log["obs_mean"].quantile(1 / 3)))
+                if not df_e_log.empty else None
             )
 
             skill_rows.append({
@@ -299,12 +270,13 @@ def run_all_combinations(
                 "n_years": skill["n_years"] if skill else None,
                 "pearson_r": skill["pearson_r"] if skill else None,
                 "rmse": skill["rmse"] if skill else None,
-                "sigma": sigma_regression,   # conditional regression std: ERA5_std·√(1-r²)
-                "era5_mean": era5_mean,
-                "era5_std": era5_std,
-                "lower_tercile_mm": lower_tercile_mm,
+                "sigma": sigma_empirical,           # empirical regression residual std (log-space)
+                "sigma_theoretical": sigma_theoretical,  # ERA5_std·√(1-r²) for comparison
+                "era5_mean": era5_mean_log,          # mean of log1p(ERA5 obs)
+                "era5_std": era5_std_log,            # std of log1p(ERA5 obs)
+                "lower_tercile_mm": lower_tercile_mm,  # original units (mm/day)
                 "current_forecast_year": current_forecast_year,
-                "current_forecast_mean": current_forecast_mean,
+                "current_forecast_mean": current_forecast_mean_log,  # log-space
                 "is_predictive": is_predictive,
                 "prob_lower_tercile": prob,
                 "forecast_rp": forecast_rp,
