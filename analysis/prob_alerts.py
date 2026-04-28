@@ -20,10 +20,10 @@ def _():
 
 @app.cell
 def _():
-    from src.constants import PCODE_NAMES, PROJECT_PREFIX, TRIMESTERS
+    from src.constants import PROJECT_PREFIX, TRIMESTERS
 
     TRIMESTER_NAMES = list(TRIMESTERS.keys())
-    return PCODE_NAMES, PROJECT_PREFIX, TRIMESTER_NAMES
+    return PROJECT_PREFIX, TRIMESTER_NAMES
 
 
 @app.cell
@@ -46,9 +46,9 @@ def _(mo):
 
 
 @app.cell
-def _(PCODE_NAMES, TRIMESTER_NAMES, calendar, df_skill, mo):
-    _pcodes = sorted(df_skill["pcode"].unique().tolist())
-    _pcode_options = {PCODE_NAMES.get(p, p): p for p in _pcodes}
+def _(TRIMESTER_NAMES, calendar, df_skill, mo):
+    _names_df = df_skill[["pcode", "country_name"]].drop_duplicates().sort_values("country_name")
+    _pcode_options = dict(zip(_names_df["country_name"], _names_df["pcode"]))
     pcode_dd = mo.ui.dropdown(
         options=_pcode_options,
         label="Country:",
@@ -116,15 +116,18 @@ def _(mo):
     mo.md(r"""
     ### Current forecast probability
 
-    **Statistical model:** for each (issued month, valid trimester) combination, we compute
-    the historical distribution of SEAS5 forecast errors (ERA5 − SEAS5). The error mean
-    gives the **bias** and the standard deviation gives **σ** (a measure of skill — smaller
-    σ means the forecast is consistently close to observations).
+    **Statistical model:** SEAS5 forecasts are first normalized to have the same mean and
+    standard deviation as ERA5 over the historical overlap period. The residual errors
+    (ERA5 − SEAS5_normalized) then have zero mean by construction; their standard deviation
+    **σ** captures how much skill is lost — smaller σ means more skillful.
 
-    For the current SEAS5 forecast value **F**, we model likely actual rainfall as a
-    Gaussian centred at **F + bias** with spread **σ**. A skillful forecast (small σ)
-    gives a decisive probability; a poor-skill forecast (large σ) gives a probability
-    near the climatological baseline of 33%.
+    For the current normalized forecast value **F**, likely actual rainfall is modelled as
+    **N(F, σ²)** — the bell curve peaks exactly at F. A skillful forecast (small σ) gives a
+    decisive probability; a poor-skill forecast (large σ) gives a probability near the
+    climatological baseline of 33%.
+
+    Return periods are computed empirically against all historical seasons for this
+    (issued month, trimester) combination.
     """)
     return
 
@@ -149,15 +152,17 @@ def _(
     ]
     _has_skill = not _row.empty and pd.notna(_row.iloc[0]["pearson_r"])
 
-    _era5_vals = (
+    _era5_df = (
         df_paired[
             (df_paired["pcode"] == pcode)
             & (df_paired["trimester"] == trimester)
             & df_paired["obs_mean"].notna()
         ]
-        .drop_duplicates("season_year")["obs_mean"]
-        .values
+        .drop_duplicates("season_year")[["season_year", "obs_mean"]]
+        .sort_values("obs_mean")
+        .reset_index(drop=True)
     )
+    _era5_vals = _era5_df["obs_mean"].values
 
     _fig_bell, _ax = plt.subplots(figsize=(9, 5), dpi=150)
 
@@ -169,19 +174,19 @@ def _(
         _ax.set_axis_off()
     else:
         _r = _row.iloc[0]
-        _bias = float(_r["bias"])
         _sigma = max(float(_r["sigma"]), 1e-9)
         _F = float(_r["current_forecast_mean"])
-        _mu = _F + _bias
         _T = float(np.percentile(_era5_vals, 100 / 3))
         _prob = float(_r["prob_lower_tercile"])
         _is_pred = bool(_r["is_predictive"])
         _year = int(_r["current_forecast_year"])
+        _forecast_rp = _r["forecast_rp"]
+        _prob_rp = _r["prob_rp"]
 
-        _x_min = min(float(_era5_vals.min()), _mu - 4 * _sigma)
-        _x_max = max(float(_era5_vals.max()), _mu + 4 * _sigma)
+        _x_min = min(float(_era5_vals.min()), _F - 4 * _sigma)
+        _x_max = max(float(_era5_vals.max()), _F + 4 * _sigma)
         _x = np.linspace(_x_min, _x_max, 500)
-        _pdf = norm.pdf(_x, loc=_mu, scale=_sigma)
+        _pdf = norm.pdf(_x, loc=_F, scale=_sigma)
 
         _ax.plot(_x, _pdf, color="k", linewidth=2)
         _low_mask = _x <= _T
@@ -190,11 +195,28 @@ def _(
             color="chocolate", alpha=0.35,
             label=f"P(lower tercile) = {_prob:.1%}",
         )
+
+        # Rug marks for all ERA5 years
         _ax.plot(
             _era5_vals, np.zeros_like(_era5_vals), "|",
             color="royalblue", markersize=18, markeredgewidth=2, alpha=0.7,
             label="Historical ERA5 seasons",
         )
+        # Label the 3 driest and 3 wettest years
+        _n_label = 3
+        _label_yrs = set(
+            _era5_df["season_year"].head(_n_label).tolist()
+            + _era5_df["season_year"].tail(_n_label).tolist()
+        )
+        for _, _yr_row in _era5_df.iterrows():
+            if int(_yr_row["season_year"]) in _label_yrs:
+                _ax.annotate(
+                    str(int(_yr_row["season_year"])),
+                    (_yr_row["obs_mean"], 0),
+                    xytext=(0, -18), textcoords="offset points",
+                    ha="center", fontsize=7, rotation=45, color="royalblue",
+                )
+
         _ax.axvline(
             _T, color="chocolate", linestyle="--", alpha=0.8,
             label=f"Lower tercile ({_T:.3f} mm/day)",
@@ -204,12 +226,26 @@ def _(
             _forecast_label += " [ERA5 now available]"
         _ax.axvline(_F, color="mediumorchid", linestyle="--", label=_forecast_label)
 
+        # RP annotations
+        _rp_lines = []
+        if pd.notna(_forecast_rp):
+            _rp_lines.append(f"Forecast RP: 1-in-{_forecast_rp:.0f} yr")
+        if pd.notna(_prob_rp):
+            _rp_lines.append(f"Probability RP: 1-in-{_prob_rp:.0f} yr")
+        if _rp_lines:
+            _ax.text(
+                0.97, 0.97, "\n".join(_rp_lines),
+                transform=_ax.transAxes, ha="right", va="top",
+                fontsize=10, fontweight="bold",
+                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.6),
+            )
+
         _issued_str = calendar.month_abbr[issued_month]
         _ax.set_title(
-            f"{pcode} — issued {_issued_str}, valid {trimester}  |  "
-            f"bias = {_bias:.3f}  σ = {_sigma:.3f}  r = {float(_r['pearson_r']):.2f}"
+            f"{_r['country_name']} — issued {_issued_str}, valid {trimester}  |  "
+            f"σ = {_sigma:.3f}  r = {float(_r['pearson_r']):.2f}"
         )
-        _ax.set_xlabel("Mean daily rainfall (mm/day)")
+        _ax.set_xlabel("Normalized mean daily rainfall (mm/day)")
         _ax.set_ylabel("Probability density")
         _ax.legend(fontsize=9)
         _ax.spines["top"].set_visible(False)
@@ -221,7 +257,7 @@ def _(
 
 
 @app.cell
-def _(TRIMESTER_NAMES, df_paired, pcode, plt, trimester):
+def _(TRIMESTER_NAMES, df_paired, df_skill, pcode, plt, trimester):
     _df_clim = (
         df_paired[df_paired["pcode"] == pcode]
         .dropna(subset=["obs_mean"])
@@ -232,15 +268,25 @@ def _(TRIMESTER_NAMES, df_paired, pcode, plt, trimester):
         .reset_index()
         .rename(columns={"obs_mean": "mean_mm_day"})
     )
-    _colors = [
-        "chocolate" if t == trimester else "royalblue"
-        for t in _df_clim["trimester"]
-    ]
+    # Rainy season: trimester accounts for ≥25% of annual rainfall.
+    # For rolling 12 trimesters, each month appears in exactly 3, so
+    # annual_total = sum of all 12 trimester means, and
+    # fraction[T] = 3 × mean[T] / annual_total.
+    _annual = _df_clim["mean_mm_day"].sum()
+    _is_rainy = (
+        {row["trimester"]: (3 * row["mean_mm_day"] / _annual >= 0.25)
+         for _, row in _df_clim.iterrows()}
+        if _annual > 0 else {}
+    )
+    _country = df_skill[df_skill["pcode"] == pcode]["country_name"].iloc[0] if not df_skill[df_skill["pcode"] == pcode].empty else pcode
+    _face_colors = ["chocolate" if t == trimester else "royalblue" for t in _df_clim["trimester"]]
+    _edge_colors = ["darkorange" if _is_rainy.get(t, False) else "none" for t in _df_clim["trimester"]]
     _fig_clim, _ax = plt.subplots(figsize=(10, 4), dpi=150)
-    _ax.bar(_df_clim["trimester"], _df_clim["mean_mm_day"], color=_colors)
-    _ax.set_xlabel("Trimester")
+    _ax.bar(_df_clim["trimester"], _df_clim["mean_mm_day"],
+            color=_face_colors, edgecolor=_edge_colors, linewidth=2.5)
+    _ax.set_xlabel("Trimester  (orange outline = ≥25% of annual rainfall)")
     _ax.set_ylabel("Mean daily rainfall (mm/day) [ERA5]")
-    _ax.set_title(f"{pcode} — ERA5 trimester climatology (selected trimester highlighted)")
+    _ax.set_title(f"{_country} — ERA5 trimester climatology (selected trimester highlighted)")
     _ax.spines["top"].set_visible(False)
     _ax.spines["right"].set_visible(False)
     plt.tight_layout()
@@ -312,9 +358,10 @@ def _(calendar, df_paired, df_skill, issued_month, pcode, pd, plt, trimester):
         _n = int(_sr["n_years"]) if pd.notna(_sr["n_years"]) else 0
 
         _issued_str = calendar.month_abbr[issued_month]
-        _ax.set_title(f"{pcode} — issued {_issued_str}, valid {trimester}")
+        _country_name = _sr["country_name"] if "country_name" in _sr.index else pcode
+        _ax.set_title(f"{_country_name} — issued {_issued_str}, valid {trimester}")
         _ax.set_xlabel(
-            f"SEAS5 forecast (mm/day)\n"
+            f"Normalized SEAS5 forecast (mm/day)\n"
             f"Pearson r = {_r_val:.2f}  |  Lower-tercile hit rate = {_tpr:.2f}  |  n = {_n}"
         )
         _ax.set_ylabel("ERA5 observed (mm/day)")
@@ -359,7 +406,7 @@ def _(TRIMESTER_NAMES, calendar, mo):
 
 
 @app.cell
-def _(PCODE_NAMES, df_skill, mo, pd, rank_issued_month_dd, rank_trimester_dd):
+def _(df_skill, mo, pd, rank_issued_month_dd, rank_trimester_dd):
     _rim = rank_issued_month_dd.value
     _rt = rank_trimester_dd.value
 
@@ -373,15 +420,20 @@ def _(PCODE_NAMES, df_skill, mo, pd, rank_issued_month_dd, rank_trimester_dd):
         .copy()
     )
     _df_rank.insert(0, "rank", range(1, len(_df_rank) + 1))
-    _df_rank["country"] = _df_rank["pcode"].map(PCODE_NAMES).fillna(_df_rank["pcode"])
     _df_rank["prob_%"] = (_df_rank["prob_lower_tercile"] * 100).round(1)
     _df_rank["pearson_r"] = _df_rank["pearson_r"].round(3)
     _df_rank["n_years"] = _df_rank["n_years"].astype(pd.Int64Dtype())
     _df_rank["current_forecast_year"] = _df_rank["current_forecast_year"].astype(pd.Int64Dtype())
+    _df_rank["forecast_rp"] = _df_rank["forecast_rp"].apply(
+        lambda x: f"1-in-{x:.0f}" if pd.notna(x) else "—"
+    )
+    _df_rank["prob_rp"] = _df_rank["prob_rp"].apply(
+        lambda x: f"1-in-{x:.0f}" if pd.notna(x) else "—"
+    )
 
     _display = _df_rank[
-        ["rank", "country", "pcode", "prob_%", "pearson_r", "n_years",
-         "current_forecast_year", "is_predictive"]
+        ["rank", "country_name", "pcode", "prob_%", "forecast_rp", "prob_rp",
+         "pearson_r", "n_years", "current_forecast_year", "is_predictive"]
     ].reset_index(drop=True)
 
     mo.ui.table(_display)
