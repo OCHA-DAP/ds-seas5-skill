@@ -34,7 +34,7 @@ def aggregate_seas5_trimester(
     )
     df_filt = df[mask]
     if df_filt.empty:
-        return pd.DataFrame(columns=["season_year", "forecast_mean"])
+        return pd.DataFrame({"season_year": pd.Series(dtype="int64"), "forecast_mean": pd.Series(dtype="float64")})
 
     df_yr = (
         df_filt.groupby(df_filt["issued_date"].dt.year)["mean"]
@@ -42,6 +42,7 @@ def aggregate_seas5_trimester(
         .reset_index()
         .rename(columns={"issued_date": "season_year", "mean": "forecast_mean"})
     )
+    df_yr["season_year"] = df_yr["season_year"].astype("int64")
     # Shift year when valid months are entirely in the next calendar year
     if not is_wrapping and min(valid_months) < issued_month:
         df_yr["season_year"] = df_yr["season_year"] + 1
@@ -60,7 +61,7 @@ def aggregate_era5_trimester(
     is_wrapping = 1 in valid_months and 12 in valid_months
     df_filt = df[df["valid_date"].dt.month.isin(valid_months)].copy()
     df_filt["month"] = df_filt["valid_date"].dt.month
-    df_filt["season_year"] = _assign_season_year(df_filt["valid_date"], valid_months)
+    df_filt["season_year"] = _assign_season_year(df_filt["valid_date"], valid_months).astype("int64")
 
     complete = (
         df_filt.groupby("season_year")["month"]

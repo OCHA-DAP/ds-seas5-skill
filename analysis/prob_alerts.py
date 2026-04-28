@@ -29,10 +29,10 @@ def _():
 @app.cell
 def _(PROJECT_PREFIX, stratus):
     df_skill = stratus.load_parquet_from_blob(
-        f"{PROJECT_PREFIX}/processed/skill_stats.parquet", stage="prod"
+        f"{PROJECT_PREFIX}/processed/skill_stats.parquet", stage="dev"
     )
     df_paired = stratus.load_parquet_from_blob(
-        f"{PROJECT_PREFIX}/processed/paired_yearly.parquet", stage="prod"
+        f"{PROJECT_PREFIX}/processed/paired_yearly.parquet", stage="dev"
     )
     return df_paired, df_skill
 

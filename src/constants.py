@@ -17,12 +17,12 @@ TRIMESTERS: dict[str, list[int]] = {
     "DJF": [12, 1, 2],
 }
 
-TARGET_PCODES: list[str] = ["ETH", "SOM", "SDN", "NER", "SSD"]
+TARGET_PCODES: list[str] = ["ET", "SO", "SD", "NE", "SS"]
 
 PCODE_NAMES: dict[str, str] = {
-    "ETH": "Ethiopia",
-    "SOM": "Somalia",
-    "SDN": "Sudan",
-    "NER": "Niger",
-    "SSD": "South Sudan",
+    "ET": "Ethiopia",
+    "SO": "Somalia",
+    "SD": "Sudan",
+    "NE": "Niger",
+    "SS": "South Sudan",
 }

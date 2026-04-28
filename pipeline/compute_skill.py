@@ -38,10 +38,10 @@ def main() -> None:
     df_paired_all = pd.concat(all_paired, ignore_index=True)
 
     print(f"\nSaving skill stats  ({len(df_skill_all):,} rows) → {SKILL_BLOB}")
-    stratus.upload_parquet_to_blob(df_skill_all, SKILL_BLOB, stage="prod")
+    stratus.upload_parquet_to_blob(df_skill_all, SKILL_BLOB, stage="dev")
 
     print(f"Saving paired yearly ({len(df_paired_all):,} rows) → {PAIRED_BLOB}")
-    stratus.upload_parquet_to_blob(df_paired_all, PAIRED_BLOB, stage="prod")
+    stratus.upload_parquet_to_blob(df_paired_all, PAIRED_BLOB, stage="dev")
 
     print("Done.")
 
