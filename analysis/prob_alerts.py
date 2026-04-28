@@ -241,10 +241,20 @@ def _(
             )
 
         _issued_str = calendar.month_abbr[issued_month]
+        _r_val = float(_r["pearson_r"])
         _ax.set_title(
             f"{_r['country_name']} — issued {_issued_str}, valid {trimester}  |  "
-            f"σ = {_sigma:.3f}  r = {float(_r['pearson_r']):.2f}"
+            f"σ = {_sigma:.3f}  r = {_r_val:.2f}"
         )
+        if _r_val < 0:
+            _ax.text(
+                0.5, 0.98,
+                "⚠ Negative skill (r < 0) — forecast is anti-correlated with observations. "
+                "Probability estimate is unreliable.",
+                transform=_ax.transAxes, ha="center", va="top",
+                fontsize=9, color="darkred", style="italic",
+                bbox=dict(boxstyle="round", facecolor="mistyrose", alpha=0.8),
+            )
         _ax.set_xlabel("Normalized mean daily rainfall (mm/day)")
         _ax.set_ylabel("Probability density")
         _ax.legend(fontsize=9)
@@ -359,7 +369,9 @@ def _(calendar, df_paired, df_skill, issued_month, pcode, pd, plt, trimester):
 
         _issued_str = calendar.month_abbr[issued_month]
         _country_name = _sr["country_name"] if "country_name" in _sr.index else pcode
-        _ax.set_title(f"{_country_name} — issued {_issued_str}, valid {trimester}")
+        _neg_skill_suffix = "  ⚠ negative skill" if _r_val < 0 else ""
+        _ax.set_title(f"{_country_name} — issued {_issued_str}, valid {trimester}{_neg_skill_suffix}",
+                      color="darkred" if _r_val < 0 else "black")
         _ax.set_xlabel(
             f"Normalized SEAS5 forecast (mm/day)\n"
             f"Pearson r = {_r_val:.2f}  |  Lower-tercile hit rate = {_tpr:.2f}  |  n = {_n}"
@@ -492,6 +504,9 @@ def _(df_skill, mo, pd, rank_issued_month_dd, rank_trimester_dd):
         .copy()
     )
     _df_rank.insert(0, "rank", range(1, len(_df_rank) + 1))
+    _df_rank["neg_skill"] = _df_rank["pearson_r"].apply(
+        lambda x: "⚠" if pd.notna(x) and x < 0 else ""
+    )
     _df_rank["prob_%"] = (_df_rank["prob_lower_tercile"] * 100).round(1)
     _df_rank["pearson_r"] = _df_rank["pearson_r"].round(3)
     _df_rank["n_years"] = _df_rank["n_years"].astype(pd.Int64Dtype())
@@ -508,7 +523,7 @@ def _(df_skill, mo, pd, rank_issued_month_dd, rank_trimester_dd):
 
     _display = _df_rank[
         ["rank", "country_name", "pcode", "prob_%", "fcst_pctile_%",
-         "forecast_rp", "prob_rp", "pearson_r", "n_years",
+         "forecast_rp", "prob_rp", "pearson_r", "neg_skill", "n_years",
          "current_forecast_year", "is_predictive"]
     ].reset_index(drop=True)
 
