@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.16.0"
+__generated_with = "0.23.3"
 app = marimo.App(app_title="SEAS5 Skill — Probabilistic Drought Alerts")
 
 
@@ -23,7 +23,7 @@ def _():
     from src.constants import PCODE_NAMES, PROJECT_PREFIX, TRIMESTERS
 
     TRIMESTER_NAMES = list(TRIMESTERS.keys())
-    return PCODE_NAMES, PROJECT_PREFIX, TRIMESTER_NAMES, TRIMESTERS
+    return PCODE_NAMES, PROJECT_PREFIX, TRIMESTER_NAMES
 
 
 @app.cell
@@ -37,14 +37,11 @@ def _(PROJECT_PREFIX, stratus):
     return df_paired, df_skill
 
 
-# ---------------------------------------------------------------------------
-# Section 1: Per-country analysis
-# ---------------------------------------------------------------------------
-
-
 @app.cell
 def _(mo):
-    mo.md("## Per-country analysis")
+    mo.md("""
+    ## Per-country analysis
+    """)
     return
 
 
@@ -55,7 +52,7 @@ def _(PCODE_NAMES, TRIMESTER_NAMES, calendar, df_skill, mo):
     pcode_dd = mo.ui.dropdown(
         options=_pcode_options,
         label="Country:",
-        value=list(_pcode_options.values())[0],
+        value=list(_pcode_options.keys())[0],
     )
     issued_month_dd = mo.ui.dropdown(
         options={calendar.month_abbr[m]: m for m in range(1, 13)},
@@ -79,11 +76,8 @@ def _(issued_month_dd, pcode_dd, trimester_dd):
     return issued_month, pcode, trimester
 
 
-# --- Plot A: Skill heatmap ---
-
-
 @app.cell
-def _(TRIMESTER_NAMES, calendar, df_skill, np, plt, pcode):
+def _(TRIMESTER_NAMES, calendar, df_skill, np, pcode, plt):
     _df_p = df_skill[df_skill["pcode"] == pcode]
     _matrix = np.full((12, 12), np.nan)
     for _, _r in _df_p.iterrows():
@@ -117,31 +111,37 @@ def _(TRIMESTER_NAMES, calendar, df_skill, np, plt, pcode):
     return
 
 
-# --- Model explanation + Plot B: Bell curve ---
-
-
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-### Current forecast probability
+    mo.md(r"""
+    ### Current forecast probability
 
-**Statistical model:** for each (issued month, valid trimester) combination, we compute
-the historical distribution of SEAS5 forecast errors (ERA5 − SEAS5). The error mean
-gives the **bias** and the standard deviation gives **σ** (a measure of skill — smaller
-σ means the forecast is consistently close to observations).
+    **Statistical model:** for each (issued month, valid trimester) combination, we compute
+    the historical distribution of SEAS5 forecast errors (ERA5 − SEAS5). The error mean
+    gives the **bias** and the standard deviation gives **σ** (a measure of skill — smaller
+    σ means the forecast is consistently close to observations).
 
-For the current SEAS5 forecast value **F**, we model likely actual rainfall as a
-Gaussian centred at **F + bias** with spread **σ**. A skillful forecast (small σ)
-gives a decisive probability; a poor-skill forecast (large σ) gives a probability
-near the climatological baseline of 33%.
-"""
-    )
+    For the current SEAS5 forecast value **F**, we model likely actual rainfall as a
+    Gaussian centred at **F + bias** with spread **σ**. A skillful forecast (small σ)
+    gives a decisive probability; a poor-skill forecast (large σ) gives a probability
+    near the climatological baseline of 33%.
+    """)
     return
 
 
 @app.cell
-def _(calendar, df_paired, df_skill, issued_month, norm, np, plt, pcode, trimester):
+def _(
+    calendar,
+    df_paired,
+    df_skill,
+    issued_month,
+    norm,
+    np,
+    pcode,
+    pd,
+    plt,
+    trimester,
+):
     _row = df_skill[
         (df_skill["pcode"] == pcode)
         & (df_skill["issued_month"] == issued_month)
@@ -161,7 +161,7 @@ def _(calendar, df_paired, df_skill, issued_month, norm, np, plt, pcode, trimest
 
     _fig_bell, _ax = plt.subplots(figsize=(9, 5), dpi=150)
 
-    if not _has_skill or len(_era5_vals) == 0 or _row.iloc[0]["current_forecast_mean"] is None:
+    if not _has_skill or len(_era5_vals) == 0 or pd.isna(_row.iloc[0]["current_forecast_mean"]):
         _ax.text(
             0.5, 0.5, "Insufficient historical data for this combination",
             ha="center", va="center", transform=_ax.transAxes, fontsize=12,
@@ -220,11 +220,8 @@ def _(calendar, df_paired, df_skill, issued_month, norm, np, plt, pcode, trimest
     return
 
 
-# --- Plot C: Trimester climatology ---
-
-
 @app.cell
-def _(TRIMESTER_NAMES, df_paired, np, plt, pcode, trimester):
+def _(TRIMESTER_NAMES, df_paired, pcode, plt, trimester):
     _df_clim = (
         df_paired[df_paired["pcode"] == pcode]
         .dropna(subset=["obs_mean"])
@@ -251,11 +248,8 @@ def _(TRIMESTER_NAMES, df_paired, np, plt, pcode, trimester):
     return
 
 
-# --- Plot D: SEAS5 vs ERA5 scatter ---
-
-
 @app.cell
-def _(calendar, df_paired, df_skill, issued_month, np, pd, plt, pcode, trimester):
+def _(calendar, df_paired, df_skill, issued_month, pcode, pd, plt, trimester):
     _df_s = df_paired[
         (df_paired["pcode"] == pcode)
         & (df_paired["issued_month"] == issued_month)
@@ -332,23 +326,19 @@ def _(calendar, df_paired, df_skill, issued_month, np, pd, plt, pcode, trimester
     return
 
 
-# ---------------------------------------------------------------------------
-# Section 2: Ranked drought alert table
-# ---------------------------------------------------------------------------
-
-
 @app.cell
 def _(mo):
-    mo.md("## Ranked drought alert table")
+    mo.md("""
+    ## Ranked drought alert table
+    """)
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        "Select an issued month and valid trimester to see all countries ranked "
-        "by their skill-adjusted probability of below-normal rainfall."
-    )
+    mo.md("""
+    Select an issued month and valid trimester to see all countries ranked by their skill-adjusted probability of below-normal rainfall.
+    """)
     return
 
 
