@@ -298,7 +298,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    show_lines_sw = mo.ui.switch(label="Show forecast reference lines", value=True)
+    show_lines_sw = mo.ui.switch(label="Show forecast reference lines", value=False)
     mo.hstack([show_lines_sw], justify="start")
     return (show_lines_sw,)
 
@@ -387,15 +387,15 @@ def _(
         _low_mask = _x <= _T_orig
         _ax.fill_between(_x[_low_mask], _pdf[_low_mask], color=_PURPLE, alpha=0.30)
 
-        # P(lower tercile) — label outside the shaded region with an arrow pointing in
+        # P(lower tercile) — label outside, arrow points to middle of shaded area
         if _low_mask.sum() > 0:
-            _x_prob = float(_x[_low_mask].mean())
-            _idx_prob = int(np.argmin(np.abs(_x - _x_prob)))
-            _y_prob_tip = float(_pdf[_idx_prob]) * 0.35  # arrow tip inside shaded area
+            _x_prob_tip = float((_x[_low_mask][0] + _T_orig) / 2)  # midpoint of shaded x range
+            _idx_prob = int(np.argmin(np.abs(_x - _x_prob_tip)))
+            _y_prob_tip = float(_pdf[_idx_prob]) * 0.5
             _ax.annotate(
                 f"P = {_prob:.1%}",
-                xy=(_x_prob, _y_prob_tip),
-                xytext=(0.06, 0.78),
+                xy=(_x_prob_tip, _y_prob_tip),
+                xytext=(0.06, 0.82),
                 xycoords="data", textcoords="axes fraction",
                 arrowprops=dict(arrowstyle="-|>", color=_PURPLE, lw=1.5),
                 color=_PURPLE, fontsize=12, fontweight="bold", ha="left", va="center",
@@ -422,7 +422,7 @@ def _(
                 )
 
         # Lower tercile always on — bold grey
-        _lbl_y = _pdf_max * 1.12  # above the curve
+        _lbl_y = _pdf_max * 1.28  # well above the curve
         _ax.axvline(_T_orig, color="grey", linewidth=2.5, alpha=0.9)
         _ax.text(_T_orig, _lbl_y, "lower tercile ",
                  color="grey", fontsize=8, rotation=90, ha="right", va="top", fontweight="bold")
@@ -439,15 +439,15 @@ def _(
                 _ax.text(_mean_orig, _lbl_y, f"cond. mean (r={_r_val:.2f}) ",
                          color=_PURPLE, fontsize=8, rotation=90, ha="right", va="top")
 
-        # Arrow annotations pointing to the SLOPES (not peaks) of each distribution
+        # Arrow annotations pointing to the SLOPES of each distribution
         _peak_cond_x = float(_x[np.argmax(_pdf)])
         _peak_clim_x = float(_x[np.argmax(_clim_pdf)])
-        # Conditional: point to right slope (falling side)
-        _right_cond = _x > _peak_cond_x
-        if _right_cond.sum() > 0:
-            _slope_idx_c = int(np.argmin(np.abs(_pdf[_right_cond] - _pdf.max() * 0.55)))
-            _arrow_xc = float(_x[_right_cond][_slope_idx_c])
-            _arrow_yc = float(_pdf[_right_cond][_slope_idx_c])
+        # Conditional: point to LEFT slope (rising side) — label is on the left
+        _left_cond = _x < _peak_cond_x
+        if _left_cond.sum() > 0:
+            _slope_idx_c = int(np.argmin(np.abs(_pdf[_left_cond] - _pdf.max() * 0.55)))
+            _arrow_xc = float(_x[_left_cond][_slope_idx_c])
+            _arrow_yc = float(_pdf[_left_cond][_slope_idx_c])
         else:
             _arrow_xc, _arrow_yc = _peak_cond_x, float(_pdf.max())
         # Climatology: point to right slope (falling side)
@@ -478,19 +478,6 @@ def _(
             color="grey", fontsize=8, ha="center", va="top",
         )
 
-        _rp_lines = []
-        if pd.notna(_forecast_rp):
-            _rp_lines.append(f"Forecast RP: 1-in-{_forecast_rp:.0f} yr")
-        if pd.notna(_prob_rp):
-            _rp_lines.append(f"Probability RP: 1-in-{_prob_rp:.0f} yr")
-        if _rp_lines:
-            _ax.text(
-                0.97, 0.97, "\n".join(_rp_lines),
-                transform=_ax.transAxes, ha="right", va="top",
-                fontsize=9, fontweight="bold",
-                bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.6),
-            )
-
         if _r_val < 0:
             _ax.text(
                 0.5, 0.98,
@@ -501,9 +488,10 @@ def _(
             )
 
         _issued_str = calendar.month_abbr[issued_month]
+        _rp_str = f"  |  P-RP: 1-in-{_prob_rp:.0f} yr" if pd.notna(_prob_rp) else ""
         _ax.set_title(
             f"{_r['country_name']} — issued {_issued_str}, valid {trimester}  |  "
-            f"r = {_r_val:.2f}  σ_log = {_sigma_log:.3f}"
+            f"r = {_r_val:.2f}  σ_log = {_sigma_log:.3f}{_rp_str}"
         )
         _ax.set_xlabel("Mean daily rainfall (mm/day)")
         _ax.set_ylabel("Probability density")
@@ -1090,12 +1078,35 @@ def _(df_skill, issued_month, mo, norm, np, pcode, pd, plt, trimester):
             _ax_i.axvline(_F_orig_i, color=_PURPLE_EX, linestyle="-", linewidth=1.5, alpha=0.6)
             _ax_i.axvline(_mean_orig_i, color=_PURPLE_EX, linestyle="--", linewidth=1.5)
 
+            # P annotation — same style as main plot
             if _low_i.sum() > 0:
-                _xc_i = float(_x_ex[_low_i].mean())
-                _ic_i = int(np.argmin(np.abs(_x_ex - _xc_i)))
-                _y_i = float(_cond_i[_ic_i]) * 0.45
-                _ax_i.text(_xc_i, _y_i, f"P={_prob_i:.0%}",
-                           ha="center", va="center", fontsize=10, fontweight="bold", color="white")
+                _xt_i = float((_x_ex[_low_i][0] + _T_ex) / 2)
+                _it_i = int(np.argmin(np.abs(_x_ex - _xt_i)))
+                _yt_i = float(_cond_i[_it_i]) * 0.5
+                _ax_i.annotate(
+                    f"P = {_prob_i:.0%}",
+                    xy=(_xt_i, _yt_i),
+                    xytext=(0.06, 0.80),
+                    xycoords="data", textcoords="axes fraction",
+                    arrowprops=dict(arrowstyle="-|>", color=_PURPLE_EX, lw=1.2),
+                    color=_PURPLE_EX, fontsize=10, fontweight="bold", ha="left", va="center",
+                )
+
+            # Climatology annotation — right slope of grey curve
+            _pk_clim_i = float(_x_ex[np.argmax(_clim_ex)])
+            _right_clim_i = _x_ex > _pk_clim_i
+            if _right_clim_i.sum() > 0:
+                _sidx_i = int(np.argmin(np.abs(_clim_ex[_right_clim_i] - _clim_ex.max() * 0.55)))
+                _axg_i = float(_x_ex[_right_clim_i][_sidx_i])
+                _ayg_i = float(_clim_ex[_right_clim_i][_sidx_i])
+                _ax_i.annotate(
+                    "climatology",
+                    xy=(_axg_i, _ayg_i),
+                    xytext=(0.88, 0.88),
+                    xycoords="data", textcoords="axes fraction",
+                    arrowprops=dict(arrowstyle="-|>", color="grey", lw=1.0),
+                    color="grey", fontsize=7, ha="center", va="top",
+                )
 
             _ax_i.set_title(f"{_lbl}\n(r={_r_i}, fcst={int(_pctile*100)}th pctile)", fontsize=9)
             _ax_i.set_xlabel("Rainfall (mm/day)", fontsize=8)
