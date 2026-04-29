@@ -165,6 +165,9 @@ def _(df_skill, issued_month, plt, rainy_set, trimester):
                 xytext=(5, 3), textcoords="offset points", fontsize=9,
                 fontstyle="normal" if _in_rainy else "italic",
             )
+        _ax.text(0.99, 0.01, "italic = not a rainy trimester for that country",
+                 transform=_ax.transAxes, ha="right", va="bottom",
+                 fontsize=8, fontstyle="italic", color="grey")
         _ax.set_xlabel("Forecast percentile (0 = driest, 100 = wettest)")
         _ax.set_ylabel("Pearson r (historical skill)")
         _ax.set_title(f"All countries — issued month {issued_month}, valid {trimester}")
@@ -222,12 +225,12 @@ def _(TRIMESTER_NAMES, calendar, df_skill, np, pcode, plt, rainy_set):
     _im = _ax.imshow(_masked, cmap="RdYlGn", vmin=-1, vmax=1, aspect="auto")
     plt.colorbar(_im, ax=_ax, label="Pearson r", shrink=0.8)
 
-    # Highlight rainy trimester columns
+    # Highlight rainy trimester columns with blue outline
     for _j, _tname in enumerate(TRIMESTER_NAMES):
         if (pcode, _tname) in rainy_set:
             _ax.add_patch(plt.Rectangle(
                 (_j - 0.5, -0.5), 1, 12,
-                facecolor="darkorange", alpha=0.13, zorder=0,
+                fill=False, edgecolor="royalblue", linewidth=2.5, zorder=5,
             ))
 
     for _i in range(12):
@@ -241,7 +244,7 @@ def _(TRIMESTER_NAMES, calendar, df_skill, np, pcode, plt, rainy_set):
     _ax.set_xticklabels(TRIMESTER_NAMES, rotation=45, ha="right")
     _ax.set_yticks(range(12))
     _ax.set_yticklabels([calendar.month_abbr[m] for m in range(1, 13)])
-    _ax.set_xlabel("Valid trimester  (orange shading = rainy season, ≥25% annual rainfall)")
+    _ax.set_xlabel("Valid trimester  (blue outline = rainy season, ≥25% annual rainfall)")
     _ax.set_ylabel("Issued month")
     _ax.set_title(f"{pcode} — SEAS5 historical skill (Pearson r)")
     plt.tight_layout()
@@ -346,10 +349,11 @@ def _(
         _low_mask = _x <= _T_orig
         _ax.fill_between(_x[_low_mask], _pdf[_low_mask], color="chocolate", alpha=0.35)
 
-        # P(lower tercile) label inside the shaded region
+        # P(lower tercile) label inside the shaded region, at half the PDF height there
         if _low_mask.sum() > 0:
             _x_prob = float(_x[_low_mask].mean())
-            _y_prob = float(_pdf[_low_mask].max()) * 0.45
+            _idx_prob = int(np.argmin(np.abs(_x - _x_prob)))
+            _y_prob = float(_pdf[_idx_prob]) * 0.5
             _ax.text(_x_prob, _y_prob, f"P = {_prob:.1%}",
                      ha="center", va="center", fontsize=11, fontweight="bold",
                      color="saddlebrown")
@@ -374,25 +378,25 @@ def _(
                     va="top",
                 )
 
-        # Reference lines — vertical inline labels
+        # Reference lines — vertical inline labels to the LEFT of each line
         _lbl_y = _pdf_max * 0.95
         _ax.axvline(_T_orig, color="chocolate", linestyle="--", alpha=0.8)
-        _ax.text(_T_orig, _lbl_y, " lower tercile",
-                 color="chocolate", fontsize=8, rotation=90, ha="left", va="top")
+        _ax.text(_T_orig, _lbl_y, "lower tercile ",
+                 color="chocolate", fontsize=8, rotation=90, ha="right", va="top")
 
         _ax.axvline(_clim_mean_orig, color="steelblue", linestyle=":")
-        _ax.text(_clim_mean_orig, _lbl_y, " clim mean",
-                 color="steelblue", fontsize=8, rotation=90, ha="left", va="top")
+        _ax.text(_clim_mean_orig, _lbl_y, "clim mean ",
+                 color="steelblue", fontsize=8, rotation=90, ha="right", va="top")
 
         _ax.axvline(_F_orig, color="mediumorchid", linestyle="--")
-        _fcst_lbl = f" {_year} fcst" + ("" if _is_pred else " (verified)")
+        _fcst_lbl = f"{_year} fcst " + ("" if _is_pred else "(verified) ")
         _ax.text(_F_orig, _lbl_y, _fcst_lbl,
-                 color="mediumorchid", fontsize=8, rotation=90, ha="left", va="top")
+                 color="mediumorchid", fontsize=8, rotation=90, ha="right", va="top")
 
         if abs(_mode_orig - _F_orig) > 0.001 * max(_clim_mean_orig, 1e-9):
             _ax.axvline(_mode_orig, color="darkorange", linestyle=":")
-            _ax.text(_mode_orig, _lbl_y, f" cond. mode (r={_r_val:.2f})",
-                     color="darkorange", fontsize=8, rotation=90, ha="left", va="top")
+            _ax.text(_mode_orig, _lbl_y, f"cond. mode (r={_r_val:.2f}) ",
+                     color="darkorange", fontsize=8, rotation=90, ha="right", va="top")
 
         _rp_lines = []
         if pd.notna(_forecast_rp):
@@ -455,14 +459,14 @@ def _(TRIMESTER_NAMES, df_paired, df_skill, np, pcode, plt, trimester):
         df_skill[df_skill["pcode"] == pcode]["country_name"].iloc[0]
         if not df_skill[df_skill["pcode"] == pcode].empty else pcode
     )
-    _face_colors = ["chocolate" if t == trimester else "royalblue" for t in _df_clim["trimester"]]
-    _edge_colors = ["darkorange" if _is_rainy.get(t, False) else "none" for t in _df_clim["trimester"]]
+    _face_colors = ["firebrick" if t == trimester else "lightgrey" for t in _df_clim["trimester"]]
+    _edge_colors = ["royalblue" if _is_rainy.get(t, False) else "none" for t in _df_clim["trimester"]]
     _fig_clim, _ax = plt.subplots(figsize=(10, 4), dpi=150)
     _ax.bar(
         _df_clim["trimester"], _df_clim["mean_mm_day"],
         color=_face_colors, edgecolor=_edge_colors, linewidth=2.5,
     )
-    _ax.set_xlabel("Trimester  (orange outline = ≥25% of annual rainfall)")
+    _ax.set_xlabel("Trimester  (blue outline = rainy season, ≥25% of annual rainfall)")
     _ax.set_ylabel("Mean daily rainfall (mm/day) [ERA5]")
     _ax.set_title(f"{_country} — ERA5 trimester climatology (selected trimester highlighted)")
     _ax.spines["top"].set_visible(False)

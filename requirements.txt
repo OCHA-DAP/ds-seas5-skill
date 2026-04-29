@@ -1,0 +1,11 @@
+marimo==0.23.3
+matplotlib==3.10.9
+numpy==2.4.4
+pandas==3.0.2
+scipy==1.17.1
+ocha-stratus==0.1.7
+tqdm==4.67.3
+azure-core==1.39.0
+azure-storage-blob==12.28.0
+psycopg2-binary==2.9.12
+sqlalchemy==2.0.49
