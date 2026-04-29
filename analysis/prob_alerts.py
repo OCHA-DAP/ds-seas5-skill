@@ -378,14 +378,19 @@ def _(
         _low_mask = _x <= _T_orig
         _ax.fill_between(_x[_low_mask], _pdf[_low_mask], color=_PURPLE, alpha=0.30)
 
-        # P(lower tercile) label inside shaded region
+        # P(lower tercile) — label outside the shaded region with an arrow pointing in
         if _low_mask.sum() > 0:
             _x_prob = float(_x[_low_mask].mean())
             _idx_prob = int(np.argmin(np.abs(_x - _x_prob)))
-            _y_prob = float(_pdf[_idx_prob]) * 0.45
-            _ax.text(_x_prob, _y_prob, f"P = {_prob:.1%}",
-                     ha="center", va="center", fontsize=11, fontweight="bold",
-                     color="white")
+            _y_prob_tip = float(_pdf[_idx_prob]) * 0.35  # arrow tip inside shaded area
+            _ax.annotate(
+                f"P = {_prob:.1%}",
+                xy=(_x_prob, _y_prob_tip),
+                xytext=(0.06, 0.78),
+                xycoords="data", textcoords="axes fraction",
+                arrowprops=dict(arrowstyle="-|>", color=_PURPLE, lw=1.5),
+                color=_PURPLE, fontsize=12, fontweight="bold", ha="left", va="center",
+            )
 
         # Rug marks in original space
         _ax.plot(
@@ -429,25 +434,28 @@ def _(
             _ax.text(_mean_orig, _lbl_y, f"cond. mean (r={_r_val:.2f}) ",
                      color=_PURPLE, fontsize=8, rotation=90, ha="right", va="top")
 
-        # Arrow annotations for the two distributions
+        # Arrow annotations pointing exactly at the peaks of each distribution
         _peak_cond_x = float(_x[np.argmax(_pdf)])
         _peak_cond_y = float(_pdf.max())
         _peak_clim_x = float(_x[np.argmax(_clim_pdf)])
         _peak_clim_y = float(_clim_pdf.max())
-        _x_range = _x_max - _x_min
+        # Predicted distribution: label on the LEFT (arrow points right to peak)
         _ax.annotate(
-            f"predicted distribution ({_year})",
-            xy=(_peak_cond_x, _peak_cond_y * 0.85),
-            xytext=(_peak_cond_x + 0.18 * _x_range, _peak_cond_y * 0.75),
+            f"predicted\ndistribution ({_year})",
+            xy=(_peak_cond_x, _peak_cond_y),
+            xytext=(0.12, 0.92),
+            xycoords="data", textcoords="axes fraction",
             arrowprops=dict(arrowstyle="-|>", color=_PURPLE, lw=1.2),
-            color=_PURPLE, fontsize=8, ha="left", va="center",
+            color=_PURPLE, fontsize=8, ha="center", va="top",
         )
+        # Climatology: label on the RIGHT (arrow points left to peak)
         _ax.annotate(
             "climatology",
-            xy=(_peak_clim_x, _peak_clim_y * 0.85),
-            xytext=(_peak_clim_x - 0.16 * _x_range, _peak_clim_y * 0.65),
+            xy=(_peak_clim_x, _peak_clim_y),
+            xytext=(0.88, 0.92),
+            xycoords="data", textcoords="axes fraction",
             arrowprops=dict(arrowstyle="-|>", color="grey", lw=1.2),
-            color="grey", fontsize=8, ha="right", va="center",
+            color="grey", fontsize=8, ha="center", va="top",
         )
 
         _rp_lines = []
@@ -544,42 +552,35 @@ def _(df_paired, df_skill, issued_month, np, pcode, plt, trimester):
         & (df_skill["trimester"] == trimester)
     ]
 
-    _fig_hp, _ax = plt.subplots(figsize=(8, 4), dpi=150)
+    _fig_hp, _ax = plt.subplots(figsize=(5, 5), dpi=150)
 
     if _df_hp.empty or _skill_row_hp.empty:
         _ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=_ax.transAxes)
         _ax.set_axis_off()
     else:
         _tercile_log = _df_hp["obs_mean"].quantile(1 / 3)
+        _T_obs_orig = float(np.expm1(_tercile_log))
         _df_hp["was_lower"] = _df_hp["obs_mean"] <= _tercile_log
-
-        # Y-axis: percentile of that year's SEAS5 forecast among all historical forecasts
-        _hist_F_all = _df_hp["forecast_mean"].dropna().values
-        _df_hp["fcst_pctile_y"] = [
-            100.0 * np.sum(_hist_F_all <= f) / len(_hist_F_all)
-            for f in _df_hp["forecast_mean"]
-        ]
+        _df_hp["obs_orig"] = np.expm1(_df_hp["obs_mean"])
 
         _colors_hp = ["royalblue" if v else "lightcoral" for v in _df_hp["was_lower"]]
-        _ax.scatter(_df_hp["hist_prob"], _df_hp["fcst_pctile_y"], c=_colors_hp, s=40, alpha=0.85, zorder=3)
+        _ax.scatter(_df_hp["hist_prob"], _df_hp["obs_orig"], c=_colors_hp, s=40, alpha=0.85, zorder=3)
         for _, _yr in _df_hp.iterrows():
             _ax.annotate(
-                str(int(_yr["season_year"])), (_yr["hist_prob"], _yr["fcst_pctile_y"]),
+                str(int(_yr["season_year"])), (_yr["hist_prob"], _yr["obs_orig"]),
                 xytext=(3, 2), textcoords="offset points", fontsize=6, color="k",
             )
 
         _ax.axvline(1 / 3, color="grey", linestyle="--", linewidth=0.8, alpha=0.6)
-        _ax.axhline(33.3, color="grey", linewidth=1.5, linestyle="--")
-        _ax.text(0.99, 34, "lower tercile of forecast (33rd pctile)",
-                 transform=_ax.get_yaxis_transform(), ha="right", va="bottom",
-                 fontsize=7, color="grey")
+        _ax.axhline(_T_obs_orig, color="grey", linewidth=1.5, linestyle="--")
+        _ax.text(0.99, _T_obs_orig, "lower tercile (obs)",
+                 ha="right", va="bottom", fontsize=7, color="grey")
         _ax.set_xlim(0, 1)
-        _ax.set_ylim(0, 100)
         _ax.set_xlabel("Predicted P(lower tercile)")
-        _ax.set_ylabel("Forecast percentile (0 = driest)")
+        _ax.set_ylabel("Observed ERA5 rainfall (mm/day)")
         _ax.set_title(
-            f"{_skill_row_hp.iloc[0]['country_name']} — predicted probability vs. forecast dryness\n"
-            f"Blue = year was in lower tercile (obs)  |  Red = above tercile"
+            f"{_skill_row_hp.iloc[0]['country_name']} — predicted probability vs. observations\n"
+            f"Blue = year was in lower tercile  |  Red = above tercile"
         )
         _ax.spines["top"].set_visible(False)
         _ax.spines["right"].set_visible(False)
@@ -1082,9 +1083,10 @@ def _(df_skill, issued_month, mo, norm, np, pcode, pd, plt, trimester):
         _buf_ex.seek(0)
         _enc_ex = _b642.b64encode(_buf_ex.read()).decode()
         plt.close(_fig_ex)
-        mo.Html(f'<img src="data:image/png;base64,{_enc_ex}" style="max-width:100%"/>')
+        _out_ex = mo.Html(f'<img src="data:image/png;base64,{_enc_ex}" style="max-width:100%"/>')
     else:
-        mo.md("*Select a country with sufficient data to see examples.*")
+        _out_ex = mo.md("*Select a country with sufficient data to see examples.*")
+    _out_ex
     return
 
 
