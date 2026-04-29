@@ -140,7 +140,7 @@ def _(df_skill, issued_month, mo, pd, rainy_set, trimester):
 
 
 @app.cell
-def _(df_skill, issued_month, plt, trimester):
+def _(df_skill, issued_month, plt, rainy_set, trimester):
     _df_sc = df_skill[
         (df_skill["issued_month"] == issued_month)
         & (df_skill["trimester"] == trimester)
@@ -158,10 +158,12 @@ def _(df_skill, issued_month, plt, trimester):
         plt.colorbar(_sc, ax=_ax, label="P(lower tercile)", shrink=0.8)
         _ax.axhline(0, color="grey", linewidth=0.6, linestyle="--", alpha=0.5)
         for _, _rr in _df_sc.iterrows():
+            _in_rainy = (_rr["pcode"], trimester) in rainy_set
             _ax.annotate(
                 _rr["country_name"].split(" ")[0],
                 (_rr["forecast_percentile"], _rr["pearson_r"]),
                 xytext=(5, 3), textcoords="offset points", fontsize=9,
+                fontstyle="normal" if _in_rainy else "italic",
             )
         _ax.set_xlabel("Forecast percentile (0 = driest, 100 = wettest)")
         _ax.set_ylabel("Pearson r (historical skill)")
@@ -344,6 +346,14 @@ def _(
         _low_mask = _x <= _T_orig
         _ax.fill_between(_x[_low_mask], _pdf[_low_mask], color="chocolate", alpha=0.35)
 
+        # P(lower tercile) label inside the shaded region
+        if _low_mask.sum() > 0:
+            _x_prob = float(_x[_low_mask].mean())
+            _y_prob = float(_pdf[_low_mask].max()) * 0.45
+            _ax.text(_x_prob, _y_prob, f"P = {_prob:.1%}",
+                     ha="center", va="center", fontsize=11, fontweight="bold",
+                     color="saddlebrown")
+
         # Rug marks in original space
         _ax.plot(
             _era5_orig, np.zeros_like(_era5_orig), "|",
@@ -359,34 +369,31 @@ def _(
                 _ax.annotate(
                     str(int(_yr_row["season_year"])),
                     (np.expm1(_yr_row["obs_mean"]), 0),
-                    xytext=(0, -20), textcoords="offset points",
+                    xytext=(0, -8), textcoords="offset points",
                     ha="center", fontsize=7, rotation=90, color="royalblue",
                     va="top",
                 )
 
-        # Reference lines with inline labels (no legend)
+        # Reference lines — vertical inline labels
+        _lbl_y = _pdf_max * 0.95
         _ax.axvline(_T_orig, color="chocolate", linestyle="--", alpha=0.8)
-        _ax.text(_T_orig, _pdf_max * 0.92, "  lower tercile", color="chocolate", fontsize=8, va="top")
+        _ax.text(_T_orig, _lbl_y, " lower tercile",
+                 color="chocolate", fontsize=8, rotation=90, ha="left", va="top")
 
         _ax.axvline(_clim_mean_orig, color="steelblue", linestyle=":")
-        _ax.text(_clim_mean_orig, _pdf_max * 0.78, "  clim mean", color="steelblue", fontsize=8, va="top")
+        _ax.text(_clim_mean_orig, _lbl_y, " clim mean",
+                 color="steelblue", fontsize=8, rotation=90, ha="left", va="top")
 
         _ax.axvline(_F_orig, color="mediumorchid", linestyle="--")
-        _fcst_lbl = f"  {_year} fcst" + ("" if _is_pred else " (verified)")
-        _ax.text(_F_orig, _pdf_max * 0.64, _fcst_lbl, color="mediumorchid", fontsize=8, va="top")
+        _fcst_lbl = f" {_year} fcst" + ("" if _is_pred else " (verified)")
+        _ax.text(_F_orig, _lbl_y, _fcst_lbl,
+                 color="mediumorchid", fontsize=8, rotation=90, ha="left", va="top")
 
         if abs(_mode_orig - _F_orig) > 0.001 * max(_clim_mean_orig, 1e-9):
             _ax.axvline(_mode_orig, color="darkorange", linestyle=":")
-            _ax.text(_mode_orig, _pdf_max * 0.50,
-                     f"  cond. mode\n  (r={_r_val:.2f})",
-                     color="darkorange", fontsize=8, va="top")
+            _ax.text(_mode_orig, _lbl_y, f" cond. mode (r={_r_val:.2f})",
+                     color="darkorange", fontsize=8, rotation=90, ha="left", va="top")
 
-        # P(lower tercile) in top-left corner
-        _ax.text(0.02, 0.97, f"P(lower tercile) = {_prob:.1%}",
-                 transform=_ax.transAxes, fontsize=12, fontweight="bold",
-                 color="chocolate", va="top")
-
-        # RP box — top right
         _rp_lines = []
         if pd.notna(_forecast_rp):
             _rp_lines.append(f"Forecast RP: 1-in-{_forecast_rp:.0f} yr")
