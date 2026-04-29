@@ -387,15 +387,16 @@ def _(
         _low_mask = _x <= _T_orig
         _ax.fill_between(_x[_low_mask], _pdf[_low_mask], color=_PURPLE, alpha=0.30)
 
-        # P(lower tercile) — label outside, arrow points to middle of shaded area
+        # P(lower tercile) — label below pred-dist annotation, arrow to middle of fill
         if _low_mask.sum() > 0:
-            _x_prob_tip = float((_x[_low_mask][0] + _T_orig) / 2)  # midpoint of shaded x range
+            # Arrow tip at 65% of the way from left edge to T_orig — visually central
+            _x_prob_tip = float(_x[_low_mask][0] + 0.65 * (_T_orig - _x[_low_mask][0]))
             _idx_prob = int(np.argmin(np.abs(_x - _x_prob_tip)))
-            _y_prob_tip = float(_pdf[_idx_prob]) * 0.5
+            _y_prob_tip = float(_pdf[_idx_prob]) * 0.55
             _ax.annotate(
                 f"P = {_prob:.1%}",
                 xy=(_x_prob_tip, _y_prob_tip),
-                xytext=(0.06, 0.82),
+                xytext=(0.06, 0.68),
                 xycoords="data", textcoords="axes fraction",
                 arrowprops=dict(arrowstyle="-|>", color=_PURPLE, lw=1.5),
                 color=_PURPLE, fontsize=12, fontweight="bold", ha="left", va="center",
@@ -1078,15 +1079,33 @@ def _(df_skill, issued_month, mo, norm, np, pcode, pd, plt, trimester):
             _ax_i.axvline(_F_orig_i, color=_PURPLE_EX, linestyle="-", linewidth=1.5, alpha=0.6)
             _ax_i.axvline(_mean_orig_i, color=_PURPLE_EX, linestyle="--", linewidth=1.5)
 
-            # P annotation — same style as main plot
+            # Predicted distribution annotation — left slope, top-left label
+            _pk_cond_i = float(_x_ex[np.argmax(_cond_i)])
+            _left_cond_i = _x_ex < _pk_cond_i
+            if _left_cond_i.sum() > 0:
+                _ls_idx = int(np.argmin(np.abs(_cond_i[_left_cond_i] - _cond_i.max() * 0.55)))
+                _axc_i = float(_x_ex[_left_cond_i][_ls_idx])
+                _ayc_i = float(_cond_i[_left_cond_i][_ls_idx])
+            else:
+                _axc_i, _ayc_i = _pk_cond_i, float(_cond_i.max())
+            _ax_i.annotate(
+                "predicted\ndistribution",
+                xy=(_axc_i, _ayc_i),
+                xytext=(0.06, 0.92),
+                xycoords="data", textcoords="axes fraction",
+                arrowprops=dict(arrowstyle="-|>", color=_PURPLE_EX, lw=1.0),
+                color=_PURPLE_EX, fontsize=7, ha="left", va="top",
+            )
+
+            # P annotation — below pred dist label, arrow to middle of fill
             if _low_i.sum() > 0:
-                _xt_i = float((_x_ex[_low_i][0] + _T_ex) / 2)
+                _xt_i = float(_x_ex[_low_i][0] + 0.65 * (_T_ex - _x_ex[_low_i][0]))
                 _it_i = int(np.argmin(np.abs(_x_ex - _xt_i)))
-                _yt_i = float(_cond_i[_it_i]) * 0.5
+                _yt_i = float(_cond_i[_it_i]) * 0.55
                 _ax_i.annotate(
                     f"P = {_prob_i:.0%}",
                     xy=(_xt_i, _yt_i),
-                    xytext=(0.06, 0.80),
+                    xytext=(0.06, 0.68),
                     xycoords="data", textcoords="axes fraction",
                     arrowprops=dict(arrowstyle="-|>", color=_PURPLE_EX, lw=1.2),
                     color=_PURPLE_EX, fontsize=10, fontweight="bold", ha="left", va="center",
