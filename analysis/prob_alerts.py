@@ -297,6 +297,13 @@ def _(mo):
 
 
 @app.cell
+def _(mo):
+    show_lines_sw = mo.ui.switch(label="Show forecast reference lines", value=True)
+    mo.hstack([show_lines_sw], justify="start")
+    return (show_lines_sw,)
+
+
+@app.cell
 def _(
     calendar,
     df_paired,
@@ -307,6 +314,7 @@ def _(
     pcode,
     pd,
     plt,
+    show_lines_sw,
     trimester,
 ):
     _row = df_skill[
@@ -373,6 +381,7 @@ def _(
         # Conditional distribution (purple) — given current forecast
         _pdf = norm.pdf(np.log1p(_x), loc=_mu_log, scale=_sigma_log) / (1 + _x)
         _pdf_max = float(max(_pdf.max(), _clim_pdf.max()))
+        _show_lines = show_lines_sw.value
 
         _ax.plot(_x, _pdf, color=_PURPLE, linewidth=2)
         _low_mask = _x <= _T_orig
@@ -392,10 +401,10 @@ def _(
                 color=_PURPLE, fontsize=12, fontweight="bold", ha="left", va="center",
             )
 
-        # Rug marks in original space
+        # Rug marks — grey to match climatology theme
         _ax.plot(
             _era5_orig, np.zeros_like(_era5_orig), "|",
-            color="royalblue", markersize=18, markeredgewidth=2, alpha=0.7,
+            color="grey", markersize=18, markeredgewidth=1.5, alpha=0.6,
         )
         _n_label = 3
         _label_yrs = set(
@@ -408,51 +417,62 @@ def _(
                     str(int(_yr_row["season_year"])),
                     (np.expm1(_yr_row["obs_mean"]), 0),
                     xytext=(0, -8), textcoords="offset points",
-                    ha="center", fontsize=7, rotation=90, color="royalblue",
+                    ha="center", fontsize=7, rotation=90, color="grey",
                     va="top",
                 )
 
-        # Reference lines — vertical inline labels
-        _lbl_y = _pdf_max * 0.95
-        # Lower tercile: grey bold
+        # Lower tercile always on — bold grey
+        _lbl_y = _pdf_max * 1.12  # above the curve
         _ax.axvline(_T_orig, color="grey", linewidth=2.5, alpha=0.9)
         _ax.text(_T_orig, _lbl_y, "lower tercile ",
                  color="grey", fontsize=8, rotation=90, ha="right", va="top", fontweight="bold")
 
-        # Climatological mean: thin grey
-        _ax.axvline(_clim_mean_orig, color="grey", linestyle=":", alpha=0.5, linewidth=1)
-
-        # Raw SEAS5 forecast: purple solid
-        _ax.axvline(_F_orig, color=_PURPLE, linestyle="-", linewidth=2)
-        _fcst_lbl = f"{_year} fcst " + ("" if _is_pred else "(verified) ")
-        _ax.text(_F_orig, _lbl_y, _fcst_lbl,
-                 color=_PURPLE, fontsize=8, rotation=90, ha="right", va="top")
-
-        # Conditional mean: purple dashed
-        if abs(_mean_orig - _F_orig) > 0.001 * max(_clim_mean_orig, 1e-9):
-            _ax.axvline(_mean_orig, color=_PURPLE, linestyle="--", linewidth=1.5)
-            _ax.text(_mean_orig, _lbl_y, f"cond. mean (r={_r_val:.2f}) ",
+        # Optional reference lines (toggled by switch)
+        if _show_lines:
+            _ax.axvline(_clim_mean_orig, color="grey", linestyle=":", alpha=0.5, linewidth=1)
+            _ax.axvline(_F_orig, color=_PURPLE, linestyle="-", linewidth=2)
+            _fcst_lbl = f"{_year} fcst " + ("" if _is_pred else "(verified) ")
+            _ax.text(_F_orig, _lbl_y, _fcst_lbl,
                      color=_PURPLE, fontsize=8, rotation=90, ha="right", va="top")
+            if abs(_mean_orig - _F_orig) > 0.001 * max(_clim_mean_orig, 1e-9):
+                _ax.axvline(_mean_orig, color=_PURPLE, linestyle="--", linewidth=1.5)
+                _ax.text(_mean_orig, _lbl_y, f"cond. mean (r={_r_val:.2f}) ",
+                         color=_PURPLE, fontsize=8, rotation=90, ha="right", va="top")
 
-        # Arrow annotations pointing exactly at the peaks of each distribution
+        # Arrow annotations pointing to the SLOPES (not peaks) of each distribution
         _peak_cond_x = float(_x[np.argmax(_pdf)])
-        _peak_cond_y = float(_pdf.max())
         _peak_clim_x = float(_x[np.argmax(_clim_pdf)])
-        _peak_clim_y = float(_clim_pdf.max())
-        # Predicted distribution: label on the LEFT (arrow points right to peak)
+        # Conditional: point to right slope (falling side)
+        _right_cond = _x > _peak_cond_x
+        if _right_cond.sum() > 0:
+            _slope_idx_c = int(np.argmin(np.abs(_pdf[_right_cond] - _pdf.max() * 0.55)))
+            _arrow_xc = float(_x[_right_cond][_slope_idx_c])
+            _arrow_yc = float(_pdf[_right_cond][_slope_idx_c])
+        else:
+            _arrow_xc, _arrow_yc = _peak_cond_x, float(_pdf.max())
+        # Climatology: point to right slope (falling side)
+        _right_clim = _x > _peak_clim_x
+        if _right_clim.sum() > 0:
+            _slope_idx_g = int(np.argmin(np.abs(_clim_pdf[_right_clim] - _clim_pdf.max() * 0.55)))
+            _arrow_xg = float(_x[_right_clim][_slope_idx_g])
+            _arrow_yg = float(_clim_pdf[_right_clim][_slope_idx_g])
+        else:
+            _arrow_xg, _arrow_yg = _peak_clim_x, float(_clim_pdf.max())
+
+        # Predicted distribution: label LEFT, arrow → right slope of conditional
         _ax.annotate(
             f"predicted\ndistribution ({_year})",
-            xy=(_peak_cond_x, _peak_cond_y),
-            xytext=(0.12, 0.92),
+            xy=(_arrow_xc, _arrow_yc),
+            xytext=(0.10, 0.92),
             xycoords="data", textcoords="axes fraction",
             arrowprops=dict(arrowstyle="-|>", color=_PURPLE, lw=1.2),
             color=_PURPLE, fontsize=8, ha="center", va="top",
         )
-        # Climatology: label on the RIGHT (arrow points left to peak)
+        # Climatology: label RIGHT, arrow → right slope of grey curve
         _ax.annotate(
             "climatology",
-            xy=(_peak_clim_x, _peak_clim_y),
-            xytext=(0.88, 0.92),
+            xy=(_arrow_xg, _arrow_yg),
+            xytext=(0.90, 0.92),
             xycoords="data", textcoords="axes fraction",
             arrowprops=dict(arrowstyle="-|>", color="grey", lw=1.2),
             color="grey", fontsize=8, ha="center", va="top",
@@ -487,7 +507,7 @@ def _(
         )
         _ax.set_xlabel("Mean daily rainfall (mm/day)")
         _ax.set_ylabel("Probability density")
-        _ax.set_ylim(bottom=0)
+        _ax.set_ylim(0, _pdf_max * 1.35)  # headroom above peaks for labels
         _ax.spines["top"].set_visible(False)
         _ax.spines["right"].set_visible(False)
         plt.tight_layout()
@@ -1036,9 +1056,21 @@ def _(df_skill, issued_month, mo, norm, np, pcode, pd, plt, trimester):
         _clim_ex_max = float(_clim_ex.max())
 
         _PURPLE_EX = "rebeccapurple"
-        _fig_ex, _axes = plt.subplots(1, 4, figsize=(14, 4), sharey=True)
 
-        for (_ax_i, (_lbl, _r_i, _pctile)) in zip(_axes, _examples):
+        # Pre-compute all conditional PDFs to get a global ylim
+        _all_cond_pdfs = []
+        for (_, _r_i, _pctile) in _examples:
+            _F_log_tmp = _eml + norm.ppf(_pctile) * _esl
+            _mu_tmp = (1 - _r_i) * _eml + _r_i * _F_log_tmp
+            _s_tmp = _esl * float(np.sqrt(max(1 - _r_i**2, 0)))
+            _c_tmp = norm.pdf(np.log1p(_x_ex), loc=_mu_tmp, scale=max(_s_tmp, 1e-9)) / (1 + _x_ex)
+            _all_cond_pdfs.append(_c_tmp)
+        _global_ymax = max(max(c.max() for c in _all_cond_pdfs), _clim_ex_max) * 1.3
+
+        _fig_ex, _axes_2d = plt.subplots(2, 2, figsize=(10, 8))
+        _axes = _axes_2d.flatten()
+
+        for (_ax_i, (_lbl, _r_i, _pctile), _cond_pre) in zip(_axes, _examples, _all_cond_pdfs):
             # Forecast in log-space at the given percentile
             _F_log_i = _eml + norm.ppf(_pctile) * _esl
             _F_orig_i = float(np.expm1(_F_log_i))
@@ -1046,8 +1078,8 @@ def _(df_skill, issued_month, mo, norm, np, pcode, pd, plt, trimester):
             _sigma_log_i = _esl * float(np.sqrt(max(1 - _r_i**2, 0)))
             _mean_orig_i = float(np.expm1(_mu_log_i + _sigma_log_i**2 / 2))
 
-            _cond_i = norm.pdf(np.log1p(_x_ex), loc=_mu_log_i, scale=max(_sigma_log_i, 1e-9)) / (1 + _x_ex)
-            _pdf_top_i = float(max(_cond_i.max(), _clim_ex_max)) * 1.1
+            _cond_i = _cond_pre  # pre-computed above
+            _pdf_top_i = _global_ymax
             _low_i = _x_ex <= _T_ex
             _prob_i = float(norm.cdf(_T_log, loc=_mu_log_i, scale=max(_sigma_log_i, 1e-9)))
 
@@ -1073,7 +1105,8 @@ def _(df_skill, issued_month, mo, norm, np, pcode, pd, plt, trimester):
             _ax_i.spines["right"].set_visible(False)
             _ax_i.tick_params(labelsize=7)
 
-        _axes[0].set_ylabel("Probability density")
+        for _axi in [_axes[0], _axes[2]]:
+            _axi.set_ylabel("Probability density")
         _fig_ex.suptitle("Solid purple = raw forecast  |  Dashed purple = conditional mean  |  Grey bold = lower tercile",
                          fontsize=8, color="grey")
         plt.tight_layout()
