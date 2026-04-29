@@ -38,6 +38,26 @@ def _(PROJECT_PREFIX, stratus):
 
 
 @app.cell
+def _(df_paired, np):
+    # Precompute which (pcode, trimester) pairs are "rainy" (≥25% of annual rainfall).
+    _clim = (
+        df_paired.dropna(subset=["obs_mean"])
+        .drop_duplicates(["pcode", "trimester", "season_year"])
+        .assign(obs_orig=lambda d: np.expm1(d["obs_mean"]))
+        .groupby(["pcode", "trimester"])["obs_orig"]
+        .mean()
+        .reset_index(name="mean_mm_day")
+    )
+    _annual = _clim.groupby("pcode")["mean_mm_day"].sum().rename("annual")
+    _clim = _clim.merge(_annual.reset_index(), on="pcode")
+    _clim["is_rainy"] = 3 * _clim["mean_mm_day"] / _clim["annual"] >= 0.25
+    rainy_set = set(
+        zip(_clim[_clim["is_rainy"]]["pcode"], _clim[_clim["is_rainy"]]["trimester"])
+    )
+    return (rainy_set,)
+
+
+@app.cell
 def _(TRIMESTER_NAMES, calendar, mo):
     issued_month_dd = mo.ui.dropdown(
         options={calendar.month_abbr[m]: m for m in range(1, 13)},
@@ -74,7 +94,7 @@ def _(mo):
 
 
 @app.cell
-def _(df_skill, issued_month, mo, pd, trimester):
+def _(df_skill, issued_month, mo, pd, rainy_set, trimester):
     _df_rank = (
         df_skill[
             (df_skill["issued_month"] == issued_month)
@@ -85,6 +105,9 @@ def _(df_skill, issued_month, mo, pd, trimester):
         .copy()
     )
     _df_rank.insert(0, "rank", range(1, len(_df_rank) + 1))
+    _df_rank["rainy"] = _df_rank["pcode"].apply(
+        lambda p: "🌧" if (p, trimester) in rainy_set else ""
+    )
     _df_rank["neg_skill"] = _df_rank["pearson_r"].apply(
         lambda x: "⚠" if pd.notna(x) and x < 0 else ""
     )
@@ -106,13 +129,47 @@ def _(df_skill, issued_month, mo, pd, trimester):
 
     _display = _df_rank[
         [
-            "rank", "country_name", "pcode", "prob_%", "fcst_pctile_%",
+            "rank", "country_name", "rainy", "pcode", "prob_%", "fcst_pctile_%",
             "forecast_rp", "prob_rp", "pearson_r", "neg_skill",
             "n_years", "current_forecast_year", "is_predictive",
         ]
     ].reset_index(drop=True)
 
     mo.ui.table(_display)
+    return
+
+
+@app.cell
+def _(df_skill, issued_month, plt, trimester):
+    _df_sc = df_skill[
+        (df_skill["issued_month"] == issued_month)
+        & (df_skill["trimester"] == trimester)
+        & df_skill["forecast_percentile"].notna()
+        & df_skill["pearson_r"].notna()
+    ].copy()
+
+    _fig_sc, _ax = plt.subplots(figsize=(8, 5), dpi=150)
+    if not _df_sc.empty:
+        _sc = _ax.scatter(
+            _df_sc["forecast_percentile"], _df_sc["pearson_r"],
+            c=_df_sc["prob_lower_tercile"], cmap="RdYlBu_r", vmin=0.1, vmax=0.6,
+            s=80, zorder=3, edgecolors="k", linewidths=0.4,
+        )
+        plt.colorbar(_sc, ax=_ax, label="P(lower tercile)", shrink=0.8)
+        _ax.axhline(0, color="grey", linewidth=0.6, linestyle="--", alpha=0.5)
+        for _, _rr in _df_sc.iterrows():
+            _ax.annotate(
+                _rr["country_name"].split(" ")[0],
+                (_rr["forecast_percentile"], _rr["pearson_r"]),
+                xytext=(5, 3), textcoords="offset points", fontsize=9,
+            )
+        _ax.set_xlabel("Forecast percentile (0 = driest, 100 = wettest)")
+        _ax.set_ylabel("Pearson r (historical skill)")
+        _ax.set_title(f"All countries — issued month {issued_month}, valid {trimester}")
+        _ax.spines["top"].set_visible(False)
+        _ax.spines["right"].set_visible(False)
+        plt.tight_layout()
+    _fig_sc
     return
 
 
@@ -148,7 +205,7 @@ def _(pcode_dd):
 
 
 @app.cell
-def _(TRIMESTER_NAMES, calendar, df_skill, np, pcode, plt):
+def _(TRIMESTER_NAMES, calendar, df_skill, np, pcode, plt, rainy_set):
     _df_p = df_skill[df_skill["pcode"] == pcode]
     _matrix = np.full((12, 12), np.nan)
     for _, _r in _df_p.iterrows():
@@ -160,8 +217,17 @@ def _(TRIMESTER_NAMES, calendar, df_skill, np, pcode, plt):
     _nan_mask = np.where(np.isnan(_matrix), 1.0, np.nan)
     _ax.imshow(_nan_mask, cmap="Greys", vmin=0, vmax=1, aspect="auto", alpha=0.25)
     _masked = np.ma.masked_invalid(_matrix)
-    _im = _ax.imshow(_masked, cmap="RdYlGn", vmin=-0.5, vmax=0.8, aspect="auto")
+    _im = _ax.imshow(_masked, cmap="RdYlGn", vmin=-1, vmax=1, aspect="auto")
     plt.colorbar(_im, ax=_ax, label="Pearson r", shrink=0.8)
+
+    # Highlight rainy trimester columns
+    for _j, _tname in enumerate(TRIMESTER_NAMES):
+        if (pcode, _tname) in rainy_set:
+            _ax.add_patch(plt.Rectangle(
+                (_j - 0.5, -0.5), 1, 12,
+                facecolor="darkorange", alpha=0.13, zorder=0,
+            ))
+
     for _i in range(12):
         for _j in range(12):
             if not np.isnan(_matrix[_i, _j]):
@@ -173,7 +239,7 @@ def _(TRIMESTER_NAMES, calendar, df_skill, np, pcode, plt):
     _ax.set_xticklabels(TRIMESTER_NAMES, rotation=45, ha="right")
     _ax.set_yticks(range(12))
     _ax.set_yticklabels([calendar.month_abbr[m] for m in range(1, 13)])
-    _ax.set_xlabel("Valid trimester")
+    _ax.set_xlabel("Valid trimester  (orange shading = rainy season, ≥25% annual rainfall)")
     _ax.set_ylabel("Issued month")
     _ax.set_title(f"{pcode} — SEAS5 historical skill (Pearson r)")
     plt.tight_layout()
@@ -264,28 +330,24 @@ def _(
 
         # Display quantities in original space (mm/day)
         _F_orig = float(np.expm1(_F_log))
-        _mu_orig = float(np.expm1(_mu_log))            # log-normal median = conditional median
-        _clim_mean_orig = float(_era5_orig.mean())      # arithmetic climatological mean
+        _mode_orig = float(np.expm1(_mu_log - _sigma_log**2))  # mode = peak of log-normal PDF
+        _clim_mean_orig = float(_era5_orig.mean())
 
         # Log-normal PDF in original space: f(x) = φ(log1p(x); μ, σ) / (1+x)
         _x_min = max(0.0, float(np.expm1(_mu_log - 4 * _sigma_log)))
         _x_max = max(float(_era5_orig.max()), float(np.expm1(_mu_log + 4 * _sigma_log)))
         _x = np.linspace(max(1e-6, _x_min), _x_max, 600)
         _pdf = norm.pdf(np.log1p(_x), loc=_mu_log, scale=_sigma_log) / (1 + _x)
+        _pdf_max = float(_pdf.max())
 
         _ax.plot(_x, _pdf, color="k", linewidth=2)
         _low_mask = _x <= _T_orig
-        _ax.fill_between(
-            _x[_low_mask], _pdf[_low_mask],
-            color="chocolate", alpha=0.35,
-            label=f"P(lower tercile) = {_prob:.1%}",
-        )
+        _ax.fill_between(_x[_low_mask], _pdf[_low_mask], color="chocolate", alpha=0.35)
 
         # Rug marks in original space
         _ax.plot(
             _era5_orig, np.zeros_like(_era5_orig), "|",
             color="royalblue", markersize=18, markeredgewidth=2, alpha=0.7,
-            label="Historical ERA5 seasons",
         )
         _n_label = 3
         _label_yrs = set(
@@ -297,29 +359,34 @@ def _(
                 _ax.annotate(
                     str(int(_yr_row["season_year"])),
                     (np.expm1(_yr_row["obs_mean"]), 0),
-                    xytext=(0, -18), textcoords="offset points",
-                    ha="center", fontsize=7, rotation=45, color="royalblue",
+                    xytext=(0, -20), textcoords="offset points",
+                    ha="center", fontsize=7, rotation=90, color="royalblue",
+                    va="top",
                 )
 
-        _ax.axvline(
-            _T_orig, color="chocolate", linestyle="--", alpha=0.8,
-            label=f"Lower tercile ({_T_orig:.3f} mm/day)",
-        )
-        _ax.axvline(
-            _clim_mean_orig, color="steelblue", linestyle=":",
-            label=f"Climatological mean ({_clim_mean_orig:.3f} mm/day)",
-        )
-        _forecast_label = f"{_year} SEAS5 forecast ({_F_orig:.3f} mm/day)"
-        if not _is_pred:
-            _forecast_label += " [ERA5 now available]"
-        _ax.axvline(_F_orig, color="mediumorchid", linestyle="--", label=_forecast_label)
-        # Conditional centre (regression-shrunk toward climatology)
-        if abs(_mu_orig - _F_orig) > 0.001 * _clim_mean_orig:
-            _ax.axvline(
-                _mu_orig, color="darkorange", linestyle=":",
-                label=f"Conditional median ({_mu_orig:.3f}) — r={_r_val:.2f} shrinkage",
-            )
+        # Reference lines with inline labels (no legend)
+        _ax.axvline(_T_orig, color="chocolate", linestyle="--", alpha=0.8)
+        _ax.text(_T_orig, _pdf_max * 0.92, "  lower tercile", color="chocolate", fontsize=8, va="top")
 
+        _ax.axvline(_clim_mean_orig, color="steelblue", linestyle=":")
+        _ax.text(_clim_mean_orig, _pdf_max * 0.78, "  clim mean", color="steelblue", fontsize=8, va="top")
+
+        _ax.axvline(_F_orig, color="mediumorchid", linestyle="--")
+        _fcst_lbl = f"  {_year} fcst" + ("" if _is_pred else " (verified)")
+        _ax.text(_F_orig, _pdf_max * 0.64, _fcst_lbl, color="mediumorchid", fontsize=8, va="top")
+
+        if abs(_mode_orig - _F_orig) > 0.001 * max(_clim_mean_orig, 1e-9):
+            _ax.axvline(_mode_orig, color="darkorange", linestyle=":")
+            _ax.text(_mode_orig, _pdf_max * 0.50,
+                     f"  cond. mode\n  (r={_r_val:.2f})",
+                     color="darkorange", fontsize=8, va="top")
+
+        # P(lower tercile) in top-left corner
+        _ax.text(0.02, 0.97, f"P(lower tercile) = {_prob:.1%}",
+                 transform=_ax.transAxes, fontsize=12, fontweight="bold",
+                 color="chocolate", va="top")
+
+        # RP box — top right
         _rp_lines = []
         if pd.notna(_forecast_rp):
             _rp_lines.append(f"Forecast RP: 1-in-{_forecast_rp:.0f} yr")
@@ -329,15 +396,14 @@ def _(
             _ax.text(
                 0.97, 0.97, "\n".join(_rp_lines),
                 transform=_ax.transAxes, ha="right", va="top",
-                fontsize=10, fontweight="bold",
+                fontsize=9, fontweight="bold",
                 bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.6),
             )
 
         if _r_val < 0:
             _ax.text(
                 0.5, 0.98,
-                "⚠ Negative skill (r < 0) — forecast is anti-correlated with observations. "
-                "Probability estimate is unreliable.",
+                "⚠ Negative skill (r < 0) — forecast anti-correlated; probability unreliable.",
                 transform=_ax.transAxes, ha="center", va="top",
                 fontsize=9, color="darkred", style="italic",
                 bbox=dict(boxstyle="round", facecolor="mistyrose", alpha=0.8),
@@ -350,7 +416,7 @@ def _(
         )
         _ax.set_xlabel("Mean daily rainfall (mm/day)")
         _ax.set_ylabel("Probability density")
-        _ax.legend(fontsize=9)
+        _ax.set_ylim(bottom=0)
         _ax.spines["top"].set_visible(False)
         _ax.spines["right"].set_visible(False)
         plt.tight_layout()
