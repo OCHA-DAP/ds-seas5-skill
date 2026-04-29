@@ -335,15 +335,23 @@ def _(
 
         # Display quantities in original space (mm/day)
         _F_orig = float(np.expm1(_F_log))
-        _mode_orig = float(np.expm1(_mu_log - _sigma_log**2))  # mode = peak of log-normal PDF
+        # True conditional mean E[obs|F] = expm1(μ_log + σ²/2) for a log-normal
+        _mean_orig = float(np.expm1(_mu_log + _sigma_log**2 / 2))
         _clim_mean_orig = float(_era5_orig.mean())
+        _era5_std_log = float(_r["era5_std"])
 
-        # Log-normal PDF in original space: f(x) = φ(log1p(x); μ, σ) / (1+x)
-        _x_min = max(0.0, float(np.expm1(_mu_log - 4 * _sigma_log)))
-        _x_max = max(float(_era5_orig.max()), float(np.expm1(_mu_log + 4 * _sigma_log)))
+        # x range covering both climatological and conditional distributions
+        _x_min = max(0.0, float(np.expm1(min(_era5_mean_log, _mu_log) - 4 * max(_era5_std_log, _sigma_log))))
+        _x_max = max(float(_era5_orig.max()), float(np.expm1(max(_era5_mean_log, _mu_log) + 4 * max(_era5_std_log, _sigma_log))))
         _x = np.linspace(max(1e-6, _x_min), _x_max, 600)
+
+        # Climatological distribution (grey dashed) — ERA5 marginal
+        _clim_pdf = norm.pdf(np.log1p(_x), loc=_era5_mean_log, scale=_era5_std_log) / (1 + _x)
+        _ax.plot(_x, _clim_pdf, color="grey", linewidth=1.5, linestyle="--", alpha=0.7, zorder=0)
+
+        # Conditional distribution (black) — given current forecast
         _pdf = norm.pdf(np.log1p(_x), loc=_mu_log, scale=_sigma_log) / (1 + _x)
-        _pdf_max = float(_pdf.max())
+        _pdf_max = float(max(_pdf.max(), _clim_pdf.max()))
 
         _ax.plot(_x, _pdf, color="k", linewidth=2)
         _low_mask = _x <= _T_orig
@@ -384,18 +392,19 @@ def _(
         _ax.text(_T_orig, _lbl_y, "lower tercile ",
                  color="chocolate", fontsize=8, rotation=90, ha="right", va="top")
 
-        _ax.axvline(_clim_mean_orig, color="steelblue", linestyle=":")
-        _ax.text(_clim_mean_orig, _lbl_y, "clim mean ",
-                 color="steelblue", fontsize=8, rotation=90, ha="right", va="top")
+        _ax.axvline(_clim_mean_orig, color="grey", linestyle=":", alpha=0.6)
 
         _ax.axvline(_F_orig, color="mediumorchid", linestyle="--")
         _fcst_lbl = f"{_year} fcst " + ("" if _is_pred else "(verified) ")
         _ax.text(_F_orig, _lbl_y, _fcst_lbl,
                  color="mediumorchid", fontsize=8, rotation=90, ha="right", va="top")
 
-        if abs(_mode_orig - _F_orig) > 0.001 * max(_clim_mean_orig, 1e-9):
-            _ax.axvline(_mode_orig, color="darkorange", linestyle=":")
-            _ax.text(_mode_orig, _lbl_y, f"cond. mode (r={_r_val:.2f}) ",
+        _ax.text(_clim_mean_orig, _lbl_y, "climatology ",
+                 color="grey", fontsize=8, rotation=90, ha="right", va="top")
+
+        if abs(_mean_orig - _F_orig) > 0.001 * max(_clim_mean_orig, 1e-9):
+            _ax.axvline(_mean_orig, color="darkorange", linestyle=":")
+            _ax.text(_mean_orig, _lbl_y, f"cond. mean (r={_r_val:.2f}) ",
                      color="darkorange", fontsize=8, rotation=90, ha="right", va="top")
 
         _rp_lines = []
@@ -473,6 +482,59 @@ def _(TRIMESTER_NAMES, df_paired, df_skill, np, pcode, plt, trimester):
     _ax.spines["right"].set_visible(False)
     plt.tight_layout()
     _fig_clim
+    return
+
+
+@app.cell
+def _(df_paired, df_skill, issued_month, np, pcode, plt, trimester):
+    _df_hp = df_paired[
+        (df_paired["pcode"] == pcode)
+        & (df_paired["issued_month"] == issued_month)
+        & (df_paired["trimester"] == trimester)
+        & df_paired["hist_prob"].notna()
+        & df_paired["obs_mean"].notna()
+    ].copy()
+
+    _skill_row_hp = df_skill[
+        (df_skill["pcode"] == pcode)
+        & (df_skill["issued_month"] == issued_month)
+        & (df_skill["trimester"] == trimester)
+    ]
+
+    _fig_hp, _ax = plt.subplots(figsize=(8, 4), dpi=150)
+
+    if _df_hp.empty or _skill_row_hp.empty:
+        _ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=_ax.transAxes)
+        _ax.set_axis_off()
+    else:
+        _tercile_log = _df_hp["obs_mean"].quantile(1 / 3)
+        _df_hp["was_lower"] = (_df_hp["obs_mean"] <= _tercile_log).astype(int)
+        _rng = np.random.default_rng(42)
+        _df_hp["y_jit"] = _df_hp["was_lower"] + _rng.normal(0, 0.04, len(_df_hp))
+
+        _colors_hp = ["royalblue" if v else "lightcoral" for v in _df_hp["was_lower"]]
+        _ax.scatter(_df_hp["hist_prob"], _df_hp["y_jit"], c=_colors_hp, s=40, alpha=0.85, zorder=3)
+        for _, _yr in _df_hp.iterrows():
+            _ax.annotate(
+                str(int(_yr["season_year"])), (_yr["hist_prob"], _yr["y_jit"]),
+                xytext=(3, 2), textcoords="offset points", fontsize=6, color="k",
+            )
+
+        _ax.axvline(1 / 3, color="grey", linestyle="--", linewidth=0.8, alpha=0.6)
+        _ax.axhline(0.5, color="grey", linestyle=":", linewidth=0.6, alpha=0.4)
+        _ax.set_yticks([0, 1])
+        _ax.set_yticklabels(["Above tercile", "Lower tercile"])
+        _ax.set_xlim(0, 1)
+        _ax.set_xlabel("Predicted P(lower tercile)")
+        _ax.set_title(
+            f"{_skill_row_hp.iloc[0]['country_name']} — historical predictions vs. actual outcomes\n"
+            f"Blue = year was in lower tercile  |  Red = year was above tercile"
+        )
+        _ax.spines["top"].set_visible(False)
+        _ax.spines["right"].set_visible(False)
+        plt.tight_layout()
+
+    _fig_hp
     return
 
 
@@ -645,6 +707,208 @@ def _(df_paired, pd, plt):
     _ax.spines["right"].set_visible(False)
     plt.tight_layout()
     _fig_cal
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Step-by-step: how we build the probability estimate
+    """)
+    return
+
+
+@app.cell
+def _(
+    calendar,
+    df_paired,
+    df_skill,
+    issued_month,
+    mo,
+    norm,
+    np,
+    pcode,
+    pd,
+    plt,
+    trimester,
+):
+    import io as _io, base64 as _b64
+
+    def _fig_to_html(fig):
+        _buf = _io.BytesIO()
+        fig.savefig(_buf, format="png", dpi=130, bbox_inches="tight")
+        _buf.seek(0)
+        _enc = _b64.b64encode(_buf.read()).decode()
+        plt.close(fig)
+        return mo.Html(f'<img src="data:image/png;base64,{_enc}" style="max-width:100%"/>')
+
+    # ── Shared data ────────────────────────────────────────────────────────────
+    _row = df_skill[
+        (df_skill["pcode"] == pcode)
+        & (df_skill["issued_month"] == issued_month)
+        & (df_skill["trimester"] == trimester)
+    ]
+    _df_tab = df_paired[
+        (df_paired["pcode"] == pcode)
+        & (df_paired["issued_month"] == issued_month)
+        & (df_paired["trimester"] == trimester)
+        & df_paired["obs_mean"].notna()
+    ].copy()
+
+    if _row.empty or _df_tab.empty or pd.isna(_row.iloc[0]["pearson_r"]):
+        _tabs_content = mo.md("*Insufficient data for this selection.*")
+    else:
+        _r = _row.iloc[0]
+        _r_val = float(_r["pearson_r"])
+        _sigma_log = max(float(_r["sigma"]), 1e-9)
+        _era5_mean_log = float(_r["era5_mean"])
+        _era5_std_log = float(_r["era5_std"])
+        _F_log = float(_r["current_forecast_mean"])
+        _mu_log = (1 - _r_val) * _era5_mean_log + _r_val * _F_log
+        _T_orig = float(_r["lower_tercile_mm"])
+        _prob = float(_r["prob_lower_tercile"])
+        _year = int(_r["current_forecast_year"])
+        _F_orig = float(np.expm1(_F_log))
+        _mean_orig = float(np.expm1(_mu_log + _sigma_log**2 / 2))
+        _era5_log = _df_tab.drop_duplicates("season_year")["obs_mean"].sort_values().values
+        _era5_orig = np.expm1(_era5_log)
+
+        _x_min = max(1e-6, float(np.expm1(min(_era5_mean_log, _mu_log) - 4 * max(_era5_std_log, _sigma_log))))
+        _x_max = max(float(_era5_orig.max()), float(np.expm1(max(_era5_mean_log, _mu_log) + 4 * max(_era5_std_log, _sigma_log))))
+        _x = np.linspace(_x_min, _x_max, 500)
+        _clim_pdf = norm.pdf(np.log1p(_x), loc=_era5_mean_log, scale=_era5_std_log) / (1 + _x)
+        _cond_pdf = norm.pdf(np.log1p(_x), loc=_mu_log, scale=_sigma_log) / (1 + _x)
+        _pdf_max = float(max(_clim_pdf.max(), _cond_pdf.max())) * 1.05
+        _clim_mean_orig = float(np.expm1(_era5_mean_log + _era5_std_log**2 / 2))
+        _issued_str = calendar.month_abbr[issued_month]
+
+        def _base_ax(ax):
+            ax.set_xlim(_x_min, _x_max)
+            ax.set_ylim(0, _pdf_max)
+            ax.set_xlabel("Mean daily rainfall (mm/day)")
+            ax.set_ylabel("Probability density")
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+
+        # ── Tab 1: Normalization (histogram comparison) ─────────────────────
+        _df_norm = _df_tab[_df_tab["forecast_mean"].notna()].copy()
+        _fcst_orig_all = np.expm1(_df_norm["forecast_mean"].values)
+        _obs_orig_all = np.expm1(_df_norm["obs_mean"].values)
+        _fig1, _ax1 = plt.subplots(figsize=(7, 4))
+        _ax1.hist(_obs_orig_all, bins=12, density=True, alpha=0.55, color="grey", label="ERA5 (observed)")
+        _ax1.hist(_fcst_orig_all, bins=12, density=True, alpha=0.55, color="royalblue", label="SEAS5 (after normalization)")
+        _ax1.axvline(float(_obs_orig_all.mean()), color="grey", linestyle="--", linewidth=1.5)
+        _ax1.axvline(float(_fcst_orig_all.mean()), color="royalblue", linestyle="--", linewidth=1.5)
+        _ax1.text(0.97, 0.95,
+                  f"ERA5:  mean={_obs_orig_all.mean():.3f}  std={_obs_orig_all.std():.3f}\n"
+                  f"SEAS5: mean={_fcst_orig_all.mean():.3f}  std={_fcst_orig_all.std():.3f}",
+                  transform=_ax1.transAxes, ha="right", va="top", fontsize=8,
+                  bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.8))
+        _ax1.set_xlabel("Mean daily rainfall (mm/day)")
+        _ax1.set_title(
+            f"Step 1 — Normalization: SEAS5 log-transformed and scaled to match ERA5\n"
+            f"{_r['country_name']}, issued {_issued_str}, valid {trimester}"
+        )
+        _ax1.legend(fontsize=8)
+        _ax1.spines["top"].set_visible(False)
+        _ax1.spines["right"].set_visible(False)
+        plt.tight_layout()
+
+        # ── Tab 2: Climatology ──────────────────────────────────────────────
+        _fig2, _ax2 = plt.subplots(figsize=(7, 4))
+        _ax2.plot(_x, _clim_pdf, color="grey", linewidth=2, linestyle="--")
+        _ax2.plot(_era5_orig, np.zeros_like(_era5_orig), "|",
+                  color="royalblue", markersize=15, markeredgewidth=2, alpha=0.7)
+        _ax2.set_title(f"Step 2 — ERA5 climatological distribution\n"
+                       f"Grey curve: what we'd expect without any forecast (33% chance below any tercile threshold)")
+        _base_ax(_ax2)
+        plt.tight_layout()
+
+        # ── Tab 3: Add normalized forecast ────────────────────────────────
+        _fig3, _ax3 = plt.subplots(figsize=(7, 4))
+        _ax3.plot(_x, _clim_pdf, color="grey", linewidth=2, linestyle="--", alpha=0.7)
+        _ax3.plot(_era5_orig, np.zeros_like(_era5_orig), "|",
+                  color="royalblue", markersize=15, markeredgewidth=2, alpha=0.7)
+        _ax3.axvline(_F_orig, color="mediumorchid", linestyle="--", linewidth=2)
+        _ax3.text(_F_orig, _pdf_max * 0.9, f" {_year} SEAS5\n forecast",
+                  color="mediumorchid", fontsize=9, va="top")
+        _ax3.set_title(f"Step 3 — Normalized SEAS5 forecast\n"
+                       f"Purple line: where the normalized SEAS5 forecast sits on the ERA5 scale")
+        _base_ax(_ax3)
+        plt.tight_layout()
+
+        # ── Tab 4: Shrinkage / conditional mean ────────────────────────────
+        _fig4, _ax4 = plt.subplots(figsize=(7, 4))
+        _ax4.plot(_x, _clim_pdf, color="grey", linewidth=2, linestyle="--", alpha=0.7)
+        _ax4.plot(_era5_orig, np.zeros_like(_era5_orig), "|",
+                  color="royalblue", markersize=15, markeredgewidth=2, alpha=0.7)
+        _ax4.axvline(_F_orig, color="mediumorchid", linestyle="--", linewidth=1.5, alpha=0.5)
+        _ax4.axvline(_mean_orig, color="darkorange", linestyle="-", linewidth=2)
+        _ax4.axvline(_clim_mean_orig, color="grey", linestyle=":", alpha=0.6)
+        _ax4.annotate("", xy=(_mean_orig, _pdf_max * 0.6), xytext=(_F_orig, _pdf_max * 0.6),
+                      arrowprops=dict(arrowstyle="->", color="darkorange", lw=1.5))
+        _ax4.text((_F_orig + _mean_orig) / 2, _pdf_max * 0.65,
+                  f"shrinkage\n(r = {_r_val:.2f})", ha="center", fontsize=8, color="darkorange")
+        _ax4.text(0.03, 0.95,
+                  f"E[obs | F] = (1−r)·μ + r·F\n"
+                  f"= {1-_r_val:.2f}·{_clim_mean_orig:.3f} + {_r_val:.2f}·{_F_orig:.3f}\n"
+                  f"= {_mean_orig:.3f} mm/day",
+                  transform=_ax4.transAxes, va="top", fontsize=9, color="darkorange",
+                  bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.85))
+        _ax4.set_title("Step 4 — Regression shrinkage: conditional mean pulled toward climatology\n"
+                       "Lower skill (smaller r) → stronger pull toward climatological mean")
+        _base_ax(_ax4)
+        plt.tight_layout()
+
+        # ── Tab 5: Conditional distribution ───────────────────────────────
+        _fig5, _ax5 = plt.subplots(figsize=(7, 4))
+        _ax5.plot(_x, _clim_pdf, color="grey", linewidth=2, linestyle="--", alpha=0.7)
+        _ax5.plot(_era5_orig, np.zeros_like(_era5_orig), "|",
+                  color="royalblue", markersize=15, markeredgewidth=2, alpha=0.7)
+        _ax5.plot(_x, _cond_pdf, color="k", linewidth=2.5)
+        _ax5.axvline(_mean_orig, color="darkorange", linestyle=":", linewidth=1.5)
+        _ax5.text(0.97, 0.95,
+                  f"Width = SE of regression\nσ_log = {_sigma_log:.3f}",
+                  transform=_ax5.transAxes, ha="right", va="top", fontsize=9,
+                  bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.85))
+        _ax5.set_title("Step 5 — Conditional distribution\n"
+                       "Black curve: our best estimate of the distribution of actual rainfall given this forecast\n"
+                       "Width = standard error of the regression (smaller for higher skill)")
+        _base_ax(_ax5)
+        plt.tight_layout()
+
+        # ── Tab 6: Probability ─────────────────────────────────────────────
+        _fig6, _ax6 = plt.subplots(figsize=(7, 4))
+        _ax6.plot(_x, _clim_pdf, color="grey", linewidth=2, linestyle="--", alpha=0.7)
+        _ax6.plot(_era5_orig, np.zeros_like(_era5_orig), "|",
+                  color="royalblue", markersize=15, markeredgewidth=2, alpha=0.7)
+        _ax6.plot(_x, _cond_pdf, color="k", linewidth=2.5)
+        _low = _x <= _T_orig
+        _ax6.fill_between(_x[_low], _cond_pdf[_low], color="chocolate", alpha=0.4)
+        _ax6.axvline(_T_orig, color="chocolate", linestyle="--", linewidth=1.5)
+        _ax6.axvline(_mean_orig, color="darkorange", linestyle=":", linewidth=1.5)
+        if _low.sum() > 0:
+            _xc = float(_x[_low].mean())
+            _ic = int(np.argmin(np.abs(_x - _xc)))
+            _ax6.text(_xc, float(_cond_pdf[_ic]) * 0.45, f"P = {_prob:.1%}",
+                      ha="center", va="center", fontsize=12, fontweight="bold", color="saddlebrown")
+        _ax6.text(_T_orig, _pdf_max * 0.9, "lower tercile ",
+                  rotation=90, ha="right", va="top", color="chocolate", fontsize=8)
+        _ax6.set_title("Step 6 — Lower-tercile probability\n"
+                       "P(lower tercile) = area of conditional distribution below the lower tercile threshold")
+        _base_ax(_ax6)
+        plt.tight_layout()
+
+        _tabs_content = mo.ui.tabs({
+            "1 — Normalization": _fig_to_html(_fig1),
+            "2 — Climatology": _fig_to_html(_fig2),
+            "3 — Forecast": _fig_to_html(_fig3),
+            "4 — Shrinkage": _fig_to_html(_fig4),
+            "5 — Conditional dist.": _fig_to_html(_fig5),
+            "6 — Probability": _fig_to_html(_fig6),
+        })
+
+    _tabs_content
     return
 
 
