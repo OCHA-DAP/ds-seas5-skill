@@ -10,6 +10,9 @@ dependencies = [
     "scipy>=1.13.0",
     "ocha-stratus>=0.1.3",
     "tqdm>=4.66.0",
+    "geopandas>=0.14.0",
+    "geodatasets>=2023.3.0",
+    "plotly>=5.0.0",
 ]
 
 [build-system]

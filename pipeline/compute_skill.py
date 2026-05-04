@@ -10,10 +10,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.constants import PROJECT_PREFIX, TARGET_ISO3S
 from src.datasources.era5 import load_era5
 from src.datasources.seas5 import load_seas5
-from src.skill import run_all_combinations
+from src.skill import compute_roc_auc, run_all_combinations
 
 SKILL_BLOB = f"{PROJECT_PREFIX}/processed/skill_stats.parquet"
 PAIRED_BLOB = f"{PROJECT_PREFIX}/processed/paired_yearly.parquet"
+ROC_AUC_BLOB = f"{PROJECT_PREFIX}/processed/roc_auc_stats.parquet"
 
 
 def main() -> None:
@@ -56,11 +57,15 @@ def main() -> None:
     df_skill_all = pd.concat(all_skill, ignore_index=True)
     df_paired_all = pd.concat(all_paired, ignore_index=True)
 
-    tqdm.write(f"\nSaving skill stats  ({len(df_skill_all):,} rows) → {SKILL_BLOB}")
+    tqdm.write(f"\nSaving skill stats  ({len(df_skill_all):,} rows) -> {SKILL_BLOB}")
     stratus.upload_parquet_to_blob(df_skill_all, SKILL_BLOB, stage="dev")
 
-    tqdm.write(f"Saving paired yearly ({len(df_paired_all):,} rows) → {PAIRED_BLOB}")
+    tqdm.write(f"Saving paired yearly ({len(df_paired_all):,} rows) -> {PAIRED_BLOB}")
     stratus.upload_parquet_to_blob(df_paired_all, PAIRED_BLOB, stage="dev")
+
+    df_roc_auc_all = compute_roc_auc(df_paired_all)
+    tqdm.write(f"Saving ROC-AUC stats ({len(df_roc_auc_all):,} rows) -> {ROC_AUC_BLOB}")
+    stratus.upload_parquet_to_blob(df_roc_auc_all, ROC_AUC_BLOB, stage="dev")
 
     tqdm.write("Done.")
 

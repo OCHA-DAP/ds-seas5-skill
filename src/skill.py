@@ -2,7 +2,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
+from scipy.stats import mannwhitneyu, norm
 
 from src.constants import MIN_YEARS, TRIMESTERS
 
@@ -288,3 +288,44 @@ def run_all_combinations(
                 progress.update(1)
 
     return pd.DataFrame(skill_rows), pd.DataFrame(paired_rows)
+
+
+def compute_roc_auc(df_paired: pd.DataFrame) -> pd.DataFrame:
+    """ROC-AUC of the deterministic normalized forecast at 3yr and 10yr drought RP thresholds.
+
+    Uses forecast_mean (normalized log-space; lower = drier) as predictor.
+    Event labels are defined by percentile thresholds of obs_mean within each group:
+      3yr RP  → obs in lowest ~33%  (100/3 th percentile)
+      10yr RP → obs in lowest  10%
+
+    Returns one row per (pcode, issued_month, trimester) with columns:
+      roc_auc_3yr, roc_auc_10yr  (NaN when too few positive examples).
+    """
+
+    def _auc(f_vals: np.ndarray, labels: np.ndarray, higher_is_event: bool) -> float:
+        pos_f = f_vals[labels == 1]
+        neg_f = f_vals[labels == 0]
+        if len(pos_f) < 2 or len(neg_f) < 2:
+            return float("nan")
+        # drought (lower tail): non-events should have higher forecasts than events
+        # flood  (upper tail): events should have higher forecasts than non-events
+        a, b = (pos_f, neg_f) if higher_is_event else (neg_f, pos_f)
+        stat, _ = mannwhitneyu(a, b, alternative="greater")
+        return float(stat / (len(pos_f) * len(neg_f)))
+
+    rows: list[dict] = []
+    for (pcode, im, tri), grp in df_paired.dropna(
+        subset=["obs_mean", "forecast_mean"]
+    ).groupby(["pcode", "issued_month", "trimester"]):
+        obs = grp["obs_mean"].values
+        f = grp["forecast_mean"].values
+        rows.append({
+            "pcode": pcode,
+            "issued_month": im,
+            "trimester": tri,
+            "roc_auc_3yr":        _auc(f, (obs <= np.percentile(obs, 100 / 3)).astype(int), False),
+            "roc_auc_10yr":       _auc(f, (obs <= np.percentile(obs, 10)).astype(int),       False),
+            "roc_auc_3yr_upper":  _auc(f, (obs >= np.percentile(obs, 200 / 3)).astype(int),  True),
+            "roc_auc_10yr_upper": _auc(f, (obs >= np.percentile(obs, 90)).astype(int),       True),
+        })
+    return pd.DataFrame(rows)

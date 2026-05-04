@@ -34,7 +34,10 @@ def _(PROJECT_PREFIX, stratus):
     df_paired = stratus.load_parquet_from_blob(
         f"{PROJECT_PREFIX}/processed/paired_yearly.parquet", stage="dev"
     )
-    return df_paired, df_skill
+    df_roc_auc = stratus.load_parquet_from_blob(
+        f"{PROJECT_PREFIX}/processed/roc_auc_stats.parquet", stage="dev"
+    )
+    return df_paired, df_roc_auc, df_skill
 
 
 @app.cell
@@ -69,21 +72,366 @@ def _(TRIMESTER_NAMES, calendar, mo):
         label="Valid trimester:",
         value="JAS",
     )
-    mo.hstack([issued_month_dd, trimester_dd], justify="start")
-    return issued_month_dd, trimester_dd
+    rainy_only_sw = mo.ui.switch(label="Show all countries", value=False)
+    mo.hstack([issued_month_dd, trimester_dd, rainy_only_sw], justify="start")
+    return issued_month_dd, rainy_only_sw, trimester_dd
 
 
 @app.cell
-def _(issued_month_dd, trimester_dd):
+def _(issued_month_dd, rainy_only_sw, trimester_dd):
     issued_month = issued_month_dd.value
     trimester = trimester_dd.value
-    return issued_month, trimester
+    show_all = rainy_only_sw.value
+    return issued_month, show_all, trimester
+
+
+@app.cell
+def _(mo):
+    mo.md("## Deterministic")
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("### Severity × skill")
+    return
+
+
+@app.cell
+def _(mo):
+    severe_rp_sl     = mo.ui.slider(2,    10,   1,    3,    label="Severe RP (yr)")
+    very_severe_rp_sl = mo.ui.slider(5,   25,   1,    10,   label="Very severe RP (yr)")
+    r_mod_sl         = mo.ui.slider(0.10, 0.60, 0.05, 0.30, label="Moderate skill (r ≥)")
+    r_high_sl        = mo.ui.slider(0.20, 0.80, 0.05, 0.50, label="High skill (r ≥)")
+    mo.hstack([severe_rp_sl, very_severe_rp_sl, r_mod_sl, r_high_sl], justify="start")
+    return r_high_sl, r_mod_sl, severe_rp_sl, very_severe_rp_sl
+
+
+@app.cell
+def _(df_skill, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, show_all, trimester, very_severe_rp_sl):
+    import matplotlib.patches as _mpatch_r
+    import re as _re
+
+    _ISO3 = {
+        "ET": "ETH", "SO": "SOM", "SD": "SDN", "NE": "NER", "SS": "SSD",
+        "KE": "KEN", "BF": "BFA", "MR": "MRT", "GT": "GTM", "HN": "HND",
+    }
+
+    _df_r = df_skill[
+        (df_skill["issued_month"] == issued_month)
+        & (df_skill["trimester"] == trimester)
+        & df_skill["forecast_percentile"].notna()
+        & df_skill["pearson_r"].notna()
+    ].copy()
+    if not show_all:
+        _df_r = _df_r[_df_r["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
+
+    _vsev_pct = 100 / very_severe_rp_sl.value
+    _sev_pct  = 100 / severe_rp_sl.value
+    _r_mod    = r_mod_sl.value
+    _r_high   = r_high_sl.value
+
+    _C_DH = "#7B3A1A"   # drought, very severe + high skill  (dark brown)
+    _C_DM = "#C8844A"   # drought, adjacent cells             (medium brown)
+    _C_FH = "#0D3B6B"   # flood,   very severe + high skill  (dark navy)
+    _C_FM = "#3D85C8"   # flood,   adjacent cells             (medium blue)
+
+    def _cat_color(pct, r):
+        _vsev    = pct <= _vsev_pct or pct >= 100 - _vsev_pct
+        _sev     = (_vsev_pct < pct <= _sev_pct) or (100 - _sev_pct <= pct < 100 - _vsev_pct)
+        _drought = pct < 50
+        if _vsev and r >= _r_high:
+            return _C_DH if _drought else _C_FH
+        if (_vsev and r >= _r_mod) or (_sev and r >= _r_high):
+            return _C_DM if _drought else _C_FM
+        return "#444444"
+
+    _fig_r, _ax_r = plt.subplots(figsize=(9, 5.5), dpi=150)
+    _ax_r.set_xlim(0, 100)
+    _ax_r.set_ylim(0, 1.0)
+
+    # --- drought shading (left, brown) ---
+    _ax_r.add_patch(_mpatch_r.Rectangle((0, _r_high), _vsev_pct, 1.0 - _r_high,                    facecolor=_C_DH, alpha=0.20, zorder=0, linewidth=0))
+    _ax_r.add_patch(_mpatch_r.Rectangle((0, _r_mod),  _vsev_pct, _r_high - _r_mod,                 facecolor=_C_DM, alpha=0.20, zorder=0, linewidth=0))
+    _ax_r.add_patch(_mpatch_r.Rectangle((_vsev_pct, _r_high), _sev_pct - _vsev_pct, 1.0 - _r_high,  facecolor=_C_DM, alpha=0.20, zorder=0, linewidth=0))
+
+    # --- flood shading (right, blue) ---
+    _ax_r.add_patch(_mpatch_r.Rectangle((100 - _vsev_pct, _r_high), _vsev_pct, 1.0 - _r_high,               facecolor=_C_FH, alpha=0.20, zorder=0, linewidth=0))
+    _ax_r.add_patch(_mpatch_r.Rectangle((100 - _vsev_pct, _r_mod),  _vsev_pct, _r_high - _r_mod,            facecolor=_C_FM, alpha=0.20, zorder=0, linewidth=0))
+    _ax_r.add_patch(_mpatch_r.Rectangle((100 - _sev_pct, _r_high), _sev_pct - _vsev_pct, 1.0 - _r_high,     facecolor=_C_FM, alpha=0.20, zorder=0, linewidth=0))
+
+    for _xv_r in [_vsev_pct, _sev_pct, 100 - _sev_pct, 100 - _vsev_pct]:
+        _ax_r.axvline(_xv_r, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=1)
+    for _yv_r in [_r_mod, _r_high]:
+        _ax_r.axhline(_yv_r, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=1)
+
+    # RP labels just inside the top edge
+    _ax_r.text(_vsev_pct,       0.98, f"{very_severe_rp_sl.value}yr", ha="center", va="top", fontsize=8, color="#666")
+    _ax_r.text(_sev_pct,        0.98, f"{severe_rp_sl.value}yr",      ha="center", va="top", fontsize=8, color="#666")
+    _ax_r.text(100 - _sev_pct,  0.98, f"{severe_rp_sl.value}yr",      ha="center", va="top", fontsize=8, color="#666")
+    _ax_r.text(100 - _vsev_pct, 0.98, f"{very_severe_rp_sl.value}yr", ha="center", va="top", fontsize=8, color="#666")
+    _ax_r.text(1, _r_mod + 0.01,  f"r = {_r_mod:.2f}",  ha="left", va="bottom", fontsize=8, color="#666")
+    _ax_r.text(1, _r_high + 0.01, f"r = {_r_high:.2f}", ha="left", va="bottom", fontsize=8, color="#666")
+    _ax_r.text(5,  0.01, "← drought", ha="center", va="bottom", fontsize=8, color="#999", style="italic")
+    _ax_r.text(95, 0.01, "flood →",   ha="center", va="bottom", fontsize=8, color="#999", style="italic")
+
+    for _, _row_r in _df_r.iterrows():
+        _pct   = _row_r["forecast_percentile"]
+        _r_val = _row_r["pearson_r"]
+        _iso2  = _re.sub(r"\d", "", _row_r["pcode"]).upper()
+        _iso   = _ISO3.get(_iso2, _iso2)
+        _col   = _cat_color(_pct, _r_val)
+        if _r_val >= 0:
+            _ax_r.text(_pct, _r_val, _iso, ha="center", va="center",
+                       color=_col, fontsize=9, fontweight="bold", zorder=4)
+        else:
+            _ax_r.text(_pct, 0.025, _iso, ha="center", va="bottom",
+                       color=_col, fontsize=9, fontweight="bold", zorder=4)
+            _ax_r.annotate("", xy=(_pct, 0.002), xytext=(_pct, 0.022),
+                           arrowprops=dict(arrowstyle="-|>", color=_col,
+                                           lw=0.9, mutation_scale=6), zorder=4)
+
+    _ax_r.set_xlabel("Forecast percentile among historical (0 = driest, 100 = wettest)")
+    _ax_r.set_ylabel("Skill (Pearson r)")
+    _yr_r = int(_df_r["current_forecast_year"].dropna().iloc[0]) if not _df_r["current_forecast_year"].dropna().empty else "—"
+    _ax_r.set_title(f"Severity × skill (Pearson r) — issued month {issued_month}, valid {trimester}, forecast year {_yr_r}")
+    _ax_r.spines["top"].set_visible(False)
+    _ax_r.spines["right"].set_visible(False)
+    plt.tight_layout()
+    _fig_r
+
+
+@app.cell
+def _():
+    import geopandas as _gpd_geo
+    import pooch as _pooch
+
+    _path = _pooch.retrieve(
+        url="https://naturalearth.s3.amazonaws.com/110m_cultural/ne_110m_admin_0_countries.zip",
+        known_hash=None,
+        path=_pooch.os_cache("ds-seas5-skill"),
+        fname="ne_110m_admin_0_countries.zip",
+    )
+    map_world = _gpd_geo.read_file(_path)[["ISO_A3", "ADMIN", "geometry"]]
+    return (map_world,)
+
+
+@app.cell
+def _(calendar, df_skill, issued_month, map_world, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, show_all, trimester, very_severe_rp_sl):
+    import plotly.express as _px
+    import re as _re_m
+
+    _ISO3_m = {
+        "ET": "ETH", "SO": "SOM", "SD": "SDN", "NE": "NER", "SS": "SSD",
+        "KE": "KEN", "BF": "BFA", "MR": "MRT", "GT": "GTM", "HN": "HND",
+    }
+    _ALL_TARGETS = set(_ISO3_m.values())
+
+    _df_m = df_skill[
+        (df_skill["issued_month"] == issued_month)
+        & (df_skill["trimester"] == trimester)
+        & df_skill["forecast_percentile"].notna()
+        & df_skill["pearson_r"].notna()
+    ].copy()
+    if not show_all:
+        _df_m = _df_m[_df_m["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
+
+    _vsev_m  = 100 / very_severe_rp_sl.value
+    _sev_m   = 100 / severe_rp_sl.value
+    _rmod_m  = r_mod_sl.value
+    _rhigh_m = r_high_sl.value
+    _vsev_yr = very_severe_rp_sl.value
+    _sev_yr  = severe_rp_sl.value
+
+    def _mcat(pct, r):
+        _vsev = pct <= _vsev_m or pct >= 100 - _vsev_m
+        _sev  = (_vsev_m < pct <= _sev_m) or (100 - _sev_m <= pct < 100 - _vsev_m)
+        _d    = pct < 50
+        if _vsev and r >= _rhigh_m:
+            return "drought_high" if _d else "flood_high"
+        if (_vsev and r >= _rmod_m) or (_sev and r >= _rhigh_m):
+            return "drought_mod" if _d else "flood_mod"
+        return "neutral"
+
+    _iso3_cat = {}
+    for _, _rm in _df_m.iterrows():
+        _i2 = _re_m.sub(r"\d", "", _rm["pcode"]).upper()
+        _iso3_cat[_ISO3_m.get(_i2, _i2)] = _mcat(
+            _rm["forecast_percentile"], _rm["pearson_r"]
+        )
+
+    _CMAP = {
+        "drought_high": "#8B2200",
+        "drought_mod":  "#D4640A",
+        "flood_high":   "#0047CC",
+        "flood_mod":    "#4D92E8",
+        "neutral":      "#DEDEDE",
+        "other":        "#FFFFFF",
+    }
+    _LABELS = {
+        "drought_high": f"Drought: ≥{_vsev_yr}-yr RP + high skill",
+        "drought_mod":  f"Drought: ≥{_vsev_yr}-yr RP + mod. skill, or ≥{_sev_yr}-yr RP + high skill",
+        "flood_high":   f"Flood: ≥{_vsev_yr}-yr RP + high skill",
+        "flood_mod":    f"Flood: ≥{_vsev_yr}-yr RP + mod. skill, or ≥{_sev_yr}-yr RP + high skill",
+        "neutral":      "No actionable alert",
+        "other":        "Not monitored",
+    }
+    _ORDER = ["drought_high", "drought_mod", "flood_high", "flood_mod", "neutral", "other"]
+
+    _name_lkp = map_world.drop_duplicates("ISO_A3").set_index("ISO_A3")["ADMIN"].to_dict()
+    _valid = [c for c in map_world["ISO_A3"].unique() if len(c) == 3]
+    _df_map = pd.DataFrame({
+        "iso3": _valid,
+        "cat":  [_iso3_cat.get(c, "neutral" if c in _ALL_TARGETS else "other") for c in _valid],
+        "name": [_name_lkp.get(c, c) for c in _valid],
+    })
+
+    # Ensure every category has at least one row so the legend is always complete.
+    # Plotly silently ignores unrecognised ISO-3 codes so these won't appear on the map.
+    _dummy = pd.DataFrame([
+        {"iso3": f"Z{i:02d}", "cat": _cat, "name": ""}
+        for i, _cat in enumerate(_ORDER)
+        if _cat not in _df_map["cat"].values
+    ])
+    if not _dummy.empty:
+        _df_map = pd.concat([_df_map, _dummy], ignore_index=True)
+
+    _month_name = calendar.month_name[issued_month]
+    _fig_m = _px.choropleth(
+        _df_map,
+        locations="iso3",
+        locationmode="ISO-3",
+        color="cat",
+        color_discrete_map=_CMAP,
+        category_orders={"cat": _ORDER},
+        hover_name="name",
+        hover_data={"iso3": True, "cat": False},
+        projection="robinson",
+        title=f"Alert map — {_month_name} issued, {trimester} valid",
+    )
+    _fig_m.update_geos(
+        showframe=False,
+        showcoastlines=True, coastlinecolor="#BBBBBB", coastlinewidth=0.4,
+        showland=True,  landcolor="#EFEFEF",
+        showocean=True, oceancolor="white",
+        showlakes=False,
+        bgcolor="white",
+    )
+    _fig_m.update_layout(
+        margin={"r": 0, "t": 36, "l": 0, "b": 110},
+        height=520,
+        legend=dict(
+            orientation="h",
+            x=0.5, y=-0.02,
+            xanchor="center", yanchor="top",
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="#CCCCCC", borderwidth=1,
+            font=dict(size=11),
+            title_text="",
+        ),
+        title_font_size=13,
+    )
+    for _tr in _fig_m.data:
+        _tr.name = _LABELS.get(_tr.name, _tr.name)
+
+    _fig_m
+
+
+@app.cell
+def _(df_roc_auc, df_skill, issued_month, mo, pd, plt, rainy_set, show_all, trimester):
+    import matplotlib.patches as _mpatch
+
+    _df = (
+        df_skill[
+            (df_skill["issued_month"] == issued_month)
+            & (df_skill["trimester"] == trimester)
+            & df_skill["forecast_percentile"].notna()
+        ]
+        .merge(df_roc_auc, on=["pcode", "issued_month", "trimester"], how="left")
+        .copy()
+    )
+    if not show_all:
+        _df = _df[_df["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
+
+    def _select_auc(row):
+        p = row["forecast_percentile"]
+        if pd.isna(p):
+            return float("nan")
+        if p <= 10:
+            return row["roc_auc_10yr"]
+        elif p <= 100 / 3:
+            return row["roc_auc_3yr"]
+        elif p >= 90:
+            return row["roc_auc_10yr_upper"]
+        elif p >= 200 / 3:
+            return row["roc_auc_3yr_upper"]
+        return row["roc_auc_3yr"]
+
+    _df["_auc"] = _df.apply(_select_auc, axis=1)
+    _df_plot = _df.dropna(subset=["_auc"])
+
+    _fig, _ax = plt.subplots(figsize=(9, 5.5), dpi=150)
+    _ax.set_xlim(-2, 102)
+    _ax.set_ylim(-0.04, 1.08)
+
+    # --- drought shading (left) ---
+    _ax.add_patch(_mpatch.Rectangle((-2, 0.7), 12, 0.38,             facecolor="#dc143c", alpha=0.18, zorder=0, linewidth=0))
+    _ax.add_patch(_mpatch.Rectangle((-2, 0.6), 12, 0.1,              facecolor="#ff8c00", alpha=0.18, zorder=0, linewidth=0))
+    _ax.add_patch(_mpatch.Rectangle((10, 0.7), 100/3 - 10, 0.38,    facecolor="#ff8c00", alpha=0.18, zorder=0, linewidth=0))
+
+    # --- flood shading (right) ---
+    _ax.add_patch(_mpatch.Rectangle((90, 0.7), 12, 0.38,             facecolor="#dc143c", alpha=0.18, zorder=0, linewidth=0))
+    _ax.add_patch(_mpatch.Rectangle((90, 0.6), 12, 0.1,              facecolor="#ff8c00", alpha=0.18, zorder=0, linewidth=0))
+    _ax.add_patch(_mpatch.Rectangle((200/3, 0.7), 90 - 200/3, 0.38, facecolor="#ff8c00", alpha=0.18, zorder=0, linewidth=0))
+
+    for _xv in [10, 100/3, 200/3, 90]:
+        _ax.axvline(_xv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=1)
+    for _yv in [0.6, 0.7]:
+        _ax.axhline(_yv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=1)
+
+    _ax.text(10,    1.05, "10yr", ha="center", va="bottom", fontsize=8, color="#666")
+    _ax.text(100/3, 1.05, "3yr",  ha="center", va="bottom", fontsize=8, color="#666")
+    _ax.text(200/3, 1.05, "3yr",  ha="center", va="bottom", fontsize=8, color="#666")
+    _ax.text(90,    1.05, "10yr", ha="center", va="bottom", fontsize=8, color="#666")
+    _ax.text(1, 0.605, "AUC 0.6", ha="left", va="bottom", fontsize=8, color="#666")
+    _ax.text(1, 0.705, "AUC 0.7", ha="left", va="bottom", fontsize=8, color="#666")
+    _ax.text(5,  0.02, "← drought", ha="center", va="bottom", fontsize=8, color="#999", style="italic")
+    _ax.text(95, 0.02, "flood →",   ha="center", va="bottom", fontsize=8, color="#999", style="italic")
+
+    _ax.scatter(
+        _df_plot["forecast_percentile"], _df_plot["_auc"],
+        s=72, zorder=4, edgecolors="#333", linewidths=0.5, color="#4c72b0",
+    )
+    for _, _r in _df_plot.iterrows():
+        _ax.annotate(
+            _r["country_name"].split(" ")[0],
+            (_r["forecast_percentile"], _r["_auc"]),
+            xytext=(5, 3), textcoords="offset points", fontsize=9,
+        )
+
+    _ax.set_xlabel("Forecast percentile among historical (0 = driest, 100 = wettest)")
+    _ax.set_ylabel("Skill (ROC-AUC)")
+    _forecast_year = int(_df["current_forecast_year"].dropna().iloc[0]) if not _df["current_forecast_year"].dropna().empty else "—"
+    _ax.set_title(f"Severity × skill — issued month {issued_month}, valid {trimester}, forecast year {_forecast_year}")
+    _ax.spines["top"].set_visible(False)
+    _ax.spines["right"].set_visible(False)
+    plt.tight_layout()
+
+    mo.accordion({
+        "ROC-AUC skill plot  (pre-calculated at fixed 3yr / 10yr RP — not affected by sliders above)": _fig
+    })
+
+
+@app.cell
+def _(mo):
+    mo.md("## Probabilistic")
+    return
 
 
 @app.cell
 def _(mo):
     mo.md("""
-    ## Ranked drought alert table
+    ### Ranked drought alert table
 
     Countries ranked by skill-adjusted probability of below-normal rainfall.
     **⚠** = negative historical correlation (forecast anti-correlated; probability unreliable).
@@ -149,52 +497,6 @@ def _(df_skill, issued_month, mo, pd, rainy_set, trimester):
     return
 
 
-@app.cell
-def _(df_skill, issued_month, plt, rainy_set, trimester):
-    _df_sc = df_skill[
-        (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
-        & df_skill["forecast_percentile"].notna()
-        & df_skill["pearson_r"].notna()
-    ].copy()
-
-    import matplotlib.colors as _mcolors
-    _bounds = [0.0, 0.33, 0.50, 0.67, 1.0]
-    _cmap_cat = _mcolors.ListedColormap(["#4575b4", "#fee08b", "#f46d43", "#d73027"])
-    _norm_cat = _mcolors.BoundaryNorm(_bounds, _cmap_cat.N)
-
-    _fig_sc, _ax = plt.subplots(figsize=(8, 5), dpi=150)
-    if not _df_sc.empty:
-        _sc = _ax.scatter(
-            _df_sc["forecast_percentile"], _df_sc["pearson_r"],
-            c=_df_sc["prob_lower_tercile"].clip(0, 1),
-            cmap=_cmap_cat, norm=_norm_cat,
-            s=80, zorder=3, edgecolors="k", linewidths=0.4,
-        )
-        _cbar = plt.colorbar(_sc, ax=_ax, shrink=0.8)
-        _cbar.set_ticks(_bounds)
-        _cbar.set_ticklabels(["0%", "33% (clim.)", "50%", "67%", "100%"])
-        _cbar.set_label("P(lower tercile)")
-        _ax.axhline(0, color="grey", linewidth=0.6, linestyle="--", alpha=0.5)
-        for _, _rr in _df_sc.iterrows():
-            _in_rainy = (_rr["pcode"], trimester) in rainy_set
-            _ax.annotate(
-                _rr["country_name"].split(" ")[0],
-                (_rr["forecast_percentile"], _rr["pearson_r"]),
-                xytext=(5, 3), textcoords="offset points", fontsize=9,
-                fontstyle="normal" if _in_rainy else "italic",
-            )
-        _ax.text(0.99, 0.01, "italic = not a rainy trimester for that country",
-                 transform=_ax.transAxes, ha="right", va="bottom",
-                 fontsize=8, fontstyle="italic", color="grey")
-        _ax.set_xlabel("Forecast percentile (0 = driest, 100 = wettest)")
-        _ax.set_ylabel("Pearson r (historical skill)")
-        _ax.set_title(f"All countries — issued month {issued_month}, valid {trimester}")
-        _ax.spines["top"].set_visible(False)
-        _ax.spines["right"].set_visible(False)
-        plt.tight_layout()
-    _fig_sc
-    return
 
 
 @app.cell
