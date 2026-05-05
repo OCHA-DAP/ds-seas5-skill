@@ -27,24 +27,43 @@ def _():
 
 
 @app.cell
-def _(PROJECT_PREFIX, stratus):
+def _(PROJECT_PREFIX, pd, stratus):
     df_skill = stratus.load_parquet_from_blob(
         f"{PROJECT_PREFIX}/processed/skill_stats.parquet", stage="dev"
     )
-    df_rainy = stratus.load_parquet_from_blob(
-        f"{PROJECT_PREFIX}/processed/rainy_pairs.parquet", stage="dev"
+    _pcodes = df_skill["pcode"].dropna().unique().tolist()
+    _engine = stratus.get_engine("prod")
+    _ph = ",".join(["%s"] * len(_pcodes))
+    with _engine.connect() as _conn:
+        _df_era5_all = pd.read_sql(
+            f"SELECT pcode, valid_date, mean FROM public.era5 WHERE pcode IN ({_ph})",
+            _conn, params=tuple(_pcodes), parse_dates=["valid_date"],
+        )
+    monthly_clim = (
+        _df_era5_all.assign(month=_df_era5_all["valid_date"].dt.month)
+        .groupby(["pcode", "month"])["mean"].mean()
+        .reset_index().rename(columns={"mean": "mean_mm_day"})
     )
-    df_roc_auc = stratus.load_parquet_from_blob(
-        f"{PROJECT_PREFIX}/processed/roc_auc_stats.parquet", stage="dev"
-    )
-    return df_rainy, df_roc_auc, df_skill
+    return df_skill, monthly_clim
 
 
 @app.cell
-def _(df_rainy):
-    rainy_set = set(
-        zip(df_rainy[df_rainy["is_rainy"]]["pcode"], df_rainy[df_rainy["is_rainy"]]["trimester"])
-    )
+def _(TRIMESTERS, monthly_clim, pd, trimester_pct_sl, month_pct_sl):
+    _mc = monthly_clim.copy()
+    _annual = _mc.groupby("pcode")["mean_mm_day"].sum().rename("annual")
+    _mc = _mc.merge(_annual.reset_index(), on="pcode")
+    _mc["pct_annual"] = _mc["mean_mm_day"] / _mc["annual"]
+    _rows = []
+    for _tri, _months in TRIMESTERS.items():
+        _tri_mc = _mc[_mc["month"].isin(_months)]
+        _tri_mean = _tri_mc.groupby("pcode")["mean_mm_day"].mean()
+        _tri_annual = _annual.reindex(_tri_mean.index)
+        _tri_ok = 3 * _tri_mean / _tri_annual >= trimester_pct_sl.value
+        _month_ok = _tri_mc.groupby("pcode")["pct_annual"].min().reindex(_tri_ok.index, fill_value=0) >= month_pct_sl.value
+        for _pcode, _is_rainy in (_tri_ok & _month_ok).items():
+            _rows.append({"pcode": _pcode, "trimester": _tri, "is_rainy": bool(_is_rainy)})
+    _df_r = pd.DataFrame(_rows)
+    rainy_set = set(zip(_df_r[_df_r["is_rainy"]]["pcode"], _df_r[_df_r["is_rainy"]]["trimester"]))
     return (rainy_set,)
 
 
@@ -102,10 +121,10 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    severe_rp_sl     = mo.ui.slider(2,    10,   1,    3,    label="Severe RP (yr)")
-    very_severe_rp_sl = mo.ui.slider(5,   25,   1,    10,   label="Very severe RP (yr)")
-    r_mod_sl         = mo.ui.slider(0.10, 0.60, 0.05, 0.30, label="Moderate skill (r ≥)")
-    r_high_sl        = mo.ui.slider(0.20, 0.80, 0.05, 0.50, label="High skill (r ≥)")
+    severe_rp_sl      = mo.ui.slider(2,    10,   1,    3,    label="Severe RP (yr)")
+    very_severe_rp_sl = mo.ui.slider(5,    25,   1,    10,   label="Very severe RP (yr)")
+    r_mod_sl          = mo.ui.slider(0.10, 0.60, 0.05, 0.30, label="Moderate skill (r ≥)")
+    r_high_sl         = mo.ui.slider(0.20, 0.80, 0.05, 0.50, label="High skill (r ≥)")
     mo.hstack([severe_rp_sl, very_severe_rp_sl, r_mod_sl, r_high_sl], justify="start")
     return r_high_sl, r_mod_sl, severe_rp_sl, very_severe_rp_sl
 
@@ -196,12 +215,120 @@ def _(df_skill, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy
 
     _ax_r.set_xlabel("Forecast percentile among historical (0 = driest, 100 = wettest)")
     _ax_r.set_ylabel("Skill (Pearson r)")
-    _yr_r = int(_df_r["current_forecast_year"].dropna().iloc[0]) if not _df_r["current_forecast_year"].dropna().empty else "—"
+    _yr_r = int(_df_r["current_forecast_year"].dropna().max()) if not _df_r["current_forecast_year"].dropna().empty else "—"
     _ax_r.set_title(f"Severity × skill (Pearson r) — issued month {issued_month}, valid {trimester}, forecast year {_yr_r}")
     _ax_r.spines["top"].set_visible(False)
     _ax_r.spines["right"].set_visible(False)
     plt.tight_layout()
     _fig_r
+
+
+@app.cell
+def _(df_skill, issued_month, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
+    import matplotlib.patches as _mpatch_rp
+
+    _vsev_rp2 = very_severe_rp_sl.value
+    _sev_rp2  = severe_rp_sl.value
+    _r_mod2   = r_mod_sl.value
+    _r_high2  = r_high_sl.value
+
+    _C_DH2 = "#7B3A1A"
+    _C_DM2 = "#C8844A"
+    _C_FH2 = "#0D3B6B"
+    _C_FM2 = "#3D85C8"
+
+    def _cat_color2(pct, r):
+        _vsev    = pct <= (100 / _vsev_rp2) or pct >= 100 - (100 / _vsev_rp2)
+        _sev     = ((100 / _vsev_rp2) < pct <= (100 / _sev_rp2)) or (100 - (100 / _sev_rp2) <= pct < 100 - (100 / _vsev_rp2))
+        _drought = pct < 50
+        if _vsev and r >= _r_high2:
+            return _C_DH2 if _drought else _C_FH2
+        if (_vsev and r >= _r_mod2) or (_sev and r >= _r_high2):
+            return _C_DM2 if _drought else _C_FM2
+        return "#444444"
+
+    _df_rp = df_skill[
+        (df_skill["issued_month"] == issued_month)
+        & (df_skill["trimester"] == trimester)
+        & df_skill["forecast_percentile"].notna()
+        & df_skill["pearson_r"].notna()
+        & df_skill["forecast_rp"].notna()
+        & df_skill["flood_rp"].notna()
+    ].copy()
+    if not rainy_only_sw.value:
+        _df_rp = _df_rp[_df_rp["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
+
+    _df_rp["_x"] = _df_rp.apply(
+        lambda row: -row["forecast_rp"] if row["forecast_percentile"] < 50 else row["flood_rp"],
+        axis=1,
+    )
+
+    _max_rp2 = max(
+        _df_rp["forecast_rp"].max() if not _df_rp.empty else _vsev_rp2,
+        _df_rp["flood_rp"].max()    if not _df_rp.empty else _vsev_rp2,
+        _vsev_rp2,
+    )
+    _xlim2 = _max_rp2 + 2
+
+    _fig_rp, _ax_rp = plt.subplots(figsize=(9, 5.5), dpi=150)
+    _ax_rp.set_xlim(-_xlim2, _xlim2)
+    _ax_rp.set_ylim(0, 1.0)
+
+    # drought shading (left)
+    _ax_rp.add_patch(_mpatch_rp.Rectangle((-_xlim2, _r_high2), _xlim2 - _vsev_rp2, 1.0 - _r_high2,          facecolor=_C_DH2, alpha=0.20, zorder=0, linewidth=0))
+    _ax_rp.add_patch(_mpatch_rp.Rectangle((-_xlim2, _r_mod2),  _xlim2 - _vsev_rp2, _r_high2 - _r_mod2,      facecolor=_C_DM2, alpha=0.20, zorder=0, linewidth=0))
+    _ax_rp.add_patch(_mpatch_rp.Rectangle((-_vsev_rp2, _r_high2), _vsev_rp2 - _sev_rp2, 1.0 - _r_high2,     facecolor=_C_DM2, alpha=0.20, zorder=0, linewidth=0))
+
+    # flood shading (right)
+    _ax_rp.add_patch(_mpatch_rp.Rectangle((_vsev_rp2, _r_high2), _xlim2 - _vsev_rp2, 1.0 - _r_high2,         facecolor=_C_FH2, alpha=0.20, zorder=0, linewidth=0))
+    _ax_rp.add_patch(_mpatch_rp.Rectangle((_vsev_rp2, _r_mod2),  _xlim2 - _vsev_rp2, _r_high2 - _r_mod2,     facecolor=_C_FM2, alpha=0.20, zorder=0, linewidth=0))
+    _ax_rp.add_patch(_mpatch_rp.Rectangle((_sev_rp2, _r_high2),  _vsev_rp2 - _sev_rp2, 1.0 - _r_high2,       facecolor=_C_FM2, alpha=0.20, zorder=0, linewidth=0))
+
+    # threshold lines
+    for _xv2 in [-_vsev_rp2, -_sev_rp2, _sev_rp2, _vsev_rp2]:
+        _ax_rp.axvline(_xv2, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=1)
+    for _yv2 in [_r_mod2, _r_high2]:
+        _ax_rp.axhline(_yv2, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=1)
+
+    # RP=1 center split band
+    _ax_rp.axvspan(-1, 1, color="#EEEEEE", zorder=0)
+    _ax_rp.axvline(0, color="#BBBBBB", linewidth=0.6, zorder=1)
+
+    # threshold labels
+    _ax_rp.text(-_vsev_rp2, 0.98, f"{_vsev_rp2}yr", ha="center", va="top", fontsize=8, color="#666")
+    _ax_rp.text(-_sev_rp2,  0.98, f"{_sev_rp2}yr",  ha="center", va="top", fontsize=8, color="#666")
+    _ax_rp.text( _sev_rp2,  0.98, f"{_sev_rp2}yr",  ha="center", va="top", fontsize=8, color="#666")
+    _ax_rp.text( _vsev_rp2, 0.98, f"{_vsev_rp2}yr", ha="center", va="top", fontsize=8, color="#666")
+    _ax_rp.text(-_xlim2 + 0.5, _r_mod2 + 0.01,  f"r = {_r_mod2:.2f}",  ha="left", va="bottom", fontsize=8, color="#666")
+    _ax_rp.text(-_xlim2 + 0.5, _r_high2 + 0.01, f"r = {_r_high2:.2f}", ha="left", va="bottom", fontsize=8, color="#666")
+    _ax_rp.text(-_xlim2 * 0.7, 0.01, "← drought", ha="center", va="bottom", fontsize=8, color="#999", style="italic")
+    _ax_rp.text( _xlim2 * 0.7, 0.01, "flood →",   ha="center", va="bottom", fontsize=8, color="#999", style="italic")
+
+    for _, _row_rp in _df_rp.iterrows():
+        _pct2  = _row_rp["forecast_percentile"]
+        _r2    = _row_rp["pearson_r"]
+        _iso2  = _row_rp["iso3"]
+        _col2  = _cat_color2(_pct2, _r2)
+        _x2    = _row_rp["_x"]
+        if _r2 >= 0:
+            _ax_rp.text(_x2, _r2, _iso2, ha="center", va="center",
+                        color=_col2, fontsize=9, fontweight="bold", zorder=4)
+        else:
+            _ax_rp.text(_x2, 0.025, _iso2, ha="center", va="bottom",
+                        color=_col2, fontsize=9, fontweight="bold", zorder=4)
+            _ax_rp.annotate("", xy=(_x2, 0.002), xytext=(_x2, 0.022),
+                            arrowprops=dict(arrowstyle="-|>", color=_col2,
+                                           lw=0.9, mutation_scale=6), zorder=4)
+
+    _ax_rp.set_xlabel("← Drought RP (yr)   |   Flood RP (yr) →")
+    _ax_rp.set_ylabel("Skill (Pearson r)")
+    _ax_rp.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: str(int(abs(x)))))
+    _yr_rp = int(_df_rp["current_forecast_year"].dropna().max()) if not _df_rp["current_forecast_year"].dropna().empty else "—"
+    _ax_rp.set_title(f"Severity × skill (RP) — issued month {issued_month}, valid {trimester}, forecast year {_yr_rp}")
+    _ax_rp.spines["top"].set_visible(False)
+    _ax_rp.spines["right"].set_visible(False)
+    plt.tight_layout()
+    _fig_rp
 
 
 @app.cell
@@ -236,12 +363,21 @@ def _(calendar, df_skill, issued_month, pd, r_high_sl, r_mod_sl, rainy_set, seve
 
     _iso3_cat: dict[str, str] = {}
     _iso3_name: dict[str, str] = {}
+    _iso3_r: dict[str, float] = {}
+    _iso3_drp: dict[str, float] = {}
+    _iso3_frp: dict[str, float] = {}
     for _, _rm in _df_m_all.iterrows():
         _pcode = _rm["pcode"]
         if _pcode not in _monitored_pcodes:
             continue
         _iso3_code = _pcode_to_iso3[_pcode]
         _iso3_name[_iso3_code] = _rm.get("country_name", _iso3_code)
+        if pd.notna(_rm.get("pearson_r")):
+            _iso3_r[_iso3_code]   = float(_rm["pearson_r"])
+        if pd.notna(_rm.get("forecast_rp")):
+            _iso3_drp[_iso3_code] = float(_rm["forecast_rp"])
+        if pd.notna(_rm.get("flood_rp")):
+            _iso3_frp[_iso3_code] = float(_rm["flood_rp"])
         if (_pcode, trimester) not in rainy_set:
             _iso3_cat[_iso3_code] = "off_season"
         elif pd.notna(_rm.get("forecast_percentile")) and pd.notna(_rm.get("pearson_r")):
@@ -269,7 +405,12 @@ def _(calendar, df_skill, issued_month, pd, r_high_sl, r_mod_sl, rainy_set, seve
 
     # Only include monitored countries; unmonitored are invisible (showland=False)
     _df_map = pd.DataFrame([
-        {"iso3": k, "cat": v, "name": _iso3_name.get(k, k)}
+        {
+            "iso3": k, "cat": v, "name": _iso3_name.get(k, k),
+            "Skill (r)":       _iso3_r.get(k),
+            "Drought RP (yr)": _iso3_drp.get(k),
+            "Flood RP (yr)":   _iso3_frp.get(k),
+        }
         for k, v in _iso3_cat.items()
     ])
 
@@ -291,7 +432,12 @@ def _(calendar, df_skill, issued_month, pd, r_high_sl, r_mod_sl, rainy_set, seve
         color_discrete_map=_CMAP,
         category_orders={"cat": _ORDER},
         hover_name="name",
-        hover_data={"iso3": True, "cat": False},
+        hover_data={
+            "iso3": True, "cat": False,
+            "Skill (r)": ":.2f",
+            "Drought RP (yr)": ":.1f",
+            "Flood RP (yr)": ":.1f",
+        },
         projection="robinson",
         title=f"Alert map — {_month_name} issued, {trimester} valid",
     )
@@ -440,42 +586,83 @@ def _(pcode_dd):
 
 
 @app.cell
-def _(TRIMESTER_NAMES, df_paired, df_skill, np, pcode, plt, trimester):
-    _df_clim = (
-        df_paired[df_paired["pcode"] == pcode]
-        .dropna(subset=["obs_mean"])
-        .drop_duplicates(["trimester", "season_year"])
-        .assign(obs_orig=lambda d: np.expm1(d["obs_mean"]))
-        .groupby("trimester")["obs_orig"]
-        .mean()
-        .reindex(TRIMESTER_NAMES)
-        .reset_index()
-        .rename(columns={"obs_orig": "mean_mm_day"})
-    )
-    _annual = _df_clim["mean_mm_day"].sum()
-    _is_rainy = (
-        {row["trimester"]: (3 * row["mean_mm_day"] / _annual >= 0.25)
-         for _, row in _df_clim.iterrows()}
-        if _annual > 0 else {}
-    )
+def _(mo):
+    trimester_pct_sl = mo.ui.slider(0.10, 0.50, 0.05, 0.25, label="Rainy: trimester ≥ X of annual")
+    month_pct_sl     = mo.ui.slider(0.00, 0.20, 0.01, 0.05, label="Rainy: each month ≥ X of annual")
+    mo.hstack([trimester_pct_sl, month_pct_sl], justify="start")
+    return month_pct_sl, trimester_pct_sl
+
+
+@app.cell
+def _(TRIMESTER_NAMES, TRIMESTERS, df_skill, monthly_clim, pd, pcode, plt, rainy_set, trimester, trimester_pct_sl):
+    _mc_p = monthly_clim[monthly_clim["pcode"] == pcode].set_index("month")["mean_mm_day"]
+    _df_clim = pd.DataFrame([
+        {"trimester": _tri, "mean_mm_day": _mc_p.reindex(_months).mean()}
+        for _tri, _months in TRIMESTERS.items()
+    ]).set_index("trimester").reindex(TRIMESTER_NAMES).reset_index()
     _country = (
         df_skill[df_skill["pcode"] == pcode]["country_name"].iloc[0]
         if not df_skill[df_skill["pcode"] == pcode].empty else pcode
     )
+    _annual_tri = _mc_p.sum()
+    _tri_thresh_line = _annual_tri * trimester_pct_sl.value / 3
     _face_colors = ["rebeccapurple" if t == trimester else "lightgrey" for t in _df_clim["trimester"]]
-    _edge_colors = ["royalblue" if _is_rainy.get(t, False) else "none" for t in _df_clim["trimester"]]
+    _edge_colors = ["royalblue" if (pcode, t) in rainy_set else "none" for t in _df_clim["trimester"]]
     _fig_clim2, _ax = plt.subplots(figsize=(10, 4), dpi=150)
     _ax.bar(
         _df_clim["trimester"], _df_clim["mean_mm_day"],
         color=_face_colors, edgecolor=_edge_colors, linewidth=2.5,
     )
-    _ax.set_xlabel("Trimester  (blue outline = rainy season, ≥25% of annual rainfall)")
+    _ax.axhline(_tri_thresh_line, color="#E55", linewidth=1.2, linestyle="--",
+                label=f"Trimester threshold ({trimester_pct_sl.value:.0%} of annual ÷ 3 = {_tri_thresh_line:.2f} mm/day)")
+    _ax.legend(fontsize=8, loc="upper right")
+    _ax.set_xlabel("Trimester  (blue outline = rainy season per current thresholds)")
     _ax.set_ylabel("Mean daily rainfall (mm/day) [ERA5]")
     _ax.set_title(f"{_country} — ERA5 trimester climatology (selected trimester highlighted)")
     _ax.spines["top"].set_visible(False)
     _ax.spines["right"].set_visible(False)
     plt.tight_layout()
     _fig_clim2
+
+
+@app.cell
+def _(TRIMESTERS, df_skill, month_pct_sl, monthly_clim, pcode, plt, trimester, trimester_pct_sl):
+    _country2 = (
+        df_skill[df_skill["pcode"] == pcode]["country_name"].iloc[0]
+        if not df_skill[df_skill["pcode"] == pcode].empty else pcode
+    )
+
+    _mc = monthly_clim[monthly_clim["pcode"] == pcode].set_index("month")["mean_mm_day"]
+    _annual2 = _mc.sum()
+    _mon_thresh2 = month_pct_sl.value
+    _tri_thresh2 = trimester_pct_sl.value
+    _tri_months = set(TRIMESTERS[trimester])
+
+    _mon_ok = {m: (_mc.get(m, 0) / _annual2 >= _mon_thresh2) for m in range(1, 13)}
+
+    _tri_is_rainy = {}
+    for _tri, _months in TRIMESTERS.items():
+        _tri_mean = _mc.reindex(_months).mean()
+        _tri_is_rainy[_tri] = (3 * _tri_mean / _annual2 >= _tri_thresh2) and all(_mon_ok.get(m, False) for m in _months)
+
+    _mon_labels = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    _heights = [_mc.get(m, 0) for m in range(1, 13)]
+    _face_c = ["rebeccapurple" if m in _tri_months else "lightgrey" for m in range(1, 13)]
+    _edge_c = ["royalblue" if _mon_ok[m] else "none" for m in range(1, 13)]
+
+    _fig_mon, _ax_mon = plt.subplots(figsize=(10, 3.5), dpi=150)
+    _ax_mon.bar(_mon_labels, _heights, color=_face_c, edgecolor=_edge_c, linewidth=2.5)
+    _thresh_line = _mon_thresh2 * _annual2
+    _ax_mon.axhline(_thresh_line, color="#E55", linewidth=1.2, linestyle="--",
+                    label=f"Monthly threshold ({_mon_thresh2:.0%} of annual = {_thresh_line:.2f} mm/day)")
+    _ax_mon.legend(fontsize=8, loc="upper right")
+    _ax_mon.set_xlabel("Month  (blue outline = meets monthly threshold; purple = in selected trimester)")
+    _ax_mon.set_ylabel("Mean daily rainfall (mm/day)")
+    _ax_mon.set_title(f"{_country2} — ERA5 monthly climatology  |  Selected trimester ({trimester}): {'rainy ✓' if _tri_is_rainy.get(trimester) else 'not rainy ✗'}")
+    _ax_mon.spines["top"].set_visible(False)
+    _ax_mon.spines["right"].set_visible(False)
+    plt.tight_layout()
+    _fig_mon
 
 
 @app.cell
@@ -570,94 +757,11 @@ def _(
     _fig_scatter2
 
 
-@app.cell
-def _(df_roc_auc, df_skill, issued_month, mo, pd, plt, rainy_only_sw, rainy_set, trimester):
-    import matplotlib.patches as _mpatch
-
-    _df = (
-        df_skill[
-            (df_skill["issued_month"] == issued_month)
-            & (df_skill["trimester"] == trimester)
-            & df_skill["forecast_percentile"].notna()
-        ]
-        .merge(df_roc_auc, on=["pcode", "issued_month", "trimester"], how="left")
-        .copy()
-    )
-    if not rainy_only_sw.value:
-        _df = _df[_df["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
-
-    def _select_auc(row):
-        p = row["forecast_percentile"]
-        if pd.isna(p):
-            return float("nan")
-        if p <= 10:
-            return row["roc_auc_10yr"]
-        elif p <= 100 / 3:
-            return row["roc_auc_3yr"]
-        elif p >= 90:
-            return row["roc_auc_10yr_upper"]
-        elif p >= 200 / 3:
-            return row["roc_auc_3yr_upper"]
-        return row["roc_auc_3yr"]
-
-    _df["_auc"] = _df.apply(_select_auc, axis=1)
-    _df_plot = _df.dropna(subset=["_auc"])
-
-    _fig, _ax = plt.subplots(figsize=(9, 5.5), dpi=150)
-    _ax.set_xlim(-2, 102)
-    _ax.set_ylim(-0.04, 1.08)
-
-    # --- drought shading (left) ---
-    _ax.add_patch(_mpatch.Rectangle((-2, 0.7), 12, 0.38,             facecolor="#dc143c", alpha=0.18, zorder=0, linewidth=0))
-    _ax.add_patch(_mpatch.Rectangle((-2, 0.6), 12, 0.1,              facecolor="#ff8c00", alpha=0.18, zorder=0, linewidth=0))
-    _ax.add_patch(_mpatch.Rectangle((10, 0.7), 100/3 - 10, 0.38,    facecolor="#ff8c00", alpha=0.18, zorder=0, linewidth=0))
-
-    # --- flood shading (right) ---
-    _ax.add_patch(_mpatch.Rectangle((90, 0.7), 12, 0.38,             facecolor="#dc143c", alpha=0.18, zorder=0, linewidth=0))
-    _ax.add_patch(_mpatch.Rectangle((90, 0.6), 12, 0.1,              facecolor="#ff8c00", alpha=0.18, zorder=0, linewidth=0))
-    _ax.add_patch(_mpatch.Rectangle((200/3, 0.7), 90 - 200/3, 0.38, facecolor="#ff8c00", alpha=0.18, zorder=0, linewidth=0))
-
-    for _xv in [10, 100/3, 200/3, 90]:
-        _ax.axvline(_xv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=1)
-    for _yv in [0.6, 0.7]:
-        _ax.axhline(_yv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=1)
-
-    _ax.text(10,    1.05, "10yr", ha="center", va="bottom", fontsize=8, color="#666")
-    _ax.text(100/3, 1.05, "3yr",  ha="center", va="bottom", fontsize=8, color="#666")
-    _ax.text(200/3, 1.05, "3yr",  ha="center", va="bottom", fontsize=8, color="#666")
-    _ax.text(90,    1.05, "10yr", ha="center", va="bottom", fontsize=8, color="#666")
-    _ax.text(1, 0.605, "AUC 0.6", ha="left", va="bottom", fontsize=8, color="#666")
-    _ax.text(1, 0.705, "AUC 0.7", ha="left", va="bottom", fontsize=8, color="#666")
-    _ax.text(5,  0.02, "← drought", ha="center", va="bottom", fontsize=8, color="#999", style="italic")
-    _ax.text(95, 0.02, "flood →",   ha="center", va="bottom", fontsize=8, color="#999", style="italic")
-
-    _ax.scatter(
-        _df_plot["forecast_percentile"], _df_plot["_auc"],
-        s=72, zorder=4, edgecolors="#333", linewidths=0.5, color="#4c72b0",
-    )
-    for _, _r in _df_plot.iterrows():
-        _ax.annotate(
-            _r["country_name"].split(" ")[0],
-            (_r["forecast_percentile"], _r["_auc"]),
-            xytext=(5, 3), textcoords="offset points", fontsize=9,
-        )
-
-    _ax.set_xlabel("Forecast percentile among historical (0 = driest, 100 = wettest)")
-    _ax.set_ylabel("Skill (ROC-AUC)")
-    _forecast_year = int(_df["current_forecast_year"].dropna().iloc[0]) if not _df["current_forecast_year"].dropna().empty else "—"
-    _ax.set_title(f"Severity × skill — issued month {issued_month}, valid {trimester}, forecast year {_forecast_year}")
-    _ax.spines["top"].set_visible(False)
-    _ax.spines["right"].set_visible(False)
-    plt.tight_layout()
-
-    mo.accordion({
-        "ROC-AUC skill plot  (pre-calculated at fixed 3yr / 10yr RP — not affected by sliders above)": _fig
-    })
 
 
 @app.cell
 def _(PROJECT_PREFIX, stratus):
-    # Loaded separately so the deterministic section above renders before this completes.
+    # Loaded here so the deterministic section above renders before this completes.
     df_paired = stratus.load_parquet_from_blob(
         f"{PROJECT_PREFIX}/processed/paired_yearly.parquet", stage="dev"
     )

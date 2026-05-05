@@ -1,8 +1,8 @@
+import argparse
 import json
 import sys
 from pathlib import Path
 
-import numpy as np
 import ocha_stratus as stratus
 import pandas as pd
 from tqdm import tqdm
@@ -16,29 +16,12 @@ from src.skill import run_all_combinations
 
 SKILL_BLOB = f"{PROJECT_PREFIX}/processed/skill_stats.parquet"
 PAIRED_BLOB = f"{PROJECT_PREFIX}/processed/paired_yearly.parquet"
-RAINY_BLOB = f"{PROJECT_PREFIX}/processed/rainy_pairs.parquet"
 
 CHECKPOINT_DIR = Path(__file__).parent / ".checkpoint"
 COMPLETED_FILE = CHECKPOINT_DIR / "completed.json"
 SKILL_PARTIAL = CHECKPOINT_DIR / "skill_partial.parquet"
 PAIRED_PARTIAL = CHECKPOINT_DIR / "paired_partial.parquet"
 SAVE_EVERY = 10  # checkpoint after this many countries
-
-
-def _compute_rainy_pairs(df_paired: pd.DataFrame) -> pd.DataFrame:
-    """Classify each (pcode, trimester) as rainy (≥25% of annual rainfall)."""
-    clim = (
-        df_paired.dropna(subset=["obs_mean"])
-        .drop_duplicates(["pcode", "trimester", "season_year"])
-        .assign(obs_orig=lambda d: np.expm1(d["obs_mean"]))
-        .groupby(["pcode", "trimester"])["obs_orig"]
-        .mean()
-        .reset_index(name="mean_mm_day")
-    )
-    annual = clim.groupby("pcode")["mean_mm_day"].sum().rename("annual")
-    clim = clim.merge(annual.reset_index(), on="pcode")
-    clim["is_rainy"] = 3 * clim["mean_mm_day"] / clim["annual"] >= 0.25
-    return clim[["pcode", "trimester", "is_rainy"]]
 
 
 def _load_checkpoint() -> tuple[set[str], list[pd.DataFrame], list[pd.DataFrame]]:
@@ -51,11 +34,7 @@ def _load_checkpoint() -> tuple[set[str], list[pd.DataFrame], list[pd.DataFrame]
     return completed, all_skill, all_paired
 
 
-def _save_checkpoint(
-    completed: set[str],
-    all_skill: list[pd.DataFrame],
-    all_paired: list[pd.DataFrame],
-) -> None:
+def _save_checkpoint(completed: set[str], all_skill: list[pd.DataFrame], all_paired: list[pd.DataFrame]) -> None:
     CHECKPOINT_DIR.mkdir(exist_ok=True)
     COMPLETED_FILE.write_text(json.dumps(sorted(completed)))
     if all_skill:
@@ -75,7 +54,63 @@ def _clear_checkpoint() -> None:
             pass
 
 
+def _run_targeted(pcodes: list[str]) -> None:
+    """Recompute only the specified pcodes and merge with existing blob data."""
+    tqdm.write(f"Targeted rerun for: {pcodes}")
+    engine = stratus.get_engine("prod")
+
+    with engine.connect() as conn:
+        placeholders = ",".join(["%s"] * len(pcodes))
+        df_adm0 = pd.read_sql(
+            f"SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=0 AND pcode IN ({placeholders})",
+            conn,
+            params=tuple(pcodes),
+        )
+
+    df_skill_base = stratus.load_parquet_from_blob(SKILL_BLOB)
+    df_paired_base = stratus.load_parquet_from_blob(PAIRED_BLOB)
+    df_skill_base = df_skill_base[~df_skill_base["pcode"].isin(pcodes)]
+    df_paired_base = df_paired_base[~df_paired_base["pcode"].isin(pcodes)]
+    all_skill, all_paired = [df_skill_base], [df_paired_base]
+
+    for _, adm0_row in tqdm(df_adm0.iterrows(), total=len(df_adm0), desc="pcodes"):
+        pcode = adm0_row["pcode"]
+        iso3 = adm0_row["iso3"]
+        country_name = adm0_row["name"]
+        df_seas5 = load_seas5(pcode)
+        df_era5 = load_era5(pcode)
+        if df_seas5.empty and df_era5.empty:
+            tqdm.write(f"  {country_name} ({pcode}): no data, skipping")
+            continue
+        tqdm.write(f"\n{country_name} ({pcode}): SEAS5 {len(df_seas5):,} rows | ERA5 {len(df_era5):,} rows")
+        with tqdm(total=144, desc=pcode, leave=False) as pbar:
+            df_skill, df_paired = run_all_combinations(
+                pcode, iso3, country_name, df_seas5, df_era5, progress=pbar
+            )
+        all_skill.append(df_skill)
+        all_paired.append(df_paired)
+
+    df_skill_all = pd.concat(all_skill, ignore_index=True)
+    df_paired_all = pd.concat(all_paired, ignore_index=True)
+    tqdm.write(f"\nSaving skill stats  ({len(df_skill_all):,} rows) -> {SKILL_BLOB}")
+    stratus.upload_parquet_to_blob(df_skill_all, SKILL_BLOB, stage="dev")
+    tqdm.write(f"Saving paired yearly ({len(df_paired_all):,} rows) -> {PAIRED_BLOB}")
+    stratus.upload_parquet_to_blob(df_paired_all, PAIRED_BLOB, stage="dev")
+    tqdm.write("Done.")
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--pcodes", nargs="+", metavar="PCODE",
+        help="Recompute only these pcodes and merge with existing blob data",
+    )
+    args = parser.parse_args()
+
+    if args.pcodes:
+        _run_targeted(args.pcodes)
+        return
+
     engine = stratus.get_engine("prod")
 
     # Load all ADM0 entries from polygon table
@@ -122,16 +157,10 @@ def main() -> None:
 
     df_skill_all = pd.concat(all_skill, ignore_index=True)
     df_paired_all = pd.concat(all_paired, ignore_index=True)
-
     tqdm.write(f"\nSaving skill stats  ({len(df_skill_all):,} rows) -> {SKILL_BLOB}")
     stratus.upload_parquet_to_blob(df_skill_all, SKILL_BLOB, stage="dev")
-
     tqdm.write(f"Saving paired yearly ({len(df_paired_all):,} rows) -> {PAIRED_BLOB}")
     stratus.upload_parquet_to_blob(df_paired_all, PAIRED_BLOB, stage="dev")
-
-    df_rainy = _compute_rainy_pairs(df_paired_all)
-    tqdm.write(f"Saving rainy pairs   ({len(df_rainy):,} rows) -> {RAINY_BLOB}")
-    stratus.upload_parquet_to_blob(df_rainy, RAINY_BLOB, stage="dev")
 
     _clear_checkpoint()
     tqdm.write("Done.")
