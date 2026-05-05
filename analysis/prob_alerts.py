@@ -31,31 +31,19 @@ def _(PROJECT_PREFIX, stratus):
     df_skill = stratus.load_parquet_from_blob(
         f"{PROJECT_PREFIX}/processed/skill_stats.parquet", stage="dev"
     )
-    df_paired = stratus.load_parquet_from_blob(
-        f"{PROJECT_PREFIX}/processed/paired_yearly.parquet", stage="dev"
+    df_rainy = stratus.load_parquet_from_blob(
+        f"{PROJECT_PREFIX}/processed/rainy_pairs.parquet", stage="dev"
     )
     df_roc_auc = stratus.load_parquet_from_blob(
         f"{PROJECT_PREFIX}/processed/roc_auc_stats.parquet", stage="dev"
     )
-    return df_paired, df_roc_auc, df_skill
+    return df_rainy, df_roc_auc, df_skill
 
 
 @app.cell
-def _(df_paired, np):
-    # Precompute which (pcode, trimester) pairs are "rainy" (≥25% of annual rainfall).
-    _clim = (
-        df_paired.dropna(subset=["obs_mean"])
-        .drop_duplicates(["pcode", "trimester", "season_year"])
-        .assign(obs_orig=lambda d: np.expm1(d["obs_mean"]))
-        .groupby(["pcode", "trimester"])["obs_orig"]
-        .mean()
-        .reset_index(name="mean_mm_day")
-    )
-    _annual = _clim.groupby("pcode")["mean_mm_day"].sum().rename("annual")
-    _clim = _clim.merge(_annual.reset_index(), on="pcode")
-    _clim["is_rainy"] = 3 * _clim["mean_mm_day"] / _clim["annual"] >= 0.25
+def _(df_rainy):
     rainy_set = set(
-        zip(_clim[_clim["is_rainy"]]["pcode"], _clim[_clim["is_rainy"]]["trimester"])
+        zip(df_rainy[df_rainy["is_rainy"]]["pcode"], df_rainy[df_rainy["is_rainy"]]["trimester"])
     )
     return (rainy_set,)
 
@@ -110,12 +98,6 @@ def _(mo):
 @app.cell
 def _(df_skill, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, show_all, trimester, very_severe_rp_sl):
     import matplotlib.patches as _mpatch_r
-    import re as _re
-
-    _ISO3 = {
-        "ET": "ETH", "SO": "SOM", "SD": "SDN", "NE": "NER", "SS": "SSD",
-        "KE": "KEN", "BF": "BFA", "MR": "MRT", "GT": "GTM", "HN": "HND",
-    }
 
     _df_r = df_skill[
         (df_skill["issued_month"] == issued_month)
@@ -178,8 +160,7 @@ def _(df_skill, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp
     for _, _row_r in _df_r.iterrows():
         _pct   = _row_r["forecast_percentile"]
         _r_val = _row_r["pearson_r"]
-        _iso2  = _re.sub(r"\d", "", _row_r["pcode"]).upper()
-        _iso   = _ISO3.get(_iso2, _iso2)
+        _iso   = _row_r["iso3"]
         _col   = _cat_color(_pct, _r_val)
         if _r_val >= 0:
             _ax_r.text(_pct, _r_val, _iso, ha="center", va="center",
@@ -202,39 +183,8 @@ def _(df_skill, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp
 
 
 @app.cell
-def _():
-    import geopandas as _gpd_geo
-    import pooch as _pooch
-
-    _path = _pooch.retrieve(
-        url="https://naturalearth.s3.amazonaws.com/110m_cultural/ne_110m_admin_0_countries.zip",
-        known_hash=None,
-        path=_pooch.os_cache("ds-seas5-skill"),
-        fname="ne_110m_admin_0_countries.zip",
-    )
-    map_world = _gpd_geo.read_file(_path)[["ISO_A3", "ADMIN", "geometry"]]
-    return (map_world,)
-
-
-@app.cell
-def _(calendar, df_skill, issued_month, map_world, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, show_all, trimester, very_severe_rp_sl):
+def _(calendar, df_skill, issued_month, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
     import plotly.express as _px
-    import re as _re_m
-
-    _ISO3_m = {
-        "ET": "ETH", "SO": "SOM", "SD": "SDN", "NE": "NER", "SS": "SSD",
-        "KE": "KEN", "BF": "BFA", "MR": "MRT", "GT": "GTM", "HN": "HND",
-    }
-    _ALL_TARGETS = set(_ISO3_m.values())
-
-    _df_m = df_skill[
-        (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
-        & df_skill["forecast_percentile"].notna()
-        & df_skill["pearson_r"].notna()
-    ].copy()
-    if not show_all:
-        _df_m = _df_m[_df_m["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
 
     _vsev_m  = 100 / very_severe_rp_sl.value
     _sev_m   = 100 / severe_rp_sl.value
@@ -251,47 +201,61 @@ def _(calendar, df_skill, issued_month, map_world, pd, r_high_sl, r_mod_sl, rain
             return "drought_high" if _d else "flood_high"
         if (_vsev and r >= _rmod_m) or (_sev and r >= _rhigh_m):
             return "drought_mod" if _d else "flood_mod"
-        return "neutral"
+        return "no_alert"
 
-    _iso3_cat = {}
-    for _, _rm in _df_m.iterrows():
-        _i2 = _re_m.sub(r"\d", "", _rm["pcode"]).upper()
-        _iso3_cat[_ISO3_m.get(_i2, _i2)] = _mcat(
-            _rm["forecast_percentile"], _rm["pearson_r"]
-        )
+    # pcode→iso3 and pcode→name from df_skill (covers all monitored countries)
+    _pcode_to_iso3 = df_skill.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
+    _monitored_pcodes = set(_pcode_to_iso3.keys())
+
+    _df_m_all = df_skill[
+        (df_skill["issued_month"] == issued_month)
+        & (df_skill["trimester"] == trimester)
+    ].copy()
+
+    _iso3_cat: dict[str, str] = {}
+    _iso3_name: dict[str, str] = {}
+    for _, _rm in _df_m_all.iterrows():
+        _pcode = _rm["pcode"]
+        if _pcode not in _monitored_pcodes:
+            continue
+        _iso3_code = _pcode_to_iso3[_pcode]
+        _iso3_name[_iso3_code] = _rm.get("country_name", _iso3_code)
+        if (_pcode, trimester) not in rainy_set:
+            _iso3_cat[_iso3_code] = "off_season"
+        elif pd.notna(_rm.get("forecast_percentile")) and pd.notna(_rm.get("pearson_r")):
+            _iso3_cat[_iso3_code] = _mcat(_rm["forecast_percentile"], _rm["pearson_r"])
+        else:
+            _iso3_cat[_iso3_code] = "no_alert"
 
     _CMAP = {
         "drought_high": "#8B2200",
         "drought_mod":  "#D4640A",
         "flood_high":   "#0047CC",
         "flood_mod":    "#4D92E8",
-        "neutral":      "#DEDEDE",
-        "other":        "#FFFFFF",
+        "no_alert":     "#FFFFFF",
+        "off_season":   "#CCCCCC",
     }
     _LABELS = {
         "drought_high": f"Drought: ≥{_vsev_yr}-yr RP + high skill",
         "drought_mod":  f"Drought: ≥{_vsev_yr}-yr RP + mod. skill, or ≥{_sev_yr}-yr RP + high skill",
         "flood_high":   f"Flood: ≥{_vsev_yr}-yr RP + high skill",
         "flood_mod":    f"Flood: ≥{_vsev_yr}-yr RP + mod. skill, or ≥{_sev_yr}-yr RP + high skill",
-        "neutral":      "No actionable alert",
-        "other":        "Not monitored",
+        "no_alert":     "Monitored — no alert",
+        "off_season":   "Monitored — off season",
     }
-    _ORDER = ["drought_high", "drought_mod", "flood_high", "flood_mod", "neutral", "other"]
+    _ORDER = ["drought_high", "drought_mod", "flood_high", "flood_mod", "no_alert", "off_season"]
 
-    _name_lkp = map_world.drop_duplicates("ISO_A3").set_index("ISO_A3")["ADMIN"].to_dict()
-    _valid = [c for c in map_world["ISO_A3"].unique() if len(c) == 3]
-    _df_map = pd.DataFrame({
-        "iso3": _valid,
-        "cat":  [_iso3_cat.get(c, "neutral" if c in _ALL_TARGETS else "other") for c in _valid],
-        "name": [_name_lkp.get(c, c) for c in _valid],
-    })
+    # Only include monitored countries; unmonitored are invisible (showland=False)
+    _df_map = pd.DataFrame([
+        {"iso3": k, "cat": v, "name": _iso3_name.get(k, k)}
+        for k, v in _iso3_cat.items()
+    ])
 
-    # Ensure every category has at least one row so the legend is always complete.
-    # Plotly silently ignores unrecognised ISO-3 codes so these won't appear on the map.
+    # Dummy rows for alert categories so legend is always complete
     _dummy = pd.DataFrame([
         {"iso3": f"Z{i:02d}", "cat": _cat, "name": ""}
         for i, _cat in enumerate(_ORDER)
-        if _cat not in _df_map["cat"].values
+        if len(_df_map) == 0 or _cat not in _df_map["cat"].values
     ])
     if not _dummy.empty:
         _df_map = pd.concat([_df_map, _dummy], ignore_index=True)
@@ -311,9 +275,10 @@ def _(calendar, df_skill, issued_month, map_world, pd, r_high_sl, r_mod_sl, rain
     )
     _fig_m.update_geos(
         showframe=False,
-        showcoastlines=True, coastlinecolor="#BBBBBB", coastlinewidth=0.4,
-        showland=True,  landcolor="#EFEFEF",
+        showland=False,
         showocean=True, oceancolor="white",
+        showcoastlines=True, coastlinecolor="#CCCCCC", coastlinewidth=0.3,
+        showcountries=True, countrycolor="#DDDDDD",
         showlakes=False,
         bgcolor="white",
     )
@@ -335,6 +300,70 @@ def _(calendar, df_skill, issued_month, map_world, pd, r_high_sl, r_mod_sl, rain
         _tr.name = _LABELS.get(_tr.name, _tr.name)
 
     _fig_m
+
+
+@app.cell
+def _(mo):
+    _r_bins = {"All": None, "r < 0.3": (None, 0.3), "0.3 ≤ r < 0.5": (0.3, 0.5), "r ≥ 0.5": (0.5, None)}
+    _rp_bins = {"All": None, "< 3-yr RP": (None, 3), "3–10-yr RP": (3, 10), "≥ 10-yr RP": (10, None)}
+    r_filter_dd  = mo.ui.dropdown(list(_r_bins), value="All", label="Filter by skill (r):")
+    rp_filter_dd = mo.ui.dropdown(list(_rp_bins), value="All", label="Filter by RP:")
+    mo.hstack([r_filter_dd, rp_filter_dd], justify="start")
+    return r_filter_dd, rp_filter_dd
+
+
+@app.cell
+def _(df_skill, issued_month, mo, pd, r_filter_dd, rainy_set, rp_filter_dd, trimester):
+    _r_bins = {"All": None, "r < 0.3": (None, 0.3), "0.3 ≤ r < 0.5": (0.3, 0.5), "r ≥ 0.5": (0.5, None)}
+    _rp_bins = {"All": None, "< 3-yr RP": (None, 3), "3–10-yr RP": (3, 10), "≥ 10-yr RP": (10, None)}
+
+    _df_t = df_skill[
+        (df_skill["issued_month"] == issued_month)
+        & (df_skill["trimester"] == trimester)
+        & df_skill["pearson_r"].notna()
+    ].copy()
+
+    _df_t["_in_season"] = _df_t["pcode"].apply(lambda p: (p, trimester) in rainy_set)
+
+    _r_range = _r_bins[r_filter_dd.value]
+    if _r_range is not None:
+        _lo, _hi = _r_range
+        if _lo is not None:
+            _df_t = _df_t[_df_t["pearson_r"] >= _lo]
+        if _hi is not None:
+            _df_t = _df_t[_df_t["pearson_r"] < _hi]
+
+    _rp_range = _rp_bins[rp_filter_dd.value]
+    if _rp_range is not None:
+        _df_t["_max_rp"] = _df_t[["forecast_rp", "flood_rp"]].max(axis=1)
+        _lo, _hi = _rp_range
+        if _lo is not None:
+            _df_t = _df_t[_df_t["_max_rp"] >= _lo]
+        if _hi is not None:
+            _df_t = _df_t[_df_t["_max_rp"] < _hi]
+
+    _display = (
+        _df_t[["country_name", "iso3", "_in_season", "pearson_r", "forecast_percentile", "forecast_rp", "flood_rp"]]
+        .rename(columns={
+            "country_name": "Country",
+            "iso3": "ISO3",
+            "_in_season": "In season",
+            "pearson_r": "Pearson r",
+            "forecast_percentile": "Forecast pctile",
+            "forecast_rp": "Drought RP (yr)",
+            "flood_rp": "Flood RP (yr)",
+        })
+        .assign(**{
+            "Pearson r": lambda d: d["Pearson r"].round(2),
+            "Forecast pctile": lambda d: d["Forecast pctile"].round(1),
+            "Drought RP (yr)": lambda d: d["Drought RP (yr)"].round(1),
+            "Flood RP (yr)": lambda d: d["Flood RP (yr)"].round(1),
+        })
+        .sort_values("Pearson r", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    mo.ui.table(_display, selection=None)
 
 
 @app.cell
@@ -420,6 +449,15 @@ def _(df_roc_auc, df_skill, issued_month, mo, pd, plt, rainy_set, show_all, trim
     mo.accordion({
         "ROC-AUC skill plot  (pre-calculated at fixed 3yr / 10yr RP — not affected by sliders above)": _fig
     })
+
+
+@app.cell
+def _(PROJECT_PREFIX, stratus):
+    # Loaded separately so the deterministic section above renders before this completes.
+    df_paired = stratus.load_parquet_from_blob(
+        f"{PROJECT_PREFIX}/processed/paired_yearly.parquet", stage="dev"
+    )
+    return (df_paired,)
 
 
 @app.cell

@@ -17,7 +17,3 @@ TRIMESTERS: dict[str, list[int]] = {
     "DJF": [12, 1, 2],
 }
 
-TARGET_ISO3S: list[str] = [
-    "ETH", "SOM", "SDN", "NER", "SSD",  # original 5
-    "KEN", "BFA", "MRT", "GTM", "HND",  # new 5
-]

@@ -137,6 +137,7 @@ def empirical_rp(
 
 def run_all_combinations(
     pcode: str,
+    iso3: str,
     country_name: str,
     df_seas5: pd.DataFrame,
     df_era5: pd.DataFrame,
@@ -199,6 +200,7 @@ def run_all_combinations(
             sigma_theoretical = None
             prob = None
             forecast_rp = None
+            flood_rp = None
             prob_rp = None
             forecast_percentile = None
             hist_probs_series: pd.Series = pd.Series(dtype=float)
@@ -233,6 +235,9 @@ def run_all_combinations(
                     forecast_rp = empirical_rp(
                         current_forecast_mean_log, hist_F, higher_is_more_extreme=False
                     )
+                    flood_rp = empirical_rp(
+                        current_forecast_mean_log, hist_F, higher_is_more_extreme=True
+                    )
                     if len(hist_probs_series) > 0:
                         prob_rp = empirical_rp(
                             prob, hist_probs_series.values, higher_is_more_extreme=True
@@ -248,6 +253,7 @@ def run_all_combinations(
                 yr = int(row["season_year"])
                 paired_rows.append({
                     "pcode": pcode,
+                    "iso3": iso3,
                     "country_name": country_name,
                     "issued_month": issued_month,
                     "trimester": trimester_name,
@@ -264,6 +270,7 @@ def run_all_combinations(
 
             skill_rows.append({
                 "pcode": pcode,
+                "iso3": iso3,
                 "country_name": country_name,
                 "issued_month": issued_month,
                 "trimester": trimester_name,
@@ -280,6 +287,7 @@ def run_all_combinations(
                 "is_predictive": is_predictive,
                 "prob_lower_tercile": prob,
                 "forecast_rp": forecast_rp,
+                "flood_rp": flood_rp,
                 "prob_rp": prob_rp,
                 "forecast_percentile": forecast_percentile,
             })
