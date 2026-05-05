@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(app_title="SEAS5 Skill — Probabilistic Drought Alerts")
+app = marimo.App(app_title="SEAS5 Skill — Probabilistic Drought Alerts", width="medium")
 
 
 @app.cell
@@ -23,7 +23,7 @@ def _():
     from src.constants import PROJECT_PREFIX, TRIMESTERS
 
     TRIMESTER_NAMES = list(TRIMESTERS.keys())
-    return PROJECT_PREFIX, TRIMESTER_NAMES
+    return PROJECT_PREFIX, TRIMESTER_NAMES, TRIMESTERS
 
 
 @app.cell
@@ -49,28 +49,43 @@ def _(df_rainy):
 
 
 @app.cell
-def _(TRIMESTER_NAMES, calendar, mo):
+def _(calendar, df_skill, mo):
+    _max_year = int(df_skill["current_forecast_year"].dropna().max())
+    _latest_month = int(
+        df_skill[df_skill["current_forecast_year"] == _max_year]["issued_month"].max()
+    )
+    _months_ordered = [((_latest_month - i - 1) % 12) + 1 for i in range(12)]
     issued_month_dd = mo.ui.dropdown(
-        options={calendar.month_abbr[m]: m for m in range(1, 13)},
+        options={calendar.month_abbr[m]: m for m in _months_ordered},
         label="Issued month:",
-        value=calendar.month_abbr[4],
+        value=calendar.month_abbr[_latest_month],
     )
-    trimester_dd = mo.ui.dropdown(
-        options=TRIMESTER_NAMES,
-        label="Valid trimester:",
-        value="JAS",
-    )
-    rainy_only_sw = mo.ui.switch(label="Show all countries", value=False)
-    mo.hstack([issued_month_dd, trimester_dd, rainy_only_sw], justify="start")
-    return issued_month_dd, rainy_only_sw, trimester_dd
+    return (issued_month_dd,)
 
 
 @app.cell
-def _(issued_month_dd, rainy_only_sw, trimester_dd):
+def _(TRIMESTERS, issued_month_dd, mo):
+    _im = issued_month_dd.value
+    valid_trimesters = [
+        name for name, months in TRIMESTERS.items()
+        if max((m - _im) % 12 for m in months) <= 6
+    ]
+    trimester_sl = mo.ui.slider(0, len(valid_trimesters) - 1, step=1, value=0)
+    return trimester_sl, valid_trimesters
+
+
+@app.cell
+def _(issued_month_dd, mo, trimester_sl, valid_trimesters):
     issued_month = issued_month_dd.value
-    trimester = trimester_dd.value
-    show_all = rainy_only_sw.value
-    return issued_month, show_all, trimester
+    trimester = valid_trimesters[trimester_sl.value]
+    mo.hstack([
+        issued_month_dd,
+        mo.vstack([
+            mo.md(f"Valid trimester: **{trimester}**"),
+            trimester_sl,
+        ], align="start"),
+    ], justify="start")
+    return issued_month, trimester
 
 
 @app.cell
@@ -96,7 +111,14 @@ def _(mo):
 
 
 @app.cell
-def _(df_skill, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, show_all, trimester, very_severe_rp_sl):
+def _(mo):
+    rainy_only_sw = mo.ui.switch(label="Show all countries (incl. off-season)", value=False)
+    rainy_only_sw
+    return (rainy_only_sw,)
+
+
+@app.cell
+def _(df_skill, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
     import matplotlib.patches as _mpatch_r
 
     _df_r = df_skill[
@@ -105,7 +127,7 @@ def _(df_skill, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp
         & df_skill["forecast_percentile"].notna()
         & df_skill["pearson_r"].notna()
     ].copy()
-    if not show_all:
+    if not rainy_only_sw.value:
         _df_r = _df_r[_df_r["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
 
     _vsev_pct = 100 / very_severe_rp_sl.value
@@ -284,7 +306,7 @@ def _(calendar, df_skill, issued_month, pd, r_high_sl, r_mod_sl, rainy_set, seve
     )
     _fig_m.update_layout(
         margin={"r": 0, "t": 36, "l": 0, "b": 110},
-        height=520,
+        height=650,
         legend=dict(
             orientation="h",
             x=0.5, y=-0.02,
@@ -303,71 +325,253 @@ def _(calendar, df_skill, issued_month, pd, r_high_sl, r_mod_sl, rainy_set, seve
 
 
 @app.cell
-def _(mo):
-    _r_bins = {"All": None, "r < 0.3": (None, 0.3), "0.3 ≤ r < 0.5": (0.3, 0.5), "r ≥ 0.5": (0.5, None)}
-    _rp_bins = {"All": None, "< 3-yr RP": (None, 3), "3–10-yr RP": (3, 10), "≥ 10-yr RP": (10, None)}
-    r_filter_dd  = mo.ui.dropdown(list(_r_bins), value="All", label="Filter by skill (r):")
-    rp_filter_dd = mo.ui.dropdown(list(_rp_bins), value="All", label="Filter by RP:")
-    mo.hstack([r_filter_dd, rp_filter_dd], justify="start")
-    return r_filter_dd, rp_filter_dd
+def _(df_skill, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
+    _vsev_pct = 100 / very_severe_rp_sl.value
+    _sev_pct  = 100 / severe_rp_sl.value
+    _r_mod    = r_mod_sl.value
+    _r_high   = r_high_sl.value
 
-
-@app.cell
-def _(df_skill, issued_month, mo, pd, r_filter_dd, rainy_set, rp_filter_dd, trimester):
-    _r_bins = {"All": None, "r < 0.3": (None, 0.3), "0.3 ≤ r < 0.5": (0.3, 0.5), "r ≥ 0.5": (0.5, None)}
-    _rp_bins = {"All": None, "< 3-yr RP": (None, 3), "3–10-yr RP": (3, 10), "≥ 10-yr RP": (10, None)}
+    _vsev_yr = very_severe_rp_sl.value
+    _sev_yr  = severe_rp_sl.value
 
     _df_t = df_skill[
         (df_skill["issued_month"] == issued_month)
         & (df_skill["trimester"] == trimester)
         & df_skill["pearson_r"].notna()
+        & df_skill["forecast_percentile"].notna()
     ].copy()
+    _df_t = _df_t[_df_t["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
 
-    _df_t["_in_season"] = _df_t["pcode"].apply(lambda p: (p, trimester) in rainy_set)
+    def _tier(pct, r):
+        _vsev = pct <= _vsev_pct or pct >= 100 - _vsev_pct
+        _sev  = (_vsev_pct < pct <= _sev_pct) or (100 - _sev_pct <= pct < 100 - _vsev_pct)
+        if _vsev and r >= _r_high: return 1   # very severe + high skill
+        if _vsev and r >= _r_mod:  return 2   # very severe + mod skill
+        if _sev  and r >= _r_high: return 3   # severe + high skill
+        return 0
 
-    _r_range = _r_bins[r_filter_dd.value]
-    if _r_range is not None:
-        _lo, _hi = _r_range
-        if _lo is not None:
-            _df_t = _df_t[_df_t["pearson_r"] >= _lo]
-        if _hi is not None:
-            _df_t = _df_t[_df_t["pearson_r"] < _hi]
+    _df_t["_tier"] = _df_t.apply(lambda r: _tier(r["forecast_percentile"], r["pearson_r"]), axis=1)
+    _df_t = _df_t[_df_t["_tier"] > 0].copy()
+    _df_t["_drought"] = _df_t["forecast_percentile"] < 50
 
-    _rp_range = _rp_bins[rp_filter_dd.value]
-    if _rp_range is not None:
-        _df_t["_max_rp"] = _df_t[["forecast_rp", "flood_rp"]].max(axis=1)
-        _lo, _hi = _rp_range
-        if _lo is not None:
-            _df_t = _df_t[_df_t["_max_rp"] >= _lo]
-        if _hi is not None:
-            _df_t = _df_t[_df_t["_max_rp"] < _hi]
+    # (drought, tier): (dark_color, light_color, bg)
+    _dark  = {True: "#7B3A1A", False: "#0D3B6B"}
+    _light = {True: "#C8844A", False: "#3D85C8"}
+    _bg    = {(True, 1): "#F9EDE8", (True, 2): "#FDF3EC", (True, 3): "#FDF3EC",
+              (False, 1): "#E8EEF9", (False, 2): "#ECF3FD", (False, 3): "#ECF3FD"}
 
-    _display = (
-        _df_t[["country_name", "iso3", "_in_season", "pearson_r", "forecast_percentile", "forecast_rp", "flood_rp"]]
-        .rename(columns={
-            "country_name": "Country",
-            "iso3": "ISO3",
-            "_in_season": "In season",
-            "pearson_r": "Pearson r",
-            "forecast_percentile": "Forecast pctile",
-            "forecast_rp": "Drought RP (yr)",
-            "flood_rp": "Flood RP (yr)",
-        })
-        .assign(**{
-            "Pearson r": lambda d: d["Pearson r"].round(2),
-            "Forecast pctile": lambda d: d["Forecast pctile"].round(1),
-            "Drought RP (yr)": lambda d: d["Drought RP (yr)"].round(1),
-            "Flood RP (yr)": lambda d: d["Flood RP (yr)"].round(1),
-        })
-        .sort_values("Pearson r", ascending=False)
-        .reset_index(drop=True)
-    )
+    def _html_table(df, drought: bool, rp_col: str, rp_label: str) -> str:
+        rows = df[df["_drought"] == drought].sort_values(
+            ["_tier", rp_col, "pearson_r"], ascending=[True, False, False]
+        )
+        if rows.empty:
+            return "<p style='color:#888;font-style:italic;margin:4px 0'>No alerts</p>"
+        html = (
+            "<table style='border-collapse:collapse;width:100%;font-size:13px'>"
+            "<thead><tr style='border-bottom:2px solid #ccc'>"
+            f"<th style='text-align:left;padding:5px 8px'>Country</th>"
+            f"<th style='text-align:left;padding:5px 8px'>ISO3</th>"
+            f"<th style='text-align:right;padding:5px 8px'>{rp_label}</th>"
+            f"<th style='text-align:right;padding:5px 8px'>Pearson r</th>"
+            "</tr></thead><tbody>"
+        )
+        for _, row in rows.iterrows():
+            tier  = int(row["_tier"])
+            dk    = _dark[drought]
+            lk    = _light[drought]
+            bg    = _bg[(drought, tier)]
+            rp_val = row[rp_col]
+            rp_str = f"{rp_val:.1f}" if pd.notna(rp_val) else "—"
+            r_str  = f"{row['pearson_r']:.2f}"
+            if tier == 1:
+                name_c, rp_c, r_c = dk, dk, dk
+            elif tier == 2:   # very severe + mod skill → highlight RP
+                name_c, rp_c, r_c = lk, dk, lk
+            else:             # severe + high skill → highlight r
+                name_c, rp_c, r_c = lk, lk, dk
+            html += (
+                f"<tr style='background:{bg};border-bottom:1px solid #e8e8e8'>"
+                f"<td style='padding:5px 8px;font-weight:600;color:{name_c}'>{row['country_name']}</td>"
+                f"<td style='padding:5px 8px;color:{name_c}'>{row['iso3']}</td>"
+                f"<td style='padding:5px 8px;text-align:right;color:{rp_c};font-weight:{'600' if tier==2 else '400'}'>{rp_str}</td>"
+                f"<td style='padding:5px 8px;text-align:right;color:{r_c};font-weight:{'600' if tier==3 else '400'}'>{r_str}</td>"
+                "</tr>"
+            )
+        html += "</tbody></table>"
+        return html
 
-    mo.ui.table(_display, selection=None)
+    _drought_html = _html_table(_df_t, True,  "forecast_rp", "Drought RP (yr)")
+    _flood_html   = _html_table(_df_t, False, "flood_rp",    "Flood RP (yr)")
+
+    mo.hstack([
+        mo.vstack([mo.md("**Drought alerts**"), mo.Html(_drought_html)]),
+        mo.vstack([mo.md("**Flood alerts**"),   mo.Html(_flood_html)]),
+    ], justify="start", gap="2rem")
 
 
 @app.cell
-def _(df_roc_auc, df_skill, issued_month, mo, pd, plt, rainy_set, show_all, trimester):
+def _(mo):
+    mo.md("### Per-country analysis")
+    return
+
+
+@app.cell
+def _(df_skill, mo):
+    _names_df = (
+        df_skill[["pcode", "country_name"]]
+        .drop_duplicates()
+        .dropna(subset=["pcode", "country_name"])
+        .sort_values("country_name")
+    )
+    _pcode_options = dict(zip(_names_df["country_name"], _names_df["pcode"]))
+    pcode_dd = mo.ui.dropdown(
+        options=_pcode_options,
+        label="Country:",
+        value=list(_pcode_options.keys())[0],
+    )
+    pcode_dd
+    return (pcode_dd,)
+
+
+@app.cell
+def _(pcode_dd):
+    pcode = pcode_dd.value
+    return (pcode,)
+
+
+@app.cell
+def _(TRIMESTER_NAMES, df_paired, df_skill, np, pcode, plt, trimester):
+    _df_clim = (
+        df_paired[df_paired["pcode"] == pcode]
+        .dropna(subset=["obs_mean"])
+        .drop_duplicates(["trimester", "season_year"])
+        .assign(obs_orig=lambda d: np.expm1(d["obs_mean"]))
+        .groupby("trimester")["obs_orig"]
+        .mean()
+        .reindex(TRIMESTER_NAMES)
+        .reset_index()
+        .rename(columns={"obs_orig": "mean_mm_day"})
+    )
+    _annual = _df_clim["mean_mm_day"].sum()
+    _is_rainy = (
+        {row["trimester"]: (3 * row["mean_mm_day"] / _annual >= 0.25)
+         for _, row in _df_clim.iterrows()}
+        if _annual > 0 else {}
+    )
+    _country = (
+        df_skill[df_skill["pcode"] == pcode]["country_name"].iloc[0]
+        if not df_skill[df_skill["pcode"] == pcode].empty else pcode
+    )
+    _face_colors = ["rebeccapurple" if t == trimester else "lightgrey" for t in _df_clim["trimester"]]
+    _edge_colors = ["royalblue" if _is_rainy.get(t, False) else "none" for t in _df_clim["trimester"]]
+    _fig_clim2, _ax = plt.subplots(figsize=(10, 4), dpi=150)
+    _ax.bar(
+        _df_clim["trimester"], _df_clim["mean_mm_day"],
+        color=_face_colors, edgecolor=_edge_colors, linewidth=2.5,
+    )
+    _ax.set_xlabel("Trimester  (blue outline = rainy season, ≥25% of annual rainfall)")
+    _ax.set_ylabel("Mean daily rainfall (mm/day) [ERA5]")
+    _ax.set_title(f"{_country} — ERA5 trimester climatology (selected trimester highlighted)")
+    _ax.spines["top"].set_visible(False)
+    _ax.spines["right"].set_visible(False)
+    plt.tight_layout()
+    _fig_clim2
+
+
+@app.cell
+def _(
+    calendar,
+    df_paired,
+    df_skill,
+    issued_month,
+    np,
+    pcode,
+    pd,
+    plt,
+    trimester,
+):
+    _df_s2 = df_paired[
+        (df_paired["pcode"] == pcode)
+        & (df_paired["issued_month"] == issued_month)
+        & (df_paired["trimester"] == trimester)
+        & df_paired["obs_mean"].notna()
+        & df_paired["forecast_mean"].notna()
+    ].copy()
+    _df_s2["forecast_orig"] = np.expm1(_df_s2["forecast_mean"])
+    _df_s2["obs_orig"] = np.expm1(_df_s2["obs_mean"])
+
+    _skill_row2 = df_skill[
+        (df_skill["pcode"] == pcode)
+        & (df_skill["issued_month"] == issued_month)
+        & (df_skill["trimester"] == trimester)
+    ]
+
+    _fig_scatter2, _ax2 = plt.subplots(figsize=(7, 7), dpi=150)
+
+    if _df_s2.empty or _skill_row2.empty:
+        _ax2.text(0.5, 0.5, "No data", ha="center", va="center", transform=_ax2.transAxes)
+        _ax2.set_axis_off()
+    else:
+        _sr2 = _skill_row2.iloc[0]
+        _xmin, _xmax = _df_s2["forecast_orig"].min(), _df_s2["forecast_orig"].max()
+        _ymin, _ymax = _df_s2["obs_orig"].min(), _df_s2["obs_orig"].max()
+        _xpad = 0.1 * (_xmax - _xmin) if _xmax > _xmin else 0.1
+        _ypad = 0.1 * (_ymax - _ymin) if _ymax > _ymin else 0.1
+        _xlim2 = (_xmin - _xpad, _xmax + _xpad)
+        _ylim2 = (_ymin - _ypad, _ymax + _ypad)
+
+        _seas5_t2 = _df_s2["forecast_orig"].quantile(1 / 3)
+        _era5_t2  = _df_s2["obs_orig"].quantile(1 / 3)
+
+        _ax2.axvspan(_xlim2[0], _seas5_t2, color="chocolate", alpha=0.08, zorder=-2)
+        _ax2.axhspan(_ylim2[0], _era5_t2,  color="chocolate", alpha=0.08, zorder=-2)
+
+        for _, _yr2 in _df_s2.iterrows():
+            _ax2.annotate(
+                str(int(_yr2["season_year"])),
+                (_yr2["forecast_orig"], _yr2["obs_orig"]),
+                fontsize=8, ha="center", va="center", color="k", zorder=3,
+            )
+
+        if bool(_sr2["is_predictive"]) and pd.notna(_sr2["current_forecast_mean"]):
+            _cf_orig2 = float(np.expm1(_sr2["current_forecast_mean"]))
+            _ax2.axvline(_cf_orig2, color="mediumorchid", linestyle="--", zorder=-1)
+            _ax2.annotate(
+                f"  {int(_sr2['current_forecast_year'])} forecast",
+                (_cf_orig2, _ylim2[0]),
+                rotation=90, va="bottom", ha="right",
+                color="mediumorchid", fontstyle="italic",
+            )
+
+        _ax2.set_xlim(_xlim2)
+        _ax2.set_ylim(_ylim2)
+
+        _r_val2  = float(_sr2["pearson_r"]) if pd.notna(_sr2["pearson_r"]) else float("nan")
+        _pp2     = _df_s2["forecast_orig"] < _seas5_t2
+        _p2      = _df_s2["obs_orig"] < _era5_t2
+        _tpr2    = float((_pp2 & _p2).sum() / _p2.sum()) if _p2.sum() > 0 else float("nan")
+        _n2      = int(_sr2["n_years"]) if pd.notna(_sr2["n_years"]) else 0
+        _country2 = _sr2["country_name"] if "country_name" in _sr2.index else pcode
+
+        _ax2.set_title(
+            f"{_country2} — issued {calendar.month_abbr[issued_month]}, valid {trimester}"
+            + ("  ⚠ negative skill" if _r_val2 < 0 else ""),
+            color="darkred" if _r_val2 < 0 else "black",
+        )
+        _ax2.set_xlabel(
+            f"Normalized SEAS5 forecast (mm/day)\n"
+            f"Pearson r = {_r_val2:.2f}  |  Lower-tercile hit rate = {_tpr2:.2f}  |  n = {_n2}"
+        )
+        _ax2.set_ylabel("ERA5 observed (mm/day)")
+        _ax2.spines["top"].set_visible(False)
+        _ax2.spines["right"].set_visible(False)
+        plt.tight_layout()
+
+    _fig_scatter2
+
+
+@app.cell
+def _(df_roc_auc, df_skill, issued_month, mo, pd, plt, rainy_only_sw, rainy_set, trimester):
     import matplotlib.patches as _mpatch
 
     _df = (
@@ -379,7 +583,7 @@ def _(df_roc_auc, df_skill, issued_month, mo, pd, plt, rainy_set, show_all, trim
         .merge(df_roc_auc, on=["pcode", "issued_month", "trimester"], how="left")
         .copy()
     )
-    if not show_all:
+    if not rainy_only_sw.value:
         _df = _df[_df["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
 
     def _select_auc(row):
@@ -535,37 +739,6 @@ def _(df_skill, issued_month, mo, pd, rainy_set, trimester):
     return
 
 
-
-
-@app.cell
-def _(mo):
-    mo.md("""
-    ## Per-country analysis
-    """)
-    return
-
-
-@app.cell
-def _(df_skill, mo):
-    _names_df = (
-        df_skill[["pcode", "country_name"]]
-        .drop_duplicates()
-        .sort_values("country_name")
-    )
-    _pcode_options = dict(zip(_names_df["country_name"], _names_df["pcode"]))
-    pcode_dd = mo.ui.dropdown(
-        options=_pcode_options,
-        label="Country:",
-        value=list(_pcode_options.keys())[0],
-    )
-    pcode_dd
-    return (pcode_dd,)
-
-
-@app.cell
-def _(pcode_dd):
-    pcode = pcode_dd.value
-    return (pcode,)
 
 
 @app.cell
@@ -845,44 +1018,6 @@ def _(
     return
 
 
-@app.cell
-def _(TRIMESTER_NAMES, df_paired, df_skill, np, pcode, plt, trimester):
-    _df_clim = (
-        df_paired[df_paired["pcode"] == pcode]
-        .dropna(subset=["obs_mean"])
-        .drop_duplicates(["trimester", "season_year"])
-        .assign(obs_orig=lambda d: np.expm1(d["obs_mean"]))  # back to mm/day
-        .groupby("trimester")["obs_orig"]
-        .mean()
-        .reindex(TRIMESTER_NAMES)
-        .reset_index()
-        .rename(columns={"obs_orig": "mean_mm_day"})
-    )
-    _annual = _df_clim["mean_mm_day"].sum()
-    _is_rainy = (
-        {row["trimester"]: (3 * row["mean_mm_day"] / _annual >= 0.25)
-         for _, row in _df_clim.iterrows()}
-        if _annual > 0 else {}
-    )
-    _country = (
-        df_skill[df_skill["pcode"] == pcode]["country_name"].iloc[0]
-        if not df_skill[df_skill["pcode"] == pcode].empty else pcode
-    )
-    _face_colors = ["rebeccapurple" if t == trimester else "lightgrey" for t in _df_clim["trimester"]]
-    _edge_colors = ["royalblue" if _is_rainy.get(t, False) else "none" for t in _df_clim["trimester"]]
-    _fig_clim, _ax = plt.subplots(figsize=(10, 4), dpi=150)
-    _ax.bar(
-        _df_clim["trimester"], _df_clim["mean_mm_day"],
-        color=_face_colors, edgecolor=_edge_colors, linewidth=2.5,
-    )
-    _ax.set_xlabel("Trimester  (blue outline = rainy season, ≥25% of annual rainfall)")
-    _ax.set_ylabel("Mean daily rainfall (mm/day) [ERA5]")
-    _ax.set_title(f"{_country} — ERA5 trimester climatology (selected trimester highlighted)")
-    _ax.spines["top"].set_visible(False)
-    _ax.spines["right"].set_visible(False)
-    plt.tight_layout()
-    _fig_clim
-    return
 
 
 @app.cell
@@ -936,101 +1071,6 @@ def _(df_paired, df_skill, issued_month, np, pcode, plt, trimester):
         plt.tight_layout()
 
     _fig_hp
-    return
-
-
-@app.cell
-def _(
-    calendar,
-    df_paired,
-    df_skill,
-    issued_month,
-    np,
-    pcode,
-    pd,
-    plt,
-    trimester,
-):
-    # df_paired stores log1p values — convert to mm/day for display
-    _df_s = df_paired[
-        (df_paired["pcode"] == pcode)
-        & (df_paired["issued_month"] == issued_month)
-        & (df_paired["trimester"] == trimester)
-        & df_paired["obs_mean"].notna()
-        & df_paired["forecast_mean"].notna()
-    ].copy()
-    _df_s["forecast_orig"] = np.expm1(_df_s["forecast_mean"])
-    _df_s["obs_orig"] = np.expm1(_df_s["obs_mean"])
-
-    _skill_row = df_skill[
-        (df_skill["pcode"] == pcode)
-        & (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
-    ]
-
-    _fig_scatter, _ax = plt.subplots(figsize=(7, 7), dpi=150)
-
-    if _df_s.empty or _skill_row.empty:
-        _ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=_ax.transAxes)
-        _ax.set_axis_off()
-    else:
-        _sr = _skill_row.iloc[0]
-        _xmin, _xmax = _df_s["forecast_orig"].min(), _df_s["forecast_orig"].max()
-        _ymin, _ymax = _df_s["obs_orig"].min(), _df_s["obs_orig"].max()
-        _xpad = 0.1 * (_xmax - _xmin) if _xmax > _xmin else 0.1
-        _ypad = 0.1 * (_ymax - _ymin) if _ymax > _ymin else 0.1
-        _xlim = (_xmin - _xpad, _xmax + _xpad)
-        _ylim = (_ymin - _ypad, _ymax + _ypad)
-
-        _seas5_t = _df_s["forecast_orig"].quantile(1 / 3)
-        _era5_t = _df_s["obs_orig"].quantile(1 / 3)
-
-        _ax.axvspan(_xlim[0], _seas5_t, color="chocolate", alpha=0.08, zorder=-2)
-        _ax.axhspan(_ylim[0], _era5_t, color="chocolate", alpha=0.08, zorder=-2)
-
-        for _, _yr in _df_s.iterrows():
-            _ax.annotate(
-                str(int(_yr["season_year"])),
-                (_yr["forecast_orig"], _yr["obs_orig"]),
-                fontsize=8, ha="center", va="center", color="k", zorder=3,
-            )
-
-        if bool(_sr["is_predictive"]) and pd.notna(_sr["current_forecast_mean"]):
-            _cf_orig = float(np.expm1(_sr["current_forecast_mean"]))
-            _ax.axvline(_cf_orig, color="mediumorchid", linestyle="--", zorder=-1)
-            _ax.annotate(
-                f"  {int(_sr['current_forecast_year'])} forecast",
-                (_cf_orig, _ylim[0]),
-                rotation=90, va="bottom", ha="right",
-                color="mediumorchid", fontstyle="italic",
-            )
-
-        _ax.set_xlim(_xlim)
-        _ax.set_ylim(_ylim)
-
-        _r_val = float(_sr["pearson_r"]) if pd.notna(_sr["pearson_r"]) else float("nan")
-        _pp = _df_s["forecast_orig"] < _seas5_t
-        _p = _df_s["obs_orig"] < _era5_t
-        _tpr = float((_pp & _p).sum() / _p.sum()) if _p.sum() > 0 else float("nan")
-        _n = int(_sr["n_years"]) if pd.notna(_sr["n_years"]) else 0
-
-        _issued_str = calendar.month_abbr[issued_month]
-        _country_name = _sr["country_name"] if "country_name" in _sr.index else pcode
-        _neg_skill_suffix = "  ⚠ negative skill" if _r_val < 0 else ""
-        _ax.set_title(
-            f"{_country_name} — issued {_issued_str}, valid {trimester}{_neg_skill_suffix}",
-            color="darkred" if _r_val < 0 else "black",
-        )
-        _ax.set_xlabel(
-            f"Normalized SEAS5 forecast (mm/day)\n"
-            f"Pearson r = {_r_val:.2f}  |  Lower-tercile hit rate = {_tpr:.2f}  |  n = {_n}"
-        )
-        _ax.set_ylabel("ERA5 observed (mm/day)")
-        _ax.spines["top"].set_visible(False)
-        _ax.spines["right"].set_visible(False)
-        plt.tight_layout()
-
-    _fig_scatter
     return
 
 

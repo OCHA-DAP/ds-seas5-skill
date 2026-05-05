@@ -129,9 +129,9 @@ def empirical_rp(
     if n == 0 or np.isnan(current):
         return float("nan")
     if higher_is_more_extreme:
-        rank = max(int(np.sum(hist >= current)), 1)
+        rank = int(np.sum(hist > current)) + 1
     else:
-        rank = max(int(np.sum(hist <= current)), 1)
+        rank = int(np.sum(hist < current)) + 1
     return (n + 1) / rank
 
 
