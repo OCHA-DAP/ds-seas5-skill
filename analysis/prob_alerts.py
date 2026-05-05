@@ -666,6 +666,14 @@ def _(TRIMESTERS, df_skill, month_pct_sl, monthly_clim, pcode, plt, trimester, t
 
 
 @app.cell
+def _(mo):
+    show_drought_rp_sw = mo.ui.switch(label="Show drought RP shading", value=True)
+    show_flood_rp_sw   = mo.ui.switch(label="Show flood RP shading",   value=True)
+    mo.hstack([show_drought_rp_sw, show_flood_rp_sw], justify="start")
+    return show_drought_rp_sw, show_flood_rp_sw
+
+
+@app.cell
 def _(
     calendar,
     df_paired,
@@ -675,7 +683,11 @@ def _(
     pcode,
     pd,
     plt,
+    severe_rp_sl,
+    show_drought_rp_sw,
+    show_flood_rp_sw,
     trimester,
+    very_severe_rp_sl,
 ):
     _df_s2 = df_paired[
         (df_paired["pcode"] == pcode)
@@ -707,11 +719,49 @@ def _(
         _xlim2 = (_xmin - _xpad, _xmax + _xpad)
         _ylim2 = (_ymin - _ypad, _ymax + _ypad)
 
-        _seas5_t2 = _df_s2["forecast_orig"].quantile(1 / 3)
-        _era5_t2  = _df_s2["obs_orig"].quantile(1 / 3)
+        _sev_rp  = severe_rp_sl.value
+        _vsev_rp = very_severe_rp_sl.value
+        _C_DH = "#7B3A1A"
+        _C_DM = "#C8844A"
+        _C_FH = "#0D3B6B"
+        _C_FM = "#3D85C8"
 
-        _ax2.axvspan(_xlim2[0], _seas5_t2, color="chocolate", alpha=0.08, zorder=-2)
-        _ax2.axhspan(_ylim2[0], _era5_t2,  color="chocolate", alpha=0.08, zorder=-2)
+        # RP quantile thresholds on both axes
+        _x_sev_d  = float(_df_s2["forecast_orig"].quantile(1 / _sev_rp))
+        _x_vsev_d = float(_df_s2["forecast_orig"].quantile(1 / _vsev_rp))
+        _x_sev_f  = float(_df_s2["forecast_orig"].quantile(1 - 1 / _sev_rp))
+        _x_vsev_f = float(_df_s2["forecast_orig"].quantile(1 - 1 / _vsev_rp))
+        _y_sev_d  = float(_df_s2["obs_orig"].quantile(1 / _sev_rp))
+        _y_vsev_d = float(_df_s2["obs_orig"].quantile(1 / _vsev_rp))
+        _y_sev_f  = float(_df_s2["obs_orig"].quantile(1 - 1 / _sev_rp))
+        _y_vsev_f = float(_df_s2["obs_orig"].quantile(1 - 1 / _vsev_rp))
+
+        # linewidth=0 removes edge borders so only facecolor is rendered
+        if show_drought_rp_sw.value:
+            _ax2.axvspan(_xlim2[0], _x_sev_d,  color=_C_DM, alpha=0.12, linewidth=0, zorder=-2)
+            _ax2.axvspan(_xlim2[0], _x_vsev_d, color=_C_DH, alpha=0.12, linewidth=0, zorder=-2)
+            _ax2.axhspan(_ylim2[0], _y_sev_d,  color=_C_DM, alpha=0.12, linewidth=0, zorder=-2)
+            _ax2.axhspan(_ylim2[0], _y_vsev_d, color=_C_DH, alpha=0.12, linewidth=0, zorder=-2)
+            _ax2.text(_x_sev_d,  _ylim2[1], f" {_sev_rp}yr",  color=_C_DM, fontsize=7, va="top", ha="center", rotation=90)
+            _ax2.text(_x_vsev_d, _ylim2[1], f" {_vsev_rp}yr", color=_C_DH, fontsize=7, va="top", ha="center", rotation=90)
+            _ax2.text(_xlim2[1], _y_sev_d,  f" {_sev_rp}yr",  color=_C_DM, fontsize=7, va="center", ha="right")
+            _ax2.text(_xlim2[1], _y_vsev_d, f" {_vsev_rp}yr", color=_C_DH, fontsize=7, va="center", ha="right")
+        if show_flood_rp_sw.value:
+            _ax2.axvspan(_x_sev_f,  _xlim2[1], color=_C_FM, alpha=0.12, linewidth=0, zorder=-2)
+            _ax2.axvspan(_x_vsev_f, _xlim2[1], color=_C_FH, alpha=0.12, linewidth=0, zorder=-2)
+            _ax2.axhspan(_y_sev_f,  _ylim2[1], color=_C_FM, alpha=0.12, linewidth=0, zorder=-2)
+            _ax2.axhspan(_y_vsev_f, _ylim2[1], color=_C_FH, alpha=0.12, linewidth=0, zorder=-2)
+            _ax2.text(_x_sev_f,  _ylim2[1], f" {_sev_rp}yr",  color=_C_FM, fontsize=7, va="top", ha="center", rotation=90)
+            _ax2.text(_x_vsev_f, _ylim2[1], f" {_vsev_rp}yr", color=_C_FH, fontsize=7, va="top", ha="center", rotation=90)
+            _ax2.text(_xlim2[1], _y_sev_f,  f" {_sev_rp}yr",  color=_C_FM, fontsize=7, va="center", ha="right")
+            _ax2.text(_xlim2[1], _y_vsev_f, f" {_vsev_rp}yr", color=_C_FH, fontsize=7, va="center", ha="right")
+
+        # 45-degree reference line (dashed)
+        _diag_min = max(_xlim2[0], _ylim2[0])
+        _diag_max = min(_xlim2[1], _ylim2[1])
+        if _diag_max > _diag_min:
+            _ax2.plot([_diag_min, _diag_max], [_diag_min, _diag_max],
+                      color="#AAAAAA", linewidth=0.9, linestyle="--", zorder=-1)
 
         for _, _yr2 in _df_s2.iterrows():
             _ax2.annotate(
@@ -734,6 +784,8 @@ def _(
         _ax2.set_ylim(_ylim2)
 
         _r_val2  = float(_sr2["pearson_r"]) if pd.notna(_sr2["pearson_r"]) else float("nan")
+        _seas5_t2 = _df_s2["forecast_orig"].quantile(1 / 3)
+        _era5_t2  = _df_s2["obs_orig"].quantile(1 / 3)
         _pp2     = _df_s2["forecast_orig"] < _seas5_t2
         _p2      = _df_s2["obs_orig"] < _era5_t2
         _tpr2    = float((_pp2 & _p2).sum() / _p2.sum()) if _p2.sum() > 0 else float("nan")
