@@ -169,10 +169,20 @@ def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, r
     _sev_pct  = 100 / _sev_rp
     _r_mod   = r_mod_sl.value
     _r_high  = r_high_sl.value
-    _C_DH = "#7B3A1A"
-    _C_DM = "#C8844A"
-    _C_FH = "#0D3B6B"
-    _C_FM = "#3D85C8"
+    # 8 colors: dark/medium for RP severity, vivid/muted for skill (matches map)
+    _C_DVH = "#7B3A1A"  # drought vsev high
+    _C_DVM = "#A8623A"  # drought vsev mod
+    _C_DSH = "#C8844A"  # drought sev high
+    _C_DSM = "#DFAA80"  # drought sev mod
+    _C_FVH = "#0D3B6B"  # flood vsev high
+    _C_FVM = "#2E5A88"  # flood vsev mod
+    _C_FSH = "#3D85C8"  # flood sev high
+    _C_FSM = "#7AAED8"  # flood sev mod
+    # Scatter zone fill colors (just 4 — hatching shows skill within each zone)
+    _C_DH = _C_DVH
+    _C_DM = _C_DSH
+    _C_FH = _C_FVH
+    _C_FM = _C_FSH
     _HATCH = "///"
     _detrend_sfx = " [detrended]" if detrend_sw.value else ""
 
@@ -191,19 +201,21 @@ def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, r
         if r < _r_mod:
             return "#444444"
         _d = pct < 50
+        _hi = r >= _r_high
         if pct <= _vsev_pct or pct >= 100 - _vsev_pct:
-            return _C_DH if _d else _C_FH
+            return (_C_DVH if _hi else _C_DVM) if _d else (_C_FVH if _hi else _C_FVM)
         if pct <= _sev_pct or pct >= 100 - _sev_pct:
-            return _C_DM if _d else _C_FM
+            return (_C_DSH if _hi else _C_DSM) if _d else (_C_FSH if _hi else _C_FSM)
         return "#444444"
 
     def _label_color_rp(rp_abs, is_drought, r):
         if r < _r_mod:
             return "#444444"
+        _hi = r >= _r_high
         if rp_abs >= _vsev_rp:
-            return _C_DH if is_drought else _C_FH
+            return (_C_DVH if _hi else _C_DVM) if is_drought else (_C_FVH if _hi else _C_FVM)
         if rp_abs >= _sev_rp:
-            return _C_DM if is_drought else _C_FM
+            return (_C_DSH if _hi else _C_DSM) if is_drought else (_C_FSH if _hi else _C_FSM)
         return "#444444"
 
     if scatter_rp_sw.value:
@@ -362,10 +374,11 @@ def _(calendar, df_skill, df_skill_active, issued_month, pd, r_high_sl, r_mod_sl
         _vsev = pct <= _vsev_m or pct >= 100 - _vsev_m
         _sev  = (_vsev_m < pct <= _sev_m) or (100 - _sev_m <= pct < 100 - _vsev_m)
         _d    = pct < 50
+        _sk   = "high" if r >= _rhigh_m else "mod"
         if _vsev:
-            return "drought_vsev" if _d else "flood_vsev"
+            return f"drought_vsev_{_sk}" if _d else f"flood_vsev_{_sk}"
         if _sev:
-            return "drought_sev" if _d else "flood_sev"
+            return f"drought_sev_{_sk}" if _d else f"flood_sev_{_sk}"
         return "no_alert"
 
     # pcode→iso3 and pcode→name from df_skill (covers all monitored countries, unchanged by detrend)
@@ -401,23 +414,38 @@ def _(calendar, df_skill, df_skill_active, issued_month, pd, r_high_sl, r_mod_sl
         else:
             _iso3_cat[_iso3_code] = "no_alert"
 
+    # 8-color scheme: RP severity → value (dark/medium); skill → saturation (vivid/muted)
     _CMAP = {
-        "drought_vsev": "#8B2200",
-        "drought_sev":  "#D4640A",
-        "flood_vsev":   "#0047CC",
-        "flood_sev":    "#4D92E8",
-        "no_alert":     "#FFFFFF",
-        "off_season":   "#CCCCCC",
+        "drought_vsev_high": "#7B3A1A",  # deep rich brown
+        "drought_vsev_mod":  "#A8623A",  # same dark, less saturated
+        "drought_sev_high":  "#C8844A",  # medium warm brown
+        "drought_sev_mod":   "#DFAA80",  # light muted tan
+        "flood_vsev_high":   "#0D3B6B",  # deep navy
+        "flood_vsev_mod":    "#2E5A88",  # same dark, less saturated
+        "flood_sev_high":    "#3D85C8",  # medium blue
+        "flood_sev_mod":     "#7AAED8",  # light muted blue
+        "no_alert":          "#FFFFFF",
+        "off_season":        "#CCCCCC",
     }
     _LABELS = {
-        "drought_vsev": f"Drought ≥{_vsev_yr}yr RP, mod+ skill",
-        "drought_sev":  f"Drought {_sev_yr}–{_vsev_yr}yr RP, mod+ skill",
-        "flood_vsev":   f"Flood ≥{_vsev_yr}yr RP, mod+ skill",
-        "flood_sev":    f"Flood {_sev_yr}–{_vsev_yr}yr RP, mod+ skill",
-        "no_alert":     "Monitored — no alert",
-        "off_season":   "Monitored — off season",
+        "drought_vsev_high": f"Drought ≥{_vsev_yr}yr RP, high skill",
+        "drought_vsev_mod":  f"Drought ≥{_vsev_yr}yr RP, mod skill",
+        "drought_sev_high":  f"Drought {_sev_yr}–{_vsev_yr}yr RP, high skill",
+        "drought_sev_mod":   f"Drought {_sev_yr}–{_vsev_yr}yr RP, mod skill",
+        "flood_vsev_high":   f"Flood ≥{_vsev_yr}yr RP, high skill",
+        "flood_vsev_mod":    f"Flood ≥{_vsev_yr}yr RP, mod skill",
+        "flood_sev_high":    f"Flood {_sev_yr}–{_vsev_yr}yr RP, high skill",
+        "flood_sev_mod":     f"Flood {_sev_yr}–{_vsev_yr}yr RP, mod skill",
+        "no_alert":          "Monitored — no alert",
+        "off_season":        "Monitored — off season",
     }
-    _ORDER = ["drought_vsev", "drought_sev", "flood_vsev", "flood_sev", "no_alert", "off_season"]
+    _ORDER = [
+        "drought_vsev_high", "drought_vsev_mod",
+        "drought_sev_high",  "drought_sev_mod",
+        "flood_vsev_high",   "flood_vsev_mod",
+        "flood_sev_high",    "flood_sev_mod",
+        "no_alert", "off_season",
+    ]
 
     # Only include monitored countries; unmonitored are invisible (showland=False)
     _df_map = pd.DataFrame([
