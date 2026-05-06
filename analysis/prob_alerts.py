@@ -369,7 +369,7 @@ def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, r
 def _():
     import geopandas as _gpd
     from pathlib import Path as _Path
-    _CACHE = _Path("analysis/_ne_110m_countries.gpkg")
+    _CACHE = _Path(__file__).resolve().parent / "_ne_110m_countries.gpkg"
     if not _CACHE.exists():
         _raw = _gpd.read_file(
             "https://naciscdn.org/naturalearth/110m/cultural/ne_110m_admin_0_countries.zip"
@@ -393,7 +393,7 @@ def _(mo):
             "SEA/Pacific": "sea_pacific",
         },
         label="Map region:",
-        value="global",
+        value="Global",
     )
     map_region_dd
     return (map_region_dd,)
