@@ -246,7 +246,7 @@ def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, r
         _ax.set_ylim(0, 1.0)
 
         # Grey background zones (drawn first)
-        _zone(_ax, -_xlim, _xlim, 0, _r_mod, "white", "xx", "#CCCCCC", 1.0)            # low skill (cross hatch)
+        _zone(_ax, -_xlim, _xlim, 0, _r_mod, "white", "xxxx", "#CCCCCC", 1.0)          # low skill (cross hatch)
         _zone(_ax, -_sev_rp, _sev_rp, _r_mod, _r_high, "white", "///", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
 
         # Drought zones (x < 0; more negative = worse)
@@ -312,7 +312,7 @@ def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, r
         _ax.set_ylim(0, 1.0)
 
         # Grey background zones (drawn first)
-        _zone(_ax, 0, 100, 0, _r_mod, "white", "xx", "#CCCCCC", 1.0)                      # low skill (cross hatch)
+        _zone(_ax, 0, 100, 0, _r_mod, "white", "xxxx", "#CCCCCC", 1.0)                    # low skill (cross hatch)
         _zone(_ax, _sev_pct, 100 - _sev_pct, _r_mod, _r_high, "white", "///", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
 
         # Drought zones (left)
@@ -452,7 +452,7 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
         "no_data":           ("#E8E8E8", "#CCCCCC", None,  None),
         "high_none":         ("#FFFFFF", "#AAAAAA", None,  None),
         "mid_none":          ("#FFFFFF", "#AAAAAA", "///", "#CCCCCC"),
-        "low_skill":         ("#FFFFFF", "#AAAAAA", "xx",  "#BBBBBB"),
+        "low_skill":         ("#FFFFFF", "#AAAAAA", "xxxx", "#BBBBBB"),
         "drought_vsev_high": ("#7B3A1A", "#5A2A0A", None,  None),
         "drought_vsev_mod":  ("#A8623A", "#7B3A1A", "///", "white"),
         "drought_sev_high":  ("#C8844A", "#A06030", None,  None),
@@ -465,11 +465,11 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
 
     # ── Region bounds ───────────────────────────────────────────────────
     _REGIONS = {
-        "global":      {"xlim": (-180, 180), "ylim": (-60, 85),  "figsize": (14, 7)},
-        "lac":         {"xlim": (-120, -30), "ylim": (-60, 35),  "figsize": (9, 11)},
+        "global":      {"xlim": (-180, 180), "ylim": (-36, 56),  "figsize": (14, 5)},
+        "lac":         {"xlim": (-120, -30), "ylim": (-35, 35),  "figsize": (9, 9)},
         "africa":      {"xlim": (-20, 55),   "ylim": (-40, 40),  "figsize": (8, 9)},
-        "asia_europe": {"xlim": (15, 145),   "ylim": (-5, 73),   "figsize": (14, 8)},
-        "sea_pacific": {"xlim": (85, 180),   "ylim": (-50, 30),  "figsize": (12, 7)},
+        "asia_europe": {"xlim": (15, 131),   "ylim": (-5, 56),   "figsize": (14, 7)},
+        "sea_pacific": {"xlim": (85, 180),   "ylim": (-36, 30),  "figsize": (12, 7)},
     }
     _reg = _REGIONS[map_region_dd.value]
     _xl, _yl = _reg["xlim"], _reg["ylim"]
@@ -483,7 +483,7 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
     _fig_m, _ax_m = plt.subplots(figsize=_reg["figsize"], dpi=150)
 
     # Unmonitored base layer
-    _gdf_clip.plot(ax=_ax_m, color="#F0F0F0", edgecolor="#DDDDDD", linewidth=0.3)
+    _gdf_clip.plot(ax=_ax_m, color="white", edgecolor="#DDDDDD", linewidth=0.3)
 
     # Each monitored category
     _CAT_ORDER = [
@@ -502,20 +502,27 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
         if _st[2]:
             _sub.plot(ax=_ax_m, color="none", edgecolor=_st[3], hatch=_st[2], linewidth=0)
 
-    # Small island dots for SEA/Pacific
+    # Small island dots for SEA/Pacific — all countries with small bbox, incl. unmonitored
     if map_region_dd.value == "sea_pacific":
-        for _, _row in _gdf_clip[_gdf_clip["cat"] != "unmonitored"].iterrows():
+        for _, _row in _gdf_clip.iterrows():
             _geom = _row.geometry
             if _geom is None:
                 continue
             _bb = _geom.bounds
             if (_bb[2] - _bb[0]) * (_bb[3] - _bb[1]) < 3.0:
                 _cx, _cy = _geom.centroid.x, _geom.centroid.y
-                _fc = _STYLE.get(_row["cat"], ("#888888",))[0]
-                if _fc in ("#FFFFFF", "white"):
-                    _fc = "#888888"
-                _ax_m.plot(_cx, _cy, "o", color=_fc, markersize=7, zorder=5,
-                           markeredgecolor="white", markeredgewidth=0.7)
+                _cat_dot = _row["cat"]
+                if _cat_dot == "unmonitored":
+                    _fc_dot, _ec_dot = "#DDDDDD", "#AAAAAA"
+                elif _cat_dot in ("high_none", "mid_none", "no_data"):
+                    _fc_dot, _ec_dot = "#CCCCCC", "#888888"
+                elif _cat_dot == "off_season":
+                    _fc_dot, _ec_dot = "#C0C0C0", "#888888"
+                else:
+                    _st_dot = _STYLE.get(_cat_dot, ("#CCCCCC", "#888888", None, None))
+                    _fc_dot, _ec_dot = _st_dot[0], _st_dot[1]
+                _ax_m.plot(_cx, _cy, "o", color=_fc_dot, markersize=7, zorder=5,
+                           markeredgecolor=_ec_dot, markeredgewidth=0.7)
 
     _ax_m.set_xlim(_xl)
     _ax_m.set_ylim(_yl)
@@ -538,7 +545,7 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
         (f"Flood {_sev_yr}–{_vsev_yr}yr RP, mod skill",    "#7AAED8", "white",   "///", 0.0),
         ("High skill — no alert",                           "#FFFFFF", "#AAAAAA", None,  0.5),
         ("Mod skill — no alert",                            "#FFFFFF", "#CCCCCC", "///", 0.5),
-        ("Low skill",                                       "#FFFFFF", "#BBBBBB", "xx",  0.5),
+        ("Low skill",                                       "#FFFFFF", "#BBBBBB", "xxxx", 0.5),
         ("Off season",                                      "#D0D0D0", "#BBBBBB", None,  0.5),
     ]
     _handles = [
