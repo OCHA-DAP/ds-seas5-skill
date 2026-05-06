@@ -465,14 +465,22 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
 
     # ── Region bounds ───────────────────────────────────────────────────
     _REGIONS = {
-        "global":      {"xlim": (-120, 180), "ylim": (-36, 56),  "figsize": (14, 5)},
-        "lac":         {"xlim": (-120, -30), "ylim": (-35, 35),  "figsize": (9, 9)},
-        "africa":      {"xlim": (-20, 55),   "ylim": (-40, 40),  "figsize": (8, 9)},
-        "asia_europe": {"xlim": (15, 131),   "ylim": (-5, 56),   "figsize": (14, 7)},
-        "sea_pacific": {"xlim": (85, 180),   "ylim": (-36, 30),  "figsize": (12, 7)},
+        "global":      {"xlim": (-120, 180), "ylim": (-36, 56)},
+        "lac":         {"xlim": (-120, -30), "ylim": (-35, 35)},
+        "africa":      {"xlim": (-20, 55),   "ylim": (-40, 40)},
+        "asia_europe": {"xlim": (15, 131),   "ylim": (5, 56)},
+        "sea_pacific": {"xlim": (85, 180),   "ylim": (-36, 30)},
     }
     _reg = _REGIONS[map_region_dd.value]
     _xl, _yl = _reg["xlim"], _reg["ylim"]
+
+    # Compute figsize so the map fills the figure exactly → legend sits right below
+    _dx = _xl[1] - _xl[0]
+    _dy = _yl[1] - _yl[0]
+    _map_w = 12.0
+    _map_h = _map_w * _dy / _dx
+    _leg_h = 1.2  # inches reserved for legend
+    _fig_h = _map_h + _leg_h
 
     # ── Clip world to region ─────────────────────────────────────────────
     _gdf = world_geo.dropna(subset=["geometry"]).copy()
@@ -480,10 +488,10 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
     _gdf_clip = _gdf.cx[_xl[0]:_xl[1], _yl[0]:_yl[1]]
 
     # ── Draw ─────────────────────────────────────────────────────────────
-    _fig_m, _ax_m = plt.subplots(figsize=_reg["figsize"], dpi=150)
+    _fig_m, _ax_m = plt.subplots(figsize=(_map_w, _fig_h), dpi=150)
 
     # Unmonitored base layer
-    _gdf_clip.plot(ax=_ax_m, color="white", edgecolor="#DDDDDD", linewidth=0.3)
+    _gdf_clip.plot(ax=_ax_m, color="#F0F0F0", edgecolor="#DDDDDD", linewidth=0.3)
 
     # Each monitored category
     _CAT_ORDER = [
@@ -555,14 +563,14 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
     _fig_m.legend(
         handles=_handles,
         loc="lower center",
-        bbox_to_anchor=(0.5, 0),
+        bbox_to_anchor=(0.5, 0.0),
         ncol=4,
         fontsize=6.5,
         framealpha=0.95,
         edgecolor="#CCCCCC",
         handlelength=3,
     )
-    plt.tight_layout(rect=[0, 0.14, 1, 1])
+    plt.tight_layout(rect=[0, _leg_h / _fig_h, 1, 1])
     _fig_m
 
 
