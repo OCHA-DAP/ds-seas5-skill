@@ -529,37 +529,40 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
     _ax_m.set_aspect("equal")
     _ax_m.axis("off")
     _ax_m.set_title(
-        f"Alert map — {calendar.month_name[issued_month]} issued, {trimester} valid",
+        f"SEAS5 severity and skill alerts — {calendar.month_name[issued_month]} issued, {trimester} valid",
         fontsize=11, pad=8,
     )
 
-    # ── Legend ───────────────────────────────────────────────────────────
+    # ── Legend (outside map, bottom of figure) ───────────────────────────
     _LEG = [
-        (f"Drought ≥{_vsev_yr}yr RP, high skill",          "#7B3A1A", "#5A2A0A", None,  0.5),
-        (f"Drought ≥{_vsev_yr}yr RP, mod skill",           "#A8623A", "white",   "///", 0.0),
-        (f"Drought {_sev_yr}–{_vsev_yr}yr RP, high skill", "#C8844A", "#A06030", None,  0.5),
-        (f"Drought {_sev_yr}–{_vsev_yr}yr RP, mod skill",  "#DFAA80", "white",   "///", 0.0),
-        (f"Flood ≥{_vsev_yr}yr RP, high skill",            "#0D40B0", "#092E88", None,  0.5),
-        (f"Flood ≥{_vsev_yr}yr RP, mod skill",             "#2E60B8", "white",   "///", 0.0),
-        (f"Flood {_sev_yr}–{_vsev_yr}yr RP, high skill",   "#3D85C8", "#2060A0", None,  0.5),
-        (f"Flood {_sev_yr}–{_vsev_yr}yr RP, mod skill",    "#7AAED8", "white",   "///", 0.0),
-        ("High skill — no alert",                           "#FFFFFF", "#AAAAAA", None,  0.5),
-        ("Mod skill — no alert",                            "#FFFFFF", "#CCCCCC", "///", 0.5),
+        (f"Drought ≥{_vsev_yr}yr RP, high skill",          "#7B3A1A", "#5A2A0A", None,   0.5),
+        (f"Drought ≥{_vsev_yr}yr RP, mod skill",           "#A8623A", "white",   "///",  0.0),
+        (f"Drought {_sev_yr}–{_vsev_yr}yr RP, high skill", "#C8844A", "#A06030", None,   0.5),
+        (f"Drought {_sev_yr}–{_vsev_yr}yr RP, mod skill",  "#DFAA80", "white",   "///",  0.0),
+        (f"Flood ≥{_vsev_yr}yr RP, high skill",            "#0D40B0", "#092E88", None,   0.5),
+        (f"Flood ≥{_vsev_yr}yr RP, mod skill",             "#2E60B8", "white",   "///",  0.0),
+        (f"Flood {_sev_yr}–{_vsev_yr}yr RP, high skill",   "#3D85C8", "#2060A0", None,   0.5),
+        (f"Flood {_sev_yr}–{_vsev_yr}yr RP, mod skill",    "#7AAED8", "white",   "///",  0.0),
+        ("High skill — no alert",                           "#FFFFFF", "#AAAAAA", None,   0.5),
+        ("Mod skill — no alert",                            "#FFFFFF", "#CCCCCC", "///",  0.5),
         ("Low skill",                                       "#FFFFFF", "#BBBBBB", "xxxx", 0.5),
-        ("Off season",                                      "#D0D0D0", "#BBBBBB", None,  0.5),
+        ("Off season",                                      "#D0D0D0", "#BBBBBB", None,   0.5),
     ]
     _handles = [
-        _mpatch_m.Patch(
-            facecolor=_fc, edgecolor=_ec, hatch=_h, linewidth=_lw, label=_lbl,
-        )
+        _mpatch_m.Patch(facecolor=_fc, edgecolor=_ec, hatch=_h, linewidth=_lw, label=_lbl)
         for _lbl, _fc, _ec, _h, _lw in _LEG
     ]
-    _ax_m.legend(
-        handles=_handles, loc="lower left", ncol=2, fontsize=6.5,
-        framealpha=0.92, edgecolor="#CCCCCC", handlelength=3,
+    _fig_m.legend(
+        handles=_handles,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0),
+        ncol=4,
+        fontsize=6.5,
+        framealpha=0.95,
+        edgecolor="#CCCCCC",
+        handlelength=3,
     )
-
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0.14, 1, 1])
     _fig_m
 
 
