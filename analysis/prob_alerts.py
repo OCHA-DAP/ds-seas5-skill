@@ -31,6 +31,9 @@ def _(PROJECT_PREFIX, pd, stratus):
     df_skill = stratus.load_parquet_from_blob(
         f"{PROJECT_PREFIX}/processed/skill_stats.parquet", stage="dev"
     )
+    df_skill_dt = stratus.load_parquet_from_blob(
+        f"{PROJECT_PREFIX}/processed/skill_stats_detrended.parquet", stage="dev"
+    )
     _pcodes = df_skill["pcode"].dropna().unique().tolist()
     _engine = stratus.get_engine("prod")
     _ph = ",".join(["%s"] * len(_pcodes))
@@ -44,7 +47,7 @@ def _(PROJECT_PREFIX, pd, stratus):
         .groupby(["pcode", "month"])["mean"].mean()
         .reset_index().rename(columns={"mean": "mean_mm_day"})
     )
-    return df_skill, monthly_clim
+    return df_skill, df_skill_dt, monthly_clim
 
 
 @app.cell
@@ -109,6 +112,25 @@ def _(issued_month_dd, mo, trimester_sl, valid_trimesters):
 
 @app.cell
 def _(mo):
+    detrend_sw = mo.ui.switch(value=False, label="Detrend forecast & reanalysis")
+    detrend_sw
+    return (detrend_sw,)
+
+
+@app.cell
+def _(df_skill, df_skill_dt, detrend_sw):
+    df_skill_active = df_skill_dt if detrend_sw.value else df_skill
+    return (df_skill_active,)
+
+
+@app.cell
+def _(df_paired, df_paired_dt, detrend_sw):
+    df_paired_active = df_paired_dt if detrend_sw.value else df_paired
+    return (df_paired_active,)
+
+
+@app.cell
+def _(mo):
     mo.md("## Deterministic")
     return
 
@@ -137,14 +159,14 @@ def _(mo):
 
 
 @app.cell
-def _(df_skill, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
+def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
     import matplotlib.patches as _mpatch_r
 
-    _df_r = df_skill[
-        (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
-        & df_skill["forecast_percentile"].notna()
-        & df_skill["pearson_r"].notna()
+    _df_r = df_skill_active[
+        (df_skill_active["issued_month"] == issued_month)
+        & (df_skill_active["trimester"] == trimester)
+        & df_skill_active["forecast_percentile"].notna()
+        & df_skill_active["pearson_r"].notna()
     ].copy()
     if not rainy_only_sw.value:
         _df_r = _df_r[_df_r["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
@@ -216,7 +238,8 @@ def _(df_skill, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy
     _ax_r.set_xlabel("Forecast percentile among historical (0 = driest, 100 = wettest)")
     _ax_r.set_ylabel("Skill (Pearson r)")
     _yr_r = int(_df_r["current_forecast_year"].dropna().max()) if not _df_r["current_forecast_year"].dropna().empty else "—"
-    _ax_r.set_title(f"Severity × skill (Pearson r) — issued month {issued_month}, valid {trimester}, forecast year {_yr_r}")
+    _detrend_sfx = " [detrended]" if detrend_sw.value else ""
+    _ax_r.set_title(f"Severity × skill (Pearson r) — issued month {issued_month}, valid {trimester}, forecast year {_yr_r}{_detrend_sfx}")
     _ax_r.spines["top"].set_visible(False)
     _ax_r.spines["right"].set_visible(False)
     plt.tight_layout()
@@ -224,7 +247,7 @@ def _(df_skill, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy
 
 
 @app.cell
-def _(df_skill, issued_month, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
+def _(detrend_sw, df_skill_active, issued_month, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
     import matplotlib.patches as _mpatch_rp
 
     _vsev_rp2 = very_severe_rp_sl.value
@@ -247,13 +270,13 @@ def _(df_skill, issued_month, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set
             return _C_DM2 if _drought else _C_FM2
         return "#444444"
 
-    _df_rp = df_skill[
-        (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
-        & df_skill["forecast_percentile"].notna()
-        & df_skill["pearson_r"].notna()
-        & df_skill["forecast_rp"].notna()
-        & df_skill["flood_rp"].notna()
+    _df_rp = df_skill_active[
+        (df_skill_active["issued_month"] == issued_month)
+        & (df_skill_active["trimester"] == trimester)
+        & df_skill_active["forecast_percentile"].notna()
+        & df_skill_active["pearson_r"].notna()
+        & df_skill_active["forecast_rp"].notna()
+        & df_skill_active["flood_rp"].notna()
     ].copy()
     if not rainy_only_sw.value:
         _df_rp = _df_rp[_df_rp["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
@@ -324,7 +347,8 @@ def _(df_skill, issued_month, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set
     _ax_rp.set_ylabel("Skill (Pearson r)")
     _ax_rp.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: str(int(abs(x)))))
     _yr_rp = int(_df_rp["current_forecast_year"].dropna().max()) if not _df_rp["current_forecast_year"].dropna().empty else "—"
-    _ax_rp.set_title(f"Severity × skill (RP) — issued month {issued_month}, valid {trimester}, forecast year {_yr_rp}")
+    _detrend_sfx2 = " [detrended]" if detrend_sw.value else ""
+    _ax_rp.set_title(f"Severity × skill (RP) — issued month {issued_month}, valid {trimester}, forecast year {_yr_rp}{_detrend_sfx2}")
     _ax_rp.spines["top"].set_visible(False)
     _ax_rp.spines["right"].set_visible(False)
     plt.tight_layout()
@@ -332,7 +356,7 @@ def _(df_skill, issued_month, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set
 
 
 @app.cell
-def _(calendar, df_skill, issued_month, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
+def _(calendar, df_skill, df_skill_active, issued_month, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
     import plotly.express as _px
 
     _vsev_m  = 100 / very_severe_rp_sl.value
@@ -352,13 +376,13 @@ def _(calendar, df_skill, issued_month, pd, r_high_sl, r_mod_sl, rainy_set, seve
             return "drought_mod" if _d else "flood_mod"
         return "no_alert"
 
-    # pcode→iso3 and pcode→name from df_skill (covers all monitored countries)
+    # pcode→iso3 and pcode→name from df_skill (covers all monitored countries, unchanged by detrend)
     _pcode_to_iso3 = df_skill.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
     _monitored_pcodes = set(_pcode_to_iso3.keys())
 
-    _df_m_all = df_skill[
-        (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
+    _df_m_all = df_skill_active[
+        (df_skill_active["issued_month"] == issued_month)
+        & (df_skill_active["trimester"] == trimester)
     ].copy()
 
     _iso3_cat: dict[str, str] = {}
@@ -471,7 +495,7 @@ def _(calendar, df_skill, issued_month, pd, r_high_sl, r_mod_sl, rainy_set, seve
 
 
 @app.cell
-def _(df_skill, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
+def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
     _vsev_pct = 100 / very_severe_rp_sl.value
     _sev_pct  = 100 / severe_rp_sl.value
     _r_mod    = r_mod_sl.value
@@ -480,11 +504,11 @@ def _(df_skill, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_
     _vsev_yr = very_severe_rp_sl.value
     _sev_yr  = severe_rp_sl.value
 
-    _df_t = df_skill[
-        (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
-        & df_skill["pearson_r"].notna()
-        & df_skill["forecast_percentile"].notna()
+    _df_t = df_skill_active[
+        (df_skill_active["issued_month"] == issued_month)
+        & (df_skill_active["trimester"] == trimester)
+        & df_skill_active["pearson_r"].notna()
+        & df_skill_active["forecast_percentile"].notna()
     ].copy()
     _df_t = _df_t[_df_t["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
 
@@ -676,8 +700,8 @@ def _(mo):
 @app.cell
 def _(
     calendar,
-    df_paired,
-    df_skill,
+    df_paired_active,
+    df_skill_active,
     issued_month,
     np,
     pcode,
@@ -689,20 +713,20 @@ def _(
     trimester,
     very_severe_rp_sl,
 ):
-    _df_s2 = df_paired[
-        (df_paired["pcode"] == pcode)
-        & (df_paired["issued_month"] == issued_month)
-        & (df_paired["trimester"] == trimester)
-        & df_paired["obs_mean"].notna()
-        & df_paired["forecast_mean"].notna()
+    _df_s2 = df_paired_active[
+        (df_paired_active["pcode"] == pcode)
+        & (df_paired_active["issued_month"] == issued_month)
+        & (df_paired_active["trimester"] == trimester)
+        & df_paired_active["obs_mean"].notna()
+        & df_paired_active["forecast_mean"].notna()
     ].copy()
     _df_s2["forecast_orig"] = np.expm1(_df_s2["forecast_mean"])
     _df_s2["obs_orig"] = np.expm1(_df_s2["obs_mean"])
 
-    _skill_row2 = df_skill[
-        (df_skill["pcode"] == pcode)
-        & (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
+    _skill_row2 = df_skill_active[
+        (df_skill_active["pcode"] == pcode)
+        & (df_skill_active["issued_month"] == issued_month)
+        & (df_skill_active["trimester"] == trimester)
     ]
 
     _fig_scatter2, _ax2 = plt.subplots(figsize=(7, 7), dpi=150)
@@ -821,6 +845,14 @@ def _(PROJECT_PREFIX, stratus):
 
 
 @app.cell
+def _(PROJECT_PREFIX, stratus):
+    df_paired_dt = stratus.load_parquet_from_blob(
+        f"{PROJECT_PREFIX}/processed/paired_yearly_detrended.parquet", stage="dev"
+    )
+    return (df_paired_dt,)
+
+
+@app.cell
 def _(mo):
     mo.md("## Probabilistic")
     return
@@ -840,12 +872,12 @@ def _(mo):
 
 
 @app.cell
-def _(df_skill, issued_month, mo, pd, rainy_set, trimester):
+def _(df_skill_active, issued_month, mo, pd, rainy_set, trimester):
     _df_rank = (
-        df_skill[
-            (df_skill["issued_month"] == issued_month)
-            & (df_skill["trimester"] == trimester)
-            & df_skill["prob_lower_tercile"].notna()
+        df_skill_active[
+            (df_skill_active["issued_month"] == issued_month)
+            & (df_skill_active["trimester"] == trimester)
+            & df_skill_active["prob_lower_tercile"].notna()
         ]
         .sort_values("prob_lower_tercile", ascending=False)
         .copy()
@@ -898,8 +930,8 @@ def _(df_skill, issued_month, mo, pd, rainy_set, trimester):
 
 
 @app.cell
-def _(TRIMESTER_NAMES, calendar, df_skill, np, pcode, plt, rainy_set):
-    _df_p = df_skill[df_skill["pcode"] == pcode]
+def _(TRIMESTER_NAMES, calendar, df_skill_active, np, pcode, plt, rainy_set):
+    _df_p = df_skill_active[df_skill_active["pcode"] == pcode]
     _matrix = np.full((12, 12), np.nan)
     for _, _r in _df_p.iterrows():
         _i = int(_r["issued_month"]) - 1
@@ -975,8 +1007,8 @@ def _(mo):
 @app.cell
 def _(
     calendar,
-    df_paired,
-    df_skill,
+    df_paired_active,
+    df_skill_active,
     issued_month,
     norm,
     np,
@@ -986,19 +1018,19 @@ def _(
     show_lines_sw,
     trimester,
 ):
-    _row = df_skill[
-        (df_skill["pcode"] == pcode)
-        & (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
+    _row = df_skill_active[
+        (df_skill_active["pcode"] == pcode)
+        & (df_skill_active["issued_month"] == issued_month)
+        & (df_skill_active["trimester"] == trimester)
     ]
     _has_skill = not _row.empty and pd.notna(_row.iloc[0]["pearson_r"])
 
-    # obs_mean in df_paired is log1p-transformed; era5_df has log-space values
+    # obs_mean in df_paired_active is log1p-transformed; era5_df has log-space values
     _era5_df = (
-        df_paired[
-            (df_paired["pcode"] == pcode)
-            & (df_paired["trimester"] == trimester)
-            & df_paired["obs_mean"].notna()
+        df_paired_active[
+            (df_paired_active["pcode"] == pcode)
+            & (df_paired_active["trimester"] == trimester)
+            & df_paired_active["obs_mean"].notna()
         ]
         .drop_duplicates("season_year")[["season_year", "obs_mean"]]
         .sort_values("obs_mean")
@@ -1177,19 +1209,19 @@ def _(
 
 
 @app.cell
-def _(df_paired, df_skill, issued_month, np, pcode, plt, trimester):
-    _df_hp = df_paired[
-        (df_paired["pcode"] == pcode)
-        & (df_paired["issued_month"] == issued_month)
-        & (df_paired["trimester"] == trimester)
-        & df_paired["hist_prob"].notna()
-        & df_paired["obs_mean"].notna()
+def _(df_paired_active, df_skill_active, issued_month, np, pcode, plt, trimester):
+    _df_hp = df_paired_active[
+        (df_paired_active["pcode"] == pcode)
+        & (df_paired_active["issued_month"] == issued_month)
+        & (df_paired_active["trimester"] == trimester)
+        & df_paired_active["hist_prob"].notna()
+        & df_paired_active["obs_mean"].notna()
     ].copy()
 
-    _skill_row_hp = df_skill[
-        (df_skill["pcode"] == pcode)
-        & (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
+    _skill_row_hp = df_skill_active[
+        (df_skill_active["pcode"] == pcode)
+        & (df_skill_active["issued_month"] == issued_month)
+        & (df_skill_active["trimester"] == trimester)
     ]
 
     _fig_hp, _ax = plt.subplots(figsize=(5, 5), dpi=150)
@@ -1248,12 +1280,12 @@ def _(mo):
 
 
 @app.cell
-def _(df_paired, pd, plt):
+def _(df_paired_active, pd, plt):
     # Calibration diagram pooling all (country, issued_month, trimester, year) combinations.
     # For each row, determine if obs_mean was actually in the lower tercile for that
     # (pcode, trimester) — computed within the pooled data (in log-space; monotone so same result).
-    _df_cal = df_paired[
-        df_paired["hist_prob"].notna() & df_paired["obs_mean"].notna()
+    _df_cal = df_paired_active[
+        df_paired_active["hist_prob"].notna() & df_paired_active["obs_mean"].notna()
     ].copy()
 
     # Lower tercile flag: obs < 33rd pctile of obs for that (pcode, trimester)
@@ -1318,8 +1350,8 @@ def _(mo):
 @app.cell
 def _(
     calendar,
-    df_paired,
-    df_skill,
+    df_paired_active,
+    df_skill_active,
     issued_month,
     mo,
     norm,
@@ -1342,16 +1374,16 @@ def _(
         return mo.Html(f'<img src="data:image/png;base64,{_enc}" style="max-width:100%"/>')
 
     # ── Shared data ────────────────────────────────────────────────────────────
-    _row = df_skill[
-        (df_skill["pcode"] == pcode)
-        & (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
+    _row = df_skill_active[
+        (df_skill_active["pcode"] == pcode)
+        & (df_skill_active["issued_month"] == issued_month)
+        & (df_skill_active["trimester"] == trimester)
     ]
-    _df_tab = df_paired[
-        (df_paired["pcode"] == pcode)
-        & (df_paired["issued_month"] == issued_month)
-        & (df_paired["trimester"] == trimester)
-        & df_paired["obs_mean"].notna()
+    _df_tab = df_paired_active[
+        (df_paired_active["pcode"] == pcode)
+        & (df_paired_active["issued_month"] == issued_month)
+        & (df_paired_active["trimester"] == trimester)
+        & df_paired_active["obs_mean"].notna()
     ].copy()
 
     if _row.empty or _df_tab.empty or pd.isna(_row.iloc[0]["pearson_r"]):
@@ -1548,13 +1580,13 @@ def _(mo):
 
 
 @app.cell
-def _(df_skill, issued_month, mo, norm, np, pcode, pd, plt, trimester):
+def _(df_skill_active, issued_month, mo, norm, np, pcode, pd, plt, trimester):
     import io as _io2, base64 as _b642
 
-    _row_ex = df_skill[
-        (df_skill["pcode"] == pcode)
-        & (df_skill["issued_month"] == issued_month)
-        & (df_skill["trimester"] == trimester)
+    _row_ex = df_skill_active[
+        (df_skill_active["pcode"] == pcode)
+        & (df_skill_active["issued_month"] == issued_month)
+        & (df_skill_active["trimester"] == trimester)
     ]
     _fig_ex = None
 

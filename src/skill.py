@@ -142,6 +142,7 @@ def run_all_combinations(
     df_seas5: pd.DataFrame,
     df_era5: pd.DataFrame,
     progress: Any = None,
+    detrend: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Compute skill for all 144 (issued_month × trimester) combinations.
 
@@ -175,6 +176,36 @@ def run_all_combinations(
 
             # Normalize SEAS5 in log-space
             df_s_norm = normalize_seas5(df_s_log, df_e_log)
+
+            if detrend:
+                _hist_yrs = sorted(set(df_e_log["season_year"]) & set(df_s_norm["season_year"]))
+                if len(_hist_yrs) >= MIN_YEARS:
+                    _x_hist = np.array(_hist_yrs, dtype=float)
+                    _A_dt = np.column_stack([_x_hist, np.ones(len(_x_hist))])
+
+                    # Detrend forecast_mean: fit on overlap, apply to all (incl. current year)
+                    _fc_hist = (
+                        df_s_norm[df_s_norm["season_year"].isin(_hist_yrs)]
+                        .sort_values("season_year")["forecast_mean"].values
+                    )
+                    _a, _b = np.linalg.lstsq(_A_dt, _fc_hist, rcond=None)[0]
+                    _x_s = df_s_norm["season_year"].values.astype(float)
+                    df_s_norm = df_s_norm.copy()
+                    df_s_norm["forecast_mean"] = (
+                        df_s_norm["forecast_mean"].values - (_a * _x_s + _b) + _fc_hist.mean()
+                    )
+
+                    # Detrend obs_mean: fit on overlap, apply to all ERA5 years
+                    _obs_hist = (
+                        df_e_log[df_e_log["season_year"].isin(_hist_yrs)]
+                        .sort_values("season_year")["obs_mean"].values
+                    )
+                    _a, _b = np.linalg.lstsq(_A_dt, _obs_hist, rcond=None)[0]
+                    _x_e = df_e_log["season_year"].values.astype(float)
+                    df_e_log = df_e_log.copy()
+                    df_e_log["obs_mean"] = (
+                        df_e_log["obs_mean"].values - (_a * _x_e + _b) + _obs_hist.mean()
+                    )
 
             skill = compute_skill_metrics(df_s_norm, df_e_log)
 
