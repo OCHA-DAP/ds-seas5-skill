@@ -174,8 +174,8 @@ def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, r
     _C_DVM = "#A8623A"  # drought vsev mod
     _C_DSH = "#C8844A"  # drought sev high
     _C_DSM = "#DFAA80"  # drought sev mod
-    _C_FVH = "#0D3B6B"  # flood vsev high
-    _C_FVM = "#2E5A88"  # flood vsev mod
+    _C_FVH = "#0D40B0"  # flood vsev high
+    _C_FVM = "#2E60B8"  # flood vsev mod
     _C_FSH = "#3D85C8"  # flood sev high
     _C_FSM = "#7AAED8"  # flood sev mod
     # Scatter zone fill colors (just 4 — hatching shows skill within each zone)
@@ -246,8 +246,8 @@ def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, r
         _ax.set_ylim(0, 1.0)
 
         # Grey background zones (drawn first)
-        _zone(_ax, -_xlim, _xlim, 0, _r_mod, "#EEEEEE", "xx", "#CCCCCC", 1.0)          # low skill (cross hatch)
-        _zone(_ax, -_sev_rp, _sev_rp, _r_mod, _r_high, "#F5F5F5", "///", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
+        _zone(_ax, -_xlim, _xlim, 0, _r_mod, "white", "xx", "#CCCCCC", 1.0)            # low skill (cross hatch)
+        _zone(_ax, -_sev_rp, _sev_rp, _r_mod, _r_high, "white", "///", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
 
         # Drought zones (x < 0; more negative = worse)
         _zone(_ax, -_xlim, -_vsev_rp, _r_high, 1.0,    _C_DH)               # vsev + high skill
@@ -312,8 +312,8 @@ def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, r
         _ax.set_ylim(0, 1.0)
 
         # Grey background zones (drawn first)
-        _zone(_ax, 0, 100, 0, _r_mod, "#EEEEEE", "xx", "#CCCCCC", 1.0)                     # low skill (cross hatch)
-        _zone(_ax, _sev_pct, 100 - _sev_pct, _r_mod, _r_high, "#F5F5F5", "///", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
+        _zone(_ax, 0, 100, 0, _r_mod, "white", "xx", "#CCCCCC", 1.0)                      # low skill (cross hatch)
+        _zone(_ax, _sev_pct, 100 - _sev_pct, _r_mod, _r_high, "white", "///", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
 
         # Drought zones (left)
         _zone(_ax, 0, _vsev_pct, _r_high, 1.0,     _C_DH)                        # vsev + high skill
@@ -401,6 +401,7 @@ def _(mo):
 
 @app.cell
 def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl, world_geo):
+    import geopandas as _gpd_map  # needed for GeoDataFrame methods in this cell
     import matplotlib.patches as _mpatch_m
 
     _vsev_m  = 100 / very_severe_rp_sl.value
@@ -456,8 +457,8 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
         "drought_vsev_mod":  ("#A8623A", "#7B3A1A", "///", "white"),
         "drought_sev_high":  ("#C8844A", "#A06030", None,  None),
         "drought_sev_mod":   ("#DFAA80", "#C08050", "///", "white"),
-        "flood_vsev_high":   ("#0D3B6B", "#0A2A50", None,  None),
-        "flood_vsev_mod":    ("#2E5A88", "#0D3B6B", "///", "white"),
+        "flood_vsev_high":   ("#0D40B0", "#092E88", None,  None),
+        "flood_vsev_mod":    ("#2E60B8", "#0D40B0", "///", "white"),
         "flood_sev_high":    ("#3D85C8", "#2060A0", None,  None),
         "flood_sev_mod":     ("#7AAED8", "#5090B8", "///", "white"),
     }
@@ -474,7 +475,7 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
     _xl, _yl = _reg["xlim"], _reg["ylim"]
 
     # ── Clip world to region ─────────────────────────────────────────────
-    _gdf = world_geo.copy()
+    _gdf = world_geo.dropna(subset=["geometry"]).copy()
     _gdf["cat"] = _gdf["iso3"].map(_iso3_cat).fillna("unmonitored")
     _gdf_clip = _gdf.cx[_xl[0]:_xl[1], _yl[0]:_yl[1]]
 
@@ -531,8 +532,8 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
         (f"Drought ≥{_vsev_yr}yr RP, mod skill",           "#A8623A", "white",   "///", 0.0),
         (f"Drought {_sev_yr}–{_vsev_yr}yr RP, high skill", "#C8844A", "#A06030", None,  0.5),
         (f"Drought {_sev_yr}–{_vsev_yr}yr RP, mod skill",  "#DFAA80", "white",   "///", 0.0),
-        (f"Flood ≥{_vsev_yr}yr RP, high skill",            "#0D3B6B", "#0A2A50", None,  0.5),
-        (f"Flood ≥{_vsev_yr}yr RP, mod skill",             "#2E5A88", "white",   "///", 0.0),
+        (f"Flood ≥{_vsev_yr}yr RP, high skill",            "#0D40B0", "#092E88", None,  0.5),
+        (f"Flood ≥{_vsev_yr}yr RP, mod skill",             "#2E60B8", "white",   "///", 0.0),
         (f"Flood {_sev_yr}–{_vsev_yr}yr RP, high skill",   "#3D85C8", "#2060A0", None,  0.5),
         (f"Flood {_sev_yr}–{_vsev_yr}yr RP, mod skill",    "#7AAED8", "white",   "///", 0.0),
         ("High skill — no alert",                           "#FFFFFF", "#AAAAAA", None,  0.5),
@@ -586,7 +587,7 @@ def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, sev
     _df_t["_drought"] = _df_t["forecast_percentile"] < 50
 
     # (drought, tier): (dark_color, light_color, bg)
-    _dark  = {True: "#7B3A1A", False: "#0D3B6B"}
+    _dark  = {True: "#7B3A1A", False: "#0D40B0"}
     _light = {True: "#C8844A", False: "#3D85C8"}
     _bg    = {(True, 1): "#F9EDE8", (True, 2): "#FDF3EC", (True, 3): "#FDF3EC",
               (False, 1): "#E8EEF9", (False, 2): "#ECF3FD", (False, 3): "#ECF3FD"}
@@ -808,7 +809,7 @@ def _(
         _vsev_rp = very_severe_rp_sl.value
         _C_DH = "#7B3A1A"
         _C_DM = "#C8844A"
-        _C_FH = "#0D3B6B"
+        _C_FH = "#0D40B0"
         _C_FM = "#3D85C8"
 
         # RP quantile thresholds on both axes
