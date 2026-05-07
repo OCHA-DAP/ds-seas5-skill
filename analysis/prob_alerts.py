@@ -160,7 +160,7 @@ def _(mo):
 
 
 @app.cell
-def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, scatter_rp_sw, severe_rp_sl, trimester, very_severe_rp_sl):
+def _(calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, scatter_rp_sw, severe_rp_sl, trimester, very_severe_rp_sl):
     import matplotlib.patches as _mpatch_sc
 
     _vsev_rp = very_severe_rp_sl.value
@@ -294,7 +294,7 @@ def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, r
         _ax.set_ylabel("Skill (Pearson r)")
         _ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: str(int(abs(x)))))
         _yr = int(_df["current_forecast_year"].dropna().max()) if not _df["current_forecast_year"].dropna().empty else "—"
-        _ax.set_title(f"Severity × skill (RP) — issued month {issued_month}, valid {trimester}, forecast year {_yr}{_detrend_sfx}")
+        _ax.set_title(f"Severity × skill (RP) — issued {calendar.month_abbr[issued_month]}, valid {trimester}, forecast year {_yr}{_detrend_sfx}")
 
     else:
         # ── Percentile view (default) ────────────────────────────────────
@@ -357,7 +357,7 @@ def _(detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, r
         _ax.set_xlabel("Forecast percentile among historical (0 = driest, 100 = wettest)")
         _ax.set_ylabel("Skill (Pearson r)")
         _yr = int(_df["current_forecast_year"].dropna().max()) if not _df["current_forecast_year"].dropna().empty else "—"
-        _ax.set_title(f"Severity × skill — issued month {issued_month}, valid {trimester}, forecast year {_yr}{_detrend_sfx}")
+        _ax.set_title(f"Severity × skill — issued {calendar.month_abbr[issued_month]}, valid {trimester}, forecast year {_yr}{_detrend_sfx}")
 
     _ax.spines["top"].set_visible(False)
     _ax.spines["right"].set_visible(False)
