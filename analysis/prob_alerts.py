@@ -489,7 +489,7 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
         "lac":         {"xlim": (-120, -30), "ylim": (-35, 35)},
         "africa":      {"xlim": (-20, 55),   "ylim": (-36, 38)},
         "asia_europe": {"xlim": (15, 131),   "ylim": (5, 56)},
-        "sea_pacific": {"xlim": (85, 180),   "ylim": (-36, 30)},
+        "sea_pacific": {"xlim": (85, 180),   "ylim": (-23, 30)},
     }
     _reg = _REGIONS[map_region_dd.value]
     _xl, _yl = _reg["xlim"], _reg["ylim"]
