@@ -188,7 +188,7 @@ def _(mo):
 
 
 @app.cell
-def _(calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, scatter_rp_sw, severe_rp_sl, trimester, very_severe_rp_sl):
+def _(TRIMESTERS, calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, scatter_rp_sw, severe_rp_sl, trimester, very_severe_rp_sl):
     import matplotlib.patches as _mpatch_sc
 
     _vsev_rp = very_severe_rp_sl.value
@@ -322,7 +322,8 @@ def _(calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r
         _ax.set_ylabel("Skill (Pearson r)")
         _ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: str(int(abs(x)))))
         _yr = int(_df["current_forecast_year"].dropna().max()) if not _df["current_forecast_year"].dropna().empty else "—"
-        _ax.set_title(f"Severity × skill (RP) — issued {calendar.month_abbr[issued_month]}, valid {trimester}, forecast year {_yr}{_detrend_sfx}")
+        _tri_str_sc = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
+        _ax.set_title(f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr}, valid {_tri_str_sc}{_detrend_sfx}")
 
     else:
         # ── Percentile view (default) ────────────────────────────────────
@@ -385,7 +386,8 @@ def _(calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r
         _ax.set_xlabel("Forecast percentile among historical (0 = driest, 100 = wettest)")
         _ax.set_ylabel("Skill (Pearson r)")
         _yr = int(_df["current_forecast_year"].dropna().max()) if not _df["current_forecast_year"].dropna().empty else "—"
-        _ax.set_title(f"Severity × skill — issued {calendar.month_abbr[issued_month]}, valid {trimester}, forecast year {_yr}{_detrend_sfx}")
+        _tri_str_sc = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
+        _ax.set_title(f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr}, valid {_tri_str_sc}{_detrend_sfx}")
 
     _ax.spines["top"].set_visible(False)
     _ax.spines["right"].set_visible(False)
@@ -826,15 +828,17 @@ def _(detrend_sw):
 
 @app.cell
 def _(mo):
-    show_drought_rp_sw = mo.ui.switch(label="Show drought RP shading", value=True)
-    show_flood_rp_sw   = mo.ui.switch(label="Show flood RP shading",   value=True)
+    show_drought_rp_sw = mo.ui.switch(label="Also show drought shading", value=False)
+    show_flood_rp_sw   = mo.ui.switch(label="Also show flood shading",   value=False)
     mo.hstack([show_drought_rp_sw, show_flood_rp_sw], justify="start")
     return show_drought_rp_sw, show_flood_rp_sw
 
 
 @app.cell
 def _(
+    best_dt_combos,
     calendar,
+    detrend_sw,
     df_paired_active,
     df_skill_active,
     issued_month,
@@ -895,8 +899,13 @@ def _(
         _y_sev_f  = float(_df_s2["obs_orig"].quantile(1 - 1 / _sev_rp))
         _y_vsev_f = float(_df_s2["obs_orig"].quantile(1 - 1 / _vsev_rp))
 
+        # Auto-show relevant shading based on forecast; switches force-show the other side
+        _fcst_pct2 = float(_sr2["forecast_percentile"]) if pd.notna(_sr2.get("forecast_percentile")) else 50.0
+        _show_drought2 = (_fcst_pct2 < 50) or show_drought_rp_sw.value
+        _show_flood2   = (_fcst_pct2 >= 50) or show_flood_rp_sw.value
+
         # linewidth=0 removes edge borders so only facecolor is rendered
-        if show_drought_rp_sw.value:
+        if _show_drought2:
             _ax2.axvspan(_xlim2[0], _x_sev_d,  color=_C_DM, alpha=0.12, linewidth=0, zorder=-2)
             _ax2.axvspan(_xlim2[0], _x_vsev_d, color=_C_DH, alpha=0.12, linewidth=0, zorder=-2)
             _ax2.axhspan(_ylim2[0], _y_sev_d,  color=_C_DM, alpha=0.12, linewidth=0, zorder=-2)
@@ -905,7 +914,7 @@ def _(
             _ax2.text(_x_vsev_d, _ylim2[1], f" {_vsev_rp}yr", color=_C_DH, fontsize=7, va="top", ha="center", rotation=90)
             _ax2.text(_xlim2[1], _y_sev_d,  f" {_sev_rp}yr",  color=_C_DM, fontsize=7, va="center", ha="right")
             _ax2.text(_xlim2[1], _y_vsev_d, f" {_vsev_rp}yr", color=_C_DH, fontsize=7, va="center", ha="right")
-        if show_flood_rp_sw.value:
+        if _show_flood2:
             _ax2.axvspan(_x_sev_f,  _xlim2[1], color=_C_FM, alpha=0.12, linewidth=0, zorder=-2)
             _ax2.axvspan(_x_vsev_f, _xlim2[1], color=_C_FH, alpha=0.12, linewidth=0, zorder=-2)
             _ax2.axhspan(_y_sev_f,  _ylim2[1], color=_C_FM, alpha=0.12, linewidth=0, zorder=-2)
@@ -951,8 +960,12 @@ def _(
         _n2      = int(_sr2["n_years"]) if pd.notna(_sr2["n_years"]) else 0
         _country2 = _sr2["country_name"] if "country_name" in _sr2.index else pcode
 
+        _is_dt2 = (detrend_sw.value == "detrended") or (
+            detrend_sw.value == "best" and (pcode, issued_month, trimester) in best_dt_combos
+        )
+        _data_lbl2 = f" [{'detrended' if _is_dt2 else 'raw'}]" if detrend_sw.value in ("detrended", "best") else ""
         _ax2.set_title(
-            f"{_country2} — issued {calendar.month_abbr[issued_month]}, valid {trimester}"
+            f"{_country2} — issued {calendar.month_abbr[issued_month]}, valid {trimester}{_data_lbl2}"
             + ("  ⚠ negative skill" if _r_val2 < 0 else ""),
             color="darkred" if _r_val2 < 0 else "black",
         )
