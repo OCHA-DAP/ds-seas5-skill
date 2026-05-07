@@ -539,26 +539,26 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
         if _st[2]:
             _sub.plot(ax=_ax_m, color="none", edgecolor=_st[3], hatch=_st[2], linewidth=0)
 
-    # Small island dots for SEA/Pacific — all countries with small bbox, incl. unmonitored
-    if map_region_dd.value == "sea_pacific":
-        for _, _row in _gdf_clip.iterrows():
-            _geom = _row.geometry
-            if _geom is None:
-                continue
-            if _geom.area < 3.0:
-                _cx, _cy = _geom.centroid.x, _geom.centroid.y
-                _cat_dot = _row["cat"]
-                if _cat_dot == "unmonitored":
-                    _fc_dot, _ec_dot = "#DDDDDD", "#AAAAAA"
-                elif _cat_dot in ("high_none", "mid_none", "no_data"):
-                    _fc_dot, _ec_dot = "#CCCCCC", "#888888"
-                elif _cat_dot == "off_season":
-                    _fc_dot, _ec_dot = "#C0C0C0", "#888888"
-                else:
-                    _st_dot = _STYLE.get(_cat_dot, ("#CCCCCC", "#888888", None, None))
-                    _fc_dot, _ec_dot = _st_dot[0], _st_dot[1]
-                _ax_m.plot(_cx, _cy, "o", color=_fc_dot, markersize=7, zorder=5,
-                           markeredgecolor=_ec_dot, markeredgewidth=0.7)
+    # Small island dots — all regions, all countries with polygon area < 3 sq deg
+    _dot_ms = 10 if map_region_dd.value == "global" else 8
+    for _, _row in _gdf_clip.iterrows():
+        _geom = _row.geometry
+        if _geom is None:
+            continue
+        if _geom.area < 3.0:
+            _cx, _cy = _geom.centroid.x, _geom.centroid.y
+            _cat_dot = _row["cat"]
+            if _cat_dot == "unmonitored":
+                _fc_dot, _ec_dot = "#DDDDDD", "#AAAAAA"
+            elif _cat_dot in ("high_none", "mid_none", "no_data"):
+                _fc_dot, _ec_dot = "#CCCCCC", "#888888"
+            elif _cat_dot == "off_season":
+                _fc_dot, _ec_dot = "#C0C0C0", "#888888"
+            else:
+                _st_dot = _STYLE.get(_cat_dot, ("#CCCCCC", "#888888", None, None))
+                _fc_dot, _ec_dot = _st_dot[0], _st_dot[1]
+            _ax_m.plot(_cx, _cy, "o", color=_fc_dot, markersize=_dot_ms, zorder=5,
+                       markeredgecolor=_ec_dot, markeredgewidth=0.8)
 
     _ax_m.set_xlim(_xl)
     _ax_m.set_ylim(_yl)
