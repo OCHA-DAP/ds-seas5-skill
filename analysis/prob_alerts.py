@@ -479,7 +479,7 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
     _dy = _yl[1] - _yl[0]
     _map_w = 12.0
     _map_h = _map_w * _dy / _dx
-    _leg_h = 1.2  # inches reserved for legend
+    _leg_h = 1.6  # inches reserved for two legend rows
     _fig_h = _map_h + _leg_h
 
     # ── Clip world to region ─────────────────────────────────────────────
@@ -541,35 +541,40 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
         fontsize=11, pad=8,
     )
 
-    # ── Legend (outside map, bottom of figure) ───────────────────────────
-    # Row 1: RP severity colours (no hatch — skill shown by hatch on the map itself)
-    # Row 2: skill / monitoring-status patterns
-    _LEG = [
-        ("Very severe drought", "#7B3A1A", "#5A2A0A", None,   0.5),
-        ("Severe drought",      "#C8844A", "#A06030", None,   0.5),
-        ("No alert",            "#FFFFFF", "#AAAAAA", None,   0.5),
-        ("Severe flood",        "#3D85C8", "#2060A0", None,   0.5),
-        ("Very severe flood",   "#0D40B0", "#092E88", None,   0.5),
-        ("Mod skill",           "#FFFFFF", "#CCCCCC", "///",  0.5),
-        ("Low skill",           "#FFFFFF", "#BBBBBB", "xxxx", 0.5),
-        ("Off season",          "#D0D0D0", "#BBBBBB", None,   0.5),
-        ("Not monitored",       "#F0F0F0", "#DDDDDD", None,   0.5),
+    # ── Legend: two labelled rows outside the map ────────────────────────
+    _LEG_KW = dict(fontsize=7, framealpha=0.95, edgecolor="#CCCCCC",
+                   handlelength=2.0, handletextpad=0.5, title_fontsize=7.5)
+
+    _h_row1 = [
+        _mpatch_m.Patch(facecolor="#7B3A1A", edgecolor="#5A2A0A", linewidth=0.5, label="Very severe drought"),
+        _mpatch_m.Patch(facecolor="#C8844A", edgecolor="#A06030", linewidth=0.5, label="Severe drought"),
+        _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#AAAAAA", linewidth=0.5, label="Neither"),
+        _mpatch_m.Patch(facecolor="#3D85C8", edgecolor="#2060A0", linewidth=0.5, label="Severe flood"),
+        _mpatch_m.Patch(facecolor="#0D40B0", edgecolor="#092E88", linewidth=0.5, label="Very severe flood"),
     ]
-    _handles = [
-        _mpatch_m.Patch(facecolor=_fc, edgecolor=_ec, hatch=_h, linewidth=_lw, label=_lbl)
-        for _lbl, _fc, _ec, _h, _lw in _LEG
+    _h_row2 = [
+        _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#CCCCCC", hatch="///",  linewidth=0.5, label="Mod skill"),
+        _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#BBBBBB", hatch="xxxx", linewidth=0.5, label="Low skill"),
+        _mpatch_m.Patch(facecolor="#D0D0D0", edgecolor="#BBBBBB",               linewidth=0.5, label="Off season"),
+        _mpatch_m.Patch(facecolor="#F0F0F0", edgecolor="#DDDDDD",               linewidth=0.5, label="Not monitored"),
     ]
-    _fig_m.legend(
-        handles=_handles,
-        loc="lower center",
-        bbox_to_anchor=(0.5, 0.0),
-        ncol=5,
-        fontsize=7,
-        framealpha=0.95,
-        edgecolor="#CCCCCC",
-        handlelength=2.5,
-    )
+
+    # Reserve legend space and draw canvas so we can measure row-2 height
     plt.tight_layout(rect=[0, _leg_h / _fig_h, 1, 1])
+
+    _leg2 = _fig_m.legend(handles=_h_row2, title="filters",
+                           loc="lower center", bbox_to_anchor=(0.5, 0.0),
+                           ncol=4, **_LEG_KW)
+    _fig_m.canvas.draw()
+    _leg2_top = _leg2.get_window_extent().transformed(
+        _fig_m.transFigure.inverted()
+    ).y1
+
+    _fig_m.add_artist(_leg2)
+    _fig_m.legend(handles=_h_row1, title="hazard (high skill)",
+                  loc="lower center", bbox_to_anchor=(0.5, _leg2_top + 0.005),
+                  ncol=5, **_LEG_KW)
+
     _fig_m
 
 
