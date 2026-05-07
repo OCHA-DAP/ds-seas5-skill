@@ -537,7 +537,8 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
         if _geom is None or _geom.area >= 0.5:
             continue
         _cat_dot = _row["cat"]
-        _cx, _cy = _geom.centroid.x, _geom.centroid.y
+        _rp = _geom.representative_point()  # always inside polygon; avoids broken centroids for antimeridian-crossing countries
+        _cx, _cy = _rp.x, _rp.y
         # Skip if outside latitude band
         if _cy < _yl[0] or _cy > _yl[1]:
             continue
