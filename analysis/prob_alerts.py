@@ -467,7 +467,7 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
     _REGIONS = {
         "global":      {"xlim": (-120, 180), "ylim": (-36, 56)},
         "lac":         {"xlim": (-120, -30), "ylim": (-35, 35)},
-        "africa":      {"xlim": (-20, 55),   "ylim": (-40, 40)},
+        "africa":      {"xlim": (-20, 55),   "ylim": (-36, 38)},
         "asia_europe": {"xlim": (15, 131),   "ylim": (5, 56)},
         "sea_pacific": {"xlim": (85, 180),   "ylim": (-36, 30)},
     }
