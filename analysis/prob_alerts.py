@@ -981,11 +981,11 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_dt, issued_month, np, pcode, plt,
     _ax_r.spines["top"].set_visible(False)
     _ax_r.spines["right"].set_visible(False)
 
-    # Bottom: forecast percentile — raw (solid) and detrended (dashed)
-    _ax_p.plot(_x, _df_ov["forecast_percentile"].values.astype(float),
-               color=_C_P, linewidth=1.8, marker="o", markersize=5, label="Raw")
-    _ax_p.plot(_x, _df_ov_dt["forecast_percentile"].values.astype(float),
-               color=_C_P, linewidth=1.8, marker="s", markersize=5, linestyle="--", alpha=0.6, label="Detrended")
+    # Bottom: forecast percentile — raw and detrended bars
+    _ax_p.bar(_x - _w/2, _df_ov["forecast_percentile"].values.astype(float),
+              width=_w, color=_bar_cols, alpha=0.80, label="Raw")
+    _ax_p.bar(_x + _w/2, _df_ov_dt["forecast_percentile"].values.astype(float),
+              width=_w, color=_bar_cols, alpha=0.40, hatch="///", edgecolor="white", label="Detrended")
     _ax_p.axhline(50, color=_C_P, linewidth=0.6, linestyle=":", alpha=0.4)
     _ax_p.set_ylim(0, 100)
     _ax_p.set_ylabel("Forecast percentile")
@@ -1029,6 +1029,7 @@ def _(calendar, df_paired, df_paired_dt, issued_month, np, pcode, plt, trimester
         _ax_f.plot(_det["season_year"], np.expm1(_det["forecast_mean"]),
                    color=_C_F, linewidth=1.6, marker="o", markersize=4,
                    linestyle="--", alpha=0.6, label="Detrended")
+    _ax_f.set_ylim(bottom=0)
     _ax_f.set_ylabel("SEAS5 forecast (mm/day)")
     _ax_f.set_title(
         f"Forecast & reanalysis timeseries — issued {calendar.month_abbr[issued_month]}, valid {trimester}"
@@ -1045,6 +1046,7 @@ def _(calendar, df_paired, df_paired_dt, issued_month, np, pcode, plt, trimester
         _ax_o.plot(_det["season_year"], np.expm1(_det["obs_mean"]),
                    color=_C_O, linewidth=1.6, marker="o", markersize=4,
                    linestyle="--", alpha=0.6, label="Detrended")
+    _ax_o.set_ylim(bottom=0)
     _ax_o.set_ylabel("ERA5 observed (mm/day)")
     _ax_o.set_xlabel("Year")
     _ax_o.legend(fontsize=7, loc="upper right")
