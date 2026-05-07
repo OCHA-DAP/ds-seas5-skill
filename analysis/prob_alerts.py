@@ -143,9 +143,9 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    severe_rp_sl      = mo.ui.slider(2,    10,   1,    3,    label="Severe RP (yr)")
-    very_severe_rp_sl = mo.ui.slider(5,    25,   1,    10,   label="Very severe RP (yr)")
-    r_mod_sl          = mo.ui.slider(0.10, 0.60, 0.05, 0.30, label="Moderate skill (r ≥)")
+    severe_rp_sl      = mo.ui.slider(2,    10,   1,    3,    label="Alert RP (yr)")
+    very_severe_rp_sl = mo.ui.slider(5,    25,   1,    10,   label="Severe Alert RP (yr)")
+    r_mod_sl          = mo.ui.slider(0.10, 0.60, 0.05, 0.25, label="Moderate skill (r ≥)")
     r_high_sl         = mo.ui.slider(0.20, 0.80, 0.05, 0.50, label="High skill (r ≥)")
     mo.hstack([severe_rp_sl, very_severe_rp_sl, r_mod_sl, r_high_sl], justify="start")
     return r_high_sl, r_mod_sl, severe_rp_sl, very_severe_rp_sl
@@ -547,11 +547,11 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
                    handlelength=2.0, handletextpad=0.5, title_fontsize=7.5)
 
     _h_row1 = [
-        _mpatch_m.Patch(facecolor="#7B3A1A", edgecolor="#5A2A0A", linewidth=0.5, label="Very severe drought"),
-        _mpatch_m.Patch(facecolor="#C8844A", edgecolor="#A06030", linewidth=0.5, label="Severe drought"),
+        _mpatch_m.Patch(facecolor="#7B3A1A", edgecolor="#5A2A0A", linewidth=0.5, label="Severe drought"),
+        _mpatch_m.Patch(facecolor="#C8844A", edgecolor="#A06030", linewidth=0.5, label="Drought"),
         _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#AAAAAA", linewidth=0.5, label="Neither"),
-        _mpatch_m.Patch(facecolor="#3D85C8", edgecolor="#2060A0", linewidth=0.5, label="Severe flood"),
-        _mpatch_m.Patch(facecolor="#0D40B0", edgecolor="#092E88", linewidth=0.5, label="Very severe flood"),
+        _mpatch_m.Patch(facecolor="#3D85C8", edgecolor="#2060A0", linewidth=0.5, label="Flood"),
+        _mpatch_m.Patch(facecolor="#0D40B0", edgecolor="#092E88", linewidth=0.5, label="Severe flood"),
     ]
     _h_row2 = [
         _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#CCCCCC", hatch="///",  linewidth=0.5, label="Mod skill"),
@@ -569,7 +569,7 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
 
     # Row 1: upper edge flush with axes bottom — no gap
     _axes_bot = _leg_h / _fig_h
-    _leg1 = _fig_m.legend(handles=_h_row1, title="Hazard (high skill)",
+    _leg1 = _fig_m.legend(handles=_h_row1, title="Hazard",
                            loc="upper center", bbox_to_anchor=(0.5, _axes_bot),
                            ncol=5, **_LEG_KW)
     _fig_m.canvas.draw()
@@ -579,7 +579,7 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
 
     _fig_m.add_artist(_leg1)
     # Row 2: hangs immediately below row 1
-    _fig_m.legend(handles=_h_row2, title="Filters",
+    _fig_m.legend(handles=_h_row2, title="Filters (high skill prediction unless otherwise indicated)",
                   loc="upper center", bbox_to_anchor=(0.5, _leg1_bot - 0.003),
                   ncol=4, **_LEG_KW)
 
@@ -970,6 +970,8 @@ def _(df_skill_active, issued_month, mo, pd, rainy_set, trimester):
             (df_skill_active["issued_month"] == issued_month)
             & (df_skill_active["trimester"] == trimester)
             & df_skill_active["prob_lower_tercile"].notna()
+            & (df_skill_active["prob_lower_tercile"] > 1 / 3)
+            & df_skill_active["pcode"].apply(lambda p: (p, trimester) in rainy_set)
         ]
         .sort_values("prob_lower_tercile", ascending=False)
         .copy()
