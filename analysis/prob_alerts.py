@@ -742,7 +742,7 @@ def _(TRIMESTER_NAMES, TRIMESTERS, df_skill, monthly_clim, pd, pcode, plt, rainy
 
 
 @app.cell
-def _(TRIMESTERS, df_skill, month_pct_sl, monthly_clim, pcode, plt, trimester, trimester_pct_sl):
+def _(TRIMESTERS, df_skill, mo, month_pct_sl, monthly_clim, pcode, plt, trimester, trimester_pct_sl):
     _country2 = (
         df_skill[df_skill["pcode"] == pcode]["country_name"].iloc[0]
         if not df_skill[df_skill["pcode"] == pcode].empty else pcode
@@ -778,7 +778,7 @@ def _(TRIMESTERS, df_skill, month_pct_sl, monthly_clim, pcode, plt, trimester, t
     _ax_mon.spines["top"].set_visible(False)
     _ax_mon.spines["right"].set_visible(False)
     plt.tight_layout()
-    _fig_mon
+    mo.ui.accordion({"Monthly climatology": _fig_mon})
 
 
 @app.cell
@@ -925,6 +925,57 @@ def _(
     _fig_scatter2
 
 
+@app.cell
+def _(TRIMESTER_NAMES, calendar, df_skill_active, issued_month, np, pcode, plt, rainy_set):
+    _df_ov = (
+        df_skill_active[
+            (df_skill_active["pcode"] == pcode)
+            & (df_skill_active["issued_month"] == issued_month)
+        ]
+        .set_index("trimester")
+        .reindex(TRIMESTER_NAMES)
+    )
+    _country_ov = (
+        df_skill_active[df_skill_active["pcode"] == pcode]["country_name"].iloc[0]
+        if not df_skill_active[df_skill_active["pcode"] == pcode].empty else pcode
+    )
+
+    _x = np.arange(len(TRIMESTER_NAMES))
+    _r_vals   = _df_ov["pearson_r"].values.astype(float)
+    _pct_vals = _df_ov["forecast_percentile"].values.astype(float)
+    _rainy    = [(pcode, t) in rainy_set for t in TRIMESTER_NAMES]
+
+    _fig_ov, _ax_r = plt.subplots(figsize=(10, 3.5), dpi=150)
+    _ax_p = _ax_r.twinx()
+
+    # Correlation bars — royalblue for rainy, lightgrey for off-season
+    _bar_cols = ["royalblue" if r else "lightgrey" for r in _rainy]
+    _ax_r.bar(_x - 0.2, _r_vals, width=0.35, color=_bar_cols, alpha=0.75, label="Pearson r")
+    _ax_r.axhline(0, color="#AAAAAA", linewidth=0.7)
+    _ax_r.set_ylim(-1, 1)
+    _ax_r.set_ylabel("Pearson r", color="#444444")
+    _ax_r.tick_params(axis="y", labelcolor="#444444")
+
+    # Forecast percentile line — purple
+    _C_P = "rebeccapurple"
+    _ax_p.plot(_x + 0.05, _pct_vals, color=_C_P, linewidth=1.8, marker="o",
+               markersize=5, label="Forecast percentile", zorder=3)
+    _ax_p.axhline(50, color=_C_P, linewidth=0.6, linestyle="--", alpha=0.4)
+    _ax_p.set_ylim(0, 100)
+    _ax_p.set_ylabel("Forecast percentile", color=_C_P)
+    _ax_p.tick_params(axis="y", labelcolor=_C_P)
+
+    _ax_r.set_xticks(_x)
+    _ax_r.set_xticklabels(TRIMESTER_NAMES, rotation=45, ha="right", fontsize=8)
+    _ax_r.set_xlabel("Valid trimester  (blue = rainy season)")
+    _ax_r.set_title(
+        f"{_country_ov} — skill & forecast severity by trimester"
+        f" — issued {calendar.month_abbr[issued_month]}"
+    )
+    _ax_r.spines["top"].set_visible(False)
+    _ax_p.spines["top"].set_visible(False)
+    plt.tight_layout()
+    _fig_ov
 
 
 @app.cell
