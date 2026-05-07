@@ -546,6 +546,9 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
         if _cx < _xl[0] or _cx > _xl[1]:
             if map_region_dd.value not in ("global", "sea_pacific"):
                 continue
+            # sea_pacific: only wrap genuine Pacific islands (< -130°); skip Atlantic/Caribbean
+            if map_region_dd.value == "sea_pacific" and _cx >= -130:
+                continue
             if _cx < _xl[0]:
                 _cx_wrap = _cx + 360
                 _cx = _cx_wrap if _cx_wrap <= _xl[1] else _xl[1] - _dot_r * 1.5
