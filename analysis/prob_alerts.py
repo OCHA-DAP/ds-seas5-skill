@@ -827,9 +827,19 @@ def _(detrend_sw):
 
 
 @app.cell
-def _(mo):
-    show_drought_rp_sw = mo.ui.switch(label="Also show drought shading", value=False)
-    show_flood_rp_sw   = mo.ui.switch(label="Also show flood shading",   value=False)
+def _(df_skill_active, issued_month, mo, pd, pcode, trimester):
+    _row = df_skill_active[
+        (df_skill_active["pcode"] == pcode)
+        & (df_skill_active["issued_month"] == issued_month)
+        & (df_skill_active["trimester"] == trimester)
+    ]
+    _pct = (
+        float(_row.iloc[0]["forecast_percentile"])
+        if not _row.empty and pd.notna(_row.iloc[0].get("forecast_percentile"))
+        else 50.0
+    )
+    show_drought_rp_sw = mo.ui.switch(label="Show drought RP shading", value=_pct < 50)
+    show_flood_rp_sw   = mo.ui.switch(label="Show flood RP shading",   value=_pct >= 50)
     mo.hstack([show_drought_rp_sw, show_flood_rp_sw], justify="start")
     return show_drought_rp_sw, show_flood_rp_sw
 
@@ -875,7 +885,16 @@ def _(
         _ax2.set_axis_off()
     else:
         _sr2 = _skill_row2.iloc[0]
-        _xmin, _xmax = _df_s2["forecast_orig"].min(), _df_s2["forecast_orig"].max()
+        # Include current forecast in x range so the forecast line is never clipped
+        _cf_orig2_for_range = (
+            float(np.expm1(_sr2["current_forecast_mean"]))
+            if bool(_sr2.get("is_predictive")) and pd.notna(_sr2.get("current_forecast_mean"))
+            else None
+        )
+        _x_vals = list(_df_s2["forecast_orig"])
+        if _cf_orig2_for_range is not None:
+            _x_vals.append(_cf_orig2_for_range)
+        _xmin, _xmax = min(_x_vals), max(_x_vals)
         _ymin, _ymax = _df_s2["obs_orig"].min(), _df_s2["obs_orig"].max()
         _xpad = 0.1 * (_xmax - _xmin) if _xmax > _xmin else 0.1
         _ypad = 0.1 * (_ymax - _ymin) if _ymax > _ymin else 0.1
@@ -899,13 +918,8 @@ def _(
         _y_sev_f  = float(_df_s2["obs_orig"].quantile(1 - 1 / _sev_rp))
         _y_vsev_f = float(_df_s2["obs_orig"].quantile(1 - 1 / _vsev_rp))
 
-        # Auto-show relevant shading based on forecast; switches force-show the other side
-        _fcst_pct2 = float(_sr2["forecast_percentile"]) if pd.notna(_sr2.get("forecast_percentile")) else 50.0
-        _show_drought2 = (_fcst_pct2 < 50) or show_drought_rp_sw.value
-        _show_flood2   = (_fcst_pct2 >= 50) or show_flood_rp_sw.value
-
         # linewidth=0 removes edge borders so only facecolor is rendered
-        if _show_drought2:
+        if show_drought_rp_sw.value:
             _ax2.axvspan(_xlim2[0], _x_sev_d,  color=_C_DM, alpha=0.12, linewidth=0, zorder=-2)
             _ax2.axvspan(_xlim2[0], _x_vsev_d, color=_C_DH, alpha=0.12, linewidth=0, zorder=-2)
             _ax2.axhspan(_ylim2[0], _y_sev_d,  color=_C_DM, alpha=0.12, linewidth=0, zorder=-2)
@@ -914,7 +928,7 @@ def _(
             _ax2.text(_x_vsev_d, _ylim2[1], f" {_vsev_rp}yr", color=_C_DH, fontsize=7, va="top", ha="center", rotation=90)
             _ax2.text(_xlim2[1], _y_sev_d,  f" {_sev_rp}yr",  color=_C_DM, fontsize=7, va="center", ha="right")
             _ax2.text(_xlim2[1], _y_vsev_d, f" {_vsev_rp}yr", color=_C_DH, fontsize=7, va="center", ha="right")
-        if _show_flood2:
+        if show_flood_rp_sw.value:
             _ax2.axvspan(_x_sev_f,  _xlim2[1], color=_C_FM, alpha=0.12, linewidth=0, zorder=-2)
             _ax2.axvspan(_x_vsev_f, _xlim2[1], color=_C_FH, alpha=0.12, linewidth=0, zorder=-2)
             _ax2.axhspan(_y_sev_f,  _ylim2[1], color=_C_FM, alpha=0.12, linewidth=0, zorder=-2)
