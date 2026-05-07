@@ -567,18 +567,21 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
         top=(_leg_h + _map_h) / _fig_h,
     )
 
-    _leg2 = _fig_m.legend(handles=_h_row2, title="Filters",
-                           loc="lower center", bbox_to_anchor=(0.5, 0.0),
-                           ncol=4, **_LEG_KW)
+    # Row 1: upper edge flush with axes bottom — no gap
+    _axes_bot = _leg_h / _fig_h
+    _leg1 = _fig_m.legend(handles=_h_row1, title="Hazard (high skill)",
+                           loc="upper center", bbox_to_anchor=(0.5, _axes_bot),
+                           ncol=5, **_LEG_KW)
     _fig_m.canvas.draw()
-    _leg2_top = _leg2.get_window_extent().transformed(
+    _leg1_bot = _leg1.get_window_extent().transformed(
         _fig_m.transFigure.inverted()
-    ).y1
+    ).y0
 
-    _fig_m.add_artist(_leg2)
-    _fig_m.legend(handles=_h_row1, title="Hazard (high skill)",
-                  loc="lower center", bbox_to_anchor=(0.5, _leg2_top + 0.005),
-                  ncol=5, **_LEG_KW)
+    _fig_m.add_artist(_leg1)
+    # Row 2: hangs immediately below row 1
+    _fig_m.legend(handles=_h_row2, title="Filters",
+                  loc="upper center", bbox_to_anchor=(0.5, _leg1_bot - 0.003),
+                  ncol=4, **_LEG_KW)
 
     _fig_m
 
