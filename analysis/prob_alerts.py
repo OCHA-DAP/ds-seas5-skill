@@ -531,7 +531,7 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
     # ── Small island dots ─────────────────────────────────────────────────
     # Iterate over ALL countries (not just clipped) so antimeridian islands
     # (negative-longitude Pacific nations) are included.
-    _dot_r = 0.005 * _dx  # ~18px physical size across all regions
+    _dot_r = 0.0035 * _dx  # ~12px physical size across all regions
     for _, _row in _gdf[_gdf["cat"] != "unmonitored"].iterrows():
         _geom = _row.geometry
         if _geom is None or _geom.area >= 0.5:
