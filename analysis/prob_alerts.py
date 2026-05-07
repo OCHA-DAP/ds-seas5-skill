@@ -474,13 +474,14 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
     _reg = _REGIONS[map_region_dd.value]
     _xl, _yl = _reg["xlim"], _reg["ylim"]
 
-    # Compute figsize so the map fills the figure exactly → legend sits right below
+    # Compute figsize: map + explicit title slice + legend slice → zero gaps
     _dx = _xl[1] - _xl[0]
     _dy = _yl[1] - _yl[0]
-    _map_w = 12.0
-    _map_h = _map_w * _dy / _dx
-    _leg_h = 1.6  # inches reserved for two legend rows
-    _fig_h = _map_h + _leg_h
+    _map_w   = 12.0
+    _map_h   = _map_w * _dy / _dx
+    _title_h = 0.30   # inches for title
+    _leg_h   = 1.6    # inches for two legend rows
+    _fig_h   = _map_h + _title_h + _leg_h
 
     # ── Clip world to region ─────────────────────────────────────────────
     _gdf = world_geo.dropna(subset=["geometry"]).copy()
@@ -559,10 +560,14 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
         _mpatch_m.Patch(facecolor="#F0F0F0", edgecolor="#DDDDDD",               linewidth=0.5, label="Not monitored"),
     ]
 
-    # Reserve legend space and draw canvas so we can measure row-2 height
-    plt.tight_layout(rect=[0, _leg_h / _fig_h, 1, 1])
+    # Place axes to fill exactly the map slice — no tight_layout gaps
+    plt.subplots_adjust(
+        left=0.0, right=1.0,
+        bottom=_leg_h / _fig_h,
+        top=(_leg_h + _map_h) / _fig_h,
+    )
 
-    _leg2 = _fig_m.legend(handles=_h_row2, title="filters",
+    _leg2 = _fig_m.legend(handles=_h_row2, title="Filters",
                            loc="lower center", bbox_to_anchor=(0.5, 0.0),
                            ncol=4, **_LEG_KW)
     _fig_m.canvas.draw()
@@ -571,7 +576,7 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
     ).y1
 
     _fig_m.add_artist(_leg2)
-    _fig_m.legend(handles=_h_row1, title="hazard (high skill)",
+    _fig_m.legend(handles=_h_row1, title="Hazard (high skill)",
                   loc="lower center", bbox_to_anchor=(0.5, _leg2_top + 0.005),
                   ncol=5, **_LEG_KW)
 
