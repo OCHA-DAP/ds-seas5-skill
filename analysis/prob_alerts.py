@@ -112,20 +112,48 @@ def _(issued_month_dd, mo, trimester_sl, valid_trimesters):
 
 @app.cell
 def _(mo):
-    detrend_sw = mo.ui.switch(value=False, label="Detrend forecast & reanalysis")
+    detrend_sw = mo.ui.dropdown(
+        options={"Raw": "raw", "Detrended": "detrended", "Best skill": "best"},
+        value="Raw",
+        label="Forecast version:",
+    )
     detrend_sw
     return (detrend_sw,)
 
 
 @app.cell
-def _(df_skill, df_skill_dt, detrend_sw):
-    df_skill_active = df_skill_dt if detrend_sw.value else df_skill
-    return (df_skill_active,)
+def _(df_skill, df_skill_dt, detrend_sw, pd):
+    _KEY = ["pcode", "issued_month", "trimester"]
+    if detrend_sw.value == "raw":
+        df_skill_active = df_skill
+        best_dt_combos  = set()
+    elif detrend_sw.value == "detrended":
+        df_skill_active = df_skill_dt
+        best_dt_combos  = set()
+    else:  # "best"
+        _r_raw = df_skill.set_index(_KEY)["pearson_r"].fillna(-999)
+        _r_dt  = df_skill_dt.set_index(_KEY)["pearson_r"].fillna(-999)
+        _all   = _r_raw.index.union(_r_dt.index)
+        best_dt_combos = set(
+            _all[_r_dt.reindex(_all, fill_value=-999) > _r_raw.reindex(_all, fill_value=-999)]
+        )
+        _raw_rows = df_skill[~df_skill.set_index(_KEY).index.isin(best_dt_combos)]
+        _dt_rows  = df_skill_dt[df_skill_dt.set_index(_KEY).index.isin(best_dt_combos)]
+        df_skill_active = pd.concat([_raw_rows, _dt_rows], ignore_index=True)
+    return df_skill_active, best_dt_combos
 
 
 @app.cell
-def _(df_paired, df_paired_dt, detrend_sw):
-    df_paired_active = df_paired_dt if detrend_sw.value else df_paired
+def _(best_dt_combos, df_paired, df_paired_dt, detrend_sw, pd):
+    if detrend_sw.value == "raw":
+        df_paired_active = df_paired
+    elif detrend_sw.value == "detrended":
+        df_paired_active = df_paired_dt
+    else:  # "best"
+        _KEY = ["pcode", "issued_month", "trimester"]
+        _raw_rows = df_paired[~df_paired.set_index(_KEY).index.isin(best_dt_combos)]
+        _dt_rows  = df_paired_dt[df_paired_dt.set_index(_KEY).index.isin(best_dt_combos)]
+        df_paired_active = pd.concat([_raw_rows, _dt_rows], ignore_index=True)
     return (df_paired_active,)
 
 
@@ -184,7 +212,7 @@ def _(calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r
     _C_FH = _C_FVH
     _C_FM = _C_FSH
     _HATCH = "///"
-    _detrend_sfx = " [detrended]" if detrend_sw.value else ""
+    _detrend_sfx = {"raw": "", "detrended": " [detrended]", "best": " [best skill]"}.get(detrend_sw.value, "")
 
     def _zone(ax, x0, x1, y0, y1, color, hatch=None, hatch_color="white", alpha=0.20):
         ax.add_patch(_mpatch_sc.Rectangle(
