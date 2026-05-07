@@ -397,16 +397,8 @@ def _(calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r
 def _():
     import geopandas as _gpd
     from pathlib import Path as _Path
-    _CACHE = _Path(__file__).resolve().parent / "_ne_50m_countries.gpkg"
-    if not _CACHE.exists():
-        _raw = _gpd.read_file(
-            "https://naciscdn.org/naturalearth/50m/cultural/ne_50m_admin_0_countries.zip"
-        )
-        _raw["iso3"] = _raw["ISO_A3"].where(_raw["ISO_A3"] != "-99", _raw["ISO_A3_EH"])
-        _raw[["iso3", "NAME", "geometry"]].rename(columns={"NAME": "name"}).to_file(
-            _CACHE, driver="GPKG"
-        )
-    world_geo = _gpd.read_file(_CACHE)
+    # Pre-simplified committed file (50m Natural Earth, tolerance=0.05, 708 KB)
+    world_geo = _gpd.read_file(_Path(__file__).resolve().parent / "_world_countries.gpkg")
     return (world_geo,)
 
 
@@ -539,17 +531,23 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
         if _st[2]:
             _sub.plot(ax=_ax_m, color="none", edgecolor=_st[3], hatch=_st[2], linewidth=0)
 
-    # Small island dots — all regions, monitored only, area < 2 sq deg
+    # Small island dots — all regions, monitored only, area < 0.5 sq deg
     # Radius scaled to ~18px regardless of region width
     _dot_r = 0.005 * (_xl[1] - _xl[0])
     for _, _row in _gdf_clip.iterrows():
         _geom = _row.geometry
-        if _geom is None or _geom.area >= 2.0:
+        if _geom is None or _geom.area >= 0.5:
             continue
         _cat_dot = _row["cat"]
         if _cat_dot == "unmonitored":
             continue
         _cx, _cy = _geom.centroid.x, _geom.centroid.y
+        # Antimeridian: Pacific islands stored with negative longitudes
+        if _cx < _xl[0]:
+            _cx_wrap = _cx + 360
+            _cx = _cx_wrap if _cx_wrap <= _xl[1] else _xl[1] - _dot_r * 1.5
+        elif _cx > _xl[1]:
+            _cx = _xl[1] - _dot_r * 1.5
         _st_dot = _STYLE.get(_cat_dot, ("#E0E0E0", "#AAAAAA", None, None))
         _ax_m.add_patch(_mpatch_m.Circle(
             (_cx, _cy), _dot_r,
