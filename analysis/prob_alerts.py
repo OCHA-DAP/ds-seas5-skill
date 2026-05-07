@@ -211,7 +211,7 @@ def _(calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r
     _C_DM = _C_DSH
     _C_FH = _C_FVH
     _C_FM = _C_FSH
-    _HATCH = "///"
+    _HATCH = "/////"
     _detrend_sfx = {"raw": "", "detrended": " [detrended]", "best": " [best skill]"}.get(detrend_sw.value, "")
 
     def _zone(ax, x0, x1, y0, y1, color, hatch=None, hatch_color="white", alpha=0.20):
@@ -274,8 +274,8 @@ def _(calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r
         _ax.set_ylim(0, 1.0)
 
         # Grey background zones (drawn first)
-        _zone(_ax, -_xlim, _xlim, 0, _r_mod, "white", "xxxx", "#CCCCCC", 1.0)          # low skill (cross hatch)
-        _zone(_ax, -_sev_rp, _sev_rp, _r_mod, _r_high, "white", "///", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
+        _zone(_ax, -_xlim, _xlim, 0, _r_mod, "white", "xxxxxx", "#CCCCCC", 1.0)          # low skill (cross hatch)
+        _zone(_ax, -_sev_rp, _sev_rp, _r_mod, _r_high, "white", "/////", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
 
         # Drought zones (x < 0; more negative = worse)
         _zone(_ax, -_xlim, -_vsev_rp, _r_high, 1.0,    _C_DH)               # vsev + high skill
@@ -340,8 +340,8 @@ def _(calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r
         _ax.set_ylim(0, 1.0)
 
         # Grey background zones (drawn first)
-        _zone(_ax, 0, 100, 0, _r_mod, "white", "xxxx", "#CCCCCC", 1.0)                    # low skill (cross hatch)
-        _zone(_ax, _sev_pct, 100 - _sev_pct, _r_mod, _r_high, "white", "///", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
+        _zone(_ax, 0, 100, 0, _r_mod, "white", "xxxxxx", "#CCCCCC", 1.0)                    # low skill (cross hatch)
+        _zone(_ax, _sev_pct, 100 - _sev_pct, _r_mod, _r_high, "white", "/////", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
 
         # Drought zones (left)
         _zone(_ax, 0, _vsev_pct, _r_high, 1.0,     _C_DH)                        # vsev + high skill
@@ -397,10 +397,10 @@ def _(calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r
 def _():
     import geopandas as _gpd
     from pathlib import Path as _Path
-    _CACHE = _Path(__file__).resolve().parent / "_ne_110m_countries.gpkg"
+    _CACHE = _Path(__file__).resolve().parent / "_ne_50m_countries.gpkg"
     if not _CACHE.exists():
         _raw = _gpd.read_file(
-            "https://naciscdn.org/naturalearth/110m/cultural/ne_110m_admin_0_countries.zip"
+            "https://naciscdn.org/naturalearth/50m/cultural/ne_50m_admin_0_countries.zip"
         )
         _raw["iso3"] = _raw["ISO_A3"].where(_raw["ISO_A3"] != "-99", _raw["ISO_A3_EH"])
         _raw[["iso3", "NAME", "geometry"]].rename(columns={"NAME": "name"}).to_file(
@@ -428,7 +428,7 @@ def _(mo):
 
 
 @app.cell
-def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl, world_geo):
+def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl, world_geo):
     import geopandas as _gpd_map  # needed for GeoDataFrame methods in this cell
     import matplotlib.patches as _mpatch_m
 
@@ -479,21 +479,21 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
         "off_season":        ("#D0D0D0", "#BBBBBB", None,  None),
         "no_data":           ("#E8E8E8", "#CCCCCC", None,  None),
         "high_none":         ("#FFFFFF", "#AAAAAA", None,  None),
-        "mid_none":          ("#FFFFFF", "#AAAAAA", "///", "#CCCCCC"),
-        "low_skill":         ("#FFFFFF", "#AAAAAA", "xxxx", "#BBBBBB"),
-        "drought_vsev_high": ("#7B3A1A", "#5A2A0A", None,  None),
-        "drought_vsev_mod":  ("#A8623A", "#7B3A1A", "///", "white"),
-        "drought_sev_high":  ("#C8844A", "#A06030", None,  None),
-        "drought_sev_mod":   ("#DFAA80", "#C08050", "///", "white"),
-        "flood_vsev_high":   ("#0D40B0", "#092E88", None,  None),
-        "flood_vsev_mod":    ("#2E60B8", "#0D40B0", "///", "white"),
-        "flood_sev_high":    ("#3D85C8", "#2060A0", None,  None),
-        "flood_sev_mod":     ("#7AAED8", "#5090B8", "///", "white"),
+        "mid_none":          ("#FFFFFF", "#AAAAAA", "/////",  "#CCCCCC"),
+        "low_skill":         ("#FFFFFF", "#AAAAAA", "xxxxxx", "#BBBBBB"),
+        "drought_vsev_high": ("#7B3A1A", "#5A2A0A", None,    None),
+        "drought_vsev_mod":  ("#A8623A", "#7B3A1A", "/////",  "white"),
+        "drought_sev_high":  ("#C8844A", "#A06030", None,    None),
+        "drought_sev_mod":   ("#DFAA80", "#C08050", "/////",  "white"),
+        "flood_vsev_high":   ("#0D40B0", "#092E88", None,    None),
+        "flood_vsev_mod":    ("#2E60B8", "#0D40B0", "/////",  "white"),
+        "flood_sev_high":    ("#3D85C8", "#2060A0", None,    None),
+        "flood_sev_mod":     ("#7AAED8", "#5090B8", "/////",  "white"),
     }
 
     # ── Region bounds ───────────────────────────────────────────────────
     _REGIONS = {
-        "global":      {"xlim": (-120, 180), "ylim": (-36, 56)},
+        "global":      {"xlim": (-100, 180), "ylim": (-36, 56)},
         "lac":         {"xlim": (-120, -30), "ylim": (-35, 35)},
         "africa":      {"xlim": (-20, 55),   "ylim": (-36, 38)},
         "asia_europe": {"xlim": (15, 131),   "ylim": (5, 56)},
@@ -545,8 +545,7 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
             _geom = _row.geometry
             if _geom is None:
                 continue
-            _bb = _geom.bounds
-            if (_bb[2] - _bb[0]) * (_bb[3] - _bb[1]) < 3.0:
+            if _geom.area < 3.0:
                 _cx, _cy = _geom.centroid.x, _geom.centroid.y
                 _cat_dot = _row["cat"]
                 if _cat_dot == "unmonitored":
@@ -565,8 +564,10 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
     _ax_m.set_ylim(_yl)
     _ax_m.set_aspect("equal")
     _ax_m.axis("off")
+    _yr_map = int(_df_m_all["current_forecast_year"].dropna().max()) if not _df_m_all["current_forecast_year"].dropna().empty else ""
+    _tri_str = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
     _ax_m.set_title(
-        f"SEAS5 severity and skill alerts — {calendar.month_name[issued_month]} issued, {trimester} valid",
+        f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr_map}, valid {_tri_str}",
         fontsize=11, pad=8,
     )
 
@@ -582,8 +583,8 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
         _mpatch_m.Patch(facecolor="#0D40B0", edgecolor="#092E88", linewidth=0.5, label="Severe flood"),
     ]
     _h_row2 = [
-        _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#CCCCCC", hatch="///",  linewidth=0.5, label="Mod skill"),
-        _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#BBBBBB", hatch="xxxx", linewidth=0.5, label="Low skill"),
+        _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#CCCCCC", hatch="/////",  linewidth=0.5, label="Mod skill"),
+        _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#BBBBBB", hatch="xxxxxx", linewidth=0.5, label="Low skill"),
         _mpatch_m.Patch(facecolor="#D0D0D0", edgecolor="#BBBBBB",               linewidth=0.5, label="Off season"),
         _mpatch_m.Patch(facecolor="#F0F0F0", edgecolor="#DDDDDD",               linewidth=0.5, label="Not monitored"),
     ]
@@ -997,7 +998,7 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_dt, issued_month, np, pcode, plt,
     _ax_r.bar(_x - _w/2, _df_ov["pearson_r"].values.astype(float),
               width=_w, color=_bar_cols, alpha=0.80, label="Raw")
     _ax_r.bar(_x + _w/2, _df_ov_dt["pearson_r"].values.astype(float),
-              width=_w, color=_bar_cols, alpha=0.40, hatch="///", edgecolor="white", label="Detrended")
+              width=_w, color=_bar_cols, alpha=0.40, hatch="/////", edgecolor="white", label="Detrended")
     _ax_r.axhline(0, color="#AAAAAA", linewidth=0.7)
     _ax_r.set_ylim(-1, 1)
     _ax_r.set_ylabel("Pearson r")
@@ -1015,7 +1016,7 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_dt, issued_month, np, pcode, plt,
     _ax_p.bar(_x - _w/2, _pct_raw - 50,
               bottom=50, width=_w, color=_bar_cols, alpha=0.80, label="Raw")
     _ax_p.bar(_x + _w/2, _pct_det - 50,
-              bottom=50, width=_w, color=_bar_cols, alpha=0.40, hatch="///", edgecolor="white", label="Detrended")
+              bottom=50, width=_w, color=_bar_cols, alpha=0.40, hatch="/////", edgecolor="white", label="Detrended")
     _ax_p.axhline(50, color=_C_P, linewidth=0.6, linestyle=":", alpha=0.4)
     _ax_p.set_ylim(0, 100)
     _ax_p.set_ylabel("Forecast percentile")

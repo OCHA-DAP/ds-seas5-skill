@@ -2,4 +2,4 @@ __pycache__/
 .venv/
 *.pyc
 
-analysis/_ne_110m_countries.gpkg
+analysis/_ne_*_countries.gpkg
