@@ -542,19 +542,18 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
     )
 
     # ── Legend (outside map, bottom of figure) ───────────────────────────
+    # Row 1: RP severity colours (no hatch — skill shown by hatch on the map itself)
+    # Row 2: skill / monitoring-status patterns
     _LEG = [
-        (f"Drought ≥{_vsev_yr}yr RP, high skill",          "#7B3A1A", "#5A2A0A", None,   0.5),
-        (f"Drought ≥{_vsev_yr}yr RP, mod skill",           "#A8623A", "white",   "///",  0.0),
-        (f"Drought {_sev_yr}–{_vsev_yr}yr RP, high skill", "#C8844A", "#A06030", None,   0.5),
-        (f"Drought {_sev_yr}–{_vsev_yr}yr RP, mod skill",  "#DFAA80", "white",   "///",  0.0),
-        (f"Flood ≥{_vsev_yr}yr RP, high skill",            "#0D40B0", "#092E88", None,   0.5),
-        (f"Flood ≥{_vsev_yr}yr RP, mod skill",             "#2E60B8", "white",   "///",  0.0),
-        (f"Flood {_sev_yr}–{_vsev_yr}yr RP, high skill",   "#3D85C8", "#2060A0", None,   0.5),
-        (f"Flood {_sev_yr}–{_vsev_yr}yr RP, mod skill",    "#7AAED8", "white",   "///",  0.0),
-        ("High skill — no alert",                           "#FFFFFF", "#AAAAAA", None,   0.5),
-        ("Mod skill — no alert",                            "#FFFFFF", "#CCCCCC", "///",  0.5),
-        ("Low skill",                                       "#FFFFFF", "#BBBBBB", "xxxx", 0.5),
-        ("Off season",                                      "#D0D0D0", "#BBBBBB", None,   0.5),
+        ("Very severe drought", "#7B3A1A", "#5A2A0A", None,   0.5),
+        ("Severe drought",      "#C8844A", "#A06030", None,   0.5),
+        ("No alert",            "#FFFFFF", "#AAAAAA", None,   0.5),
+        ("Severe flood",        "#3D85C8", "#2060A0", None,   0.5),
+        ("Very severe flood",   "#0D40B0", "#092E88", None,   0.5),
+        ("Mod skill",           "#FFFFFF", "#CCCCCC", "///",  0.5),
+        ("Low skill",           "#FFFFFF", "#BBBBBB", "xxxx", 0.5),
+        ("Off season",          "#D0D0D0", "#BBBBBB", None,   0.5),
+        ("Not monitored",       "#F0F0F0", "#DDDDDD", None,   0.5),
     ]
     _handles = [
         _mpatch_m.Patch(facecolor=_fc, edgecolor=_ec, hatch=_h, linewidth=_lw, label=_lbl)
@@ -564,11 +563,11 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
         handles=_handles,
         loc="lower center",
         bbox_to_anchor=(0.5, 0.0),
-        ncol=4,
-        fontsize=6.5,
+        ncol=5,
+        fontsize=7,
         framealpha=0.95,
         edgecolor="#CCCCCC",
-        handlelength=3,
+        handlelength=2.5,
     )
     plt.tight_layout(rect=[0, _leg_h / _fig_h, 1, 1])
     _fig_m
