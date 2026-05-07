@@ -541,12 +541,15 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
         # Skip if outside latitude band
         if _cy < _yl[0] or _cy > _yl[1]:
             continue
-        # Wrap antimeridian (Pacific islands with negative longitudes)
-        if _cx < _xl[0]:
-            _cx_wrap = _cx + 360
-            _cx = _cx_wrap if _cx_wrap <= _xl[1] else _xl[1] - _dot_r * 1.5
-        elif _cx > _xl[1]:
-            _cx = _xl[1] - _dot_r * 1.5
+        # Wrap antimeridian only for global/Pacific views
+        if _cx < _xl[0] or _cx > _xl[1]:
+            if map_region_dd.value not in ("global", "sea_pacific"):
+                continue
+            if _cx < _xl[0]:
+                _cx_wrap = _cx + 360
+                _cx = _cx_wrap if _cx_wrap <= _xl[1] else _xl[1] - _dot_r * 1.5
+            else:
+                _cx = _xl[1] - _dot_r * 1.5
         _st_dot = _STYLE.get(_cat_dot, ("#E0E0E0", "#AAAAAA", None, None))
         _ax_m.add_patch(_mpatch_m.Circle(
             (_cx, _cy), _dot_r,
