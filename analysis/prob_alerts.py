@@ -587,6 +587,11 @@ def _(calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt,
 
 
 @app.cell
+def _(detrend_sw):
+    detrend_sw
+
+
+@app.cell
 def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
     _vsev_pct = 100 / very_severe_rp_sl.value
     _sev_pct  = 100 / severe_rp_sl.value
@@ -782,6 +787,11 @@ def _(TRIMESTERS, df_skill, mo, month_pct_sl, monthly_clim, pcode, plt, trimeste
 
 
 @app.cell
+def _(detrend_sw):
+    detrend_sw
+
+
+@app.cell
 def _(mo):
     show_drought_rp_sw = mo.ui.switch(label="Show drought RP shading", value=True)
     show_flood_rp_sw   = mo.ui.switch(label="Show flood RP shading",   value=True)
@@ -926,8 +936,8 @@ def _(
 
 
 @app.cell
-def _(TRIMESTERS, calendar, df_skill_active, issued_month, np, pcode, plt, rainy_set):
-    # Valid trimesters for this issued month, sorted by lead time (earliest first)
+def _(TRIMESTERS, calendar, df_skill, df_skill_dt, issued_month, np, pcode, plt, rainy_set):
+    # Valid trimesters sorted by lead time (earliest first)
     _valid = sorted(
         [(name, months) for name, months in TRIMESTERS.items()
          if max((m - issued_month) % 12 for m in months) <= 6],
@@ -935,32 +945,35 @@ def _(TRIMESTERS, calendar, df_skill_active, issued_month, np, pcode, plt, rainy
     )
     _tri_names = [t for t, _ in _valid]
 
-    _df_ov = (
-        df_skill_active[
-            (df_skill_active["pcode"] == pcode)
-            & (df_skill_active["issued_month"] == issued_month)
-        ]
-        .set_index("trimester")
-        .reindex(_tri_names)
-    )
+    def _skill_row(df):
+        return (
+            df[(df["pcode"] == pcode) & (df["issued_month"] == issued_month)]
+            .set_index("trimester").reindex(_tri_names)
+        )
+
+    _df_ov    = _skill_row(df_skill)
+    _df_ov_dt = _skill_row(df_skill_dt)
     _country_ov = (
-        df_skill_active[df_skill_active["pcode"] == pcode]["country_name"].iloc[0]
-        if not df_skill_active[df_skill_active["pcode"] == pcode].empty else pcode
+        df_skill[df_skill["pcode"] == pcode]["country_name"].iloc[0]
+        if not df_skill[df_skill["pcode"] == pcode].empty else pcode
     )
 
     _x = np.arange(len(_tri_names))
-    _r_vals   = _df_ov["pearson_r"].values.astype(float)
-    _pct_vals = _df_ov["forecast_percentile"].values.astype(float)
-    _bar_cols  = ["royalblue" if (pcode, t) in rainy_set else "lightgrey" for t in _tri_names]
+    _bar_cols = ["royalblue" if (pcode, t) in rainy_set else "lightgrey" for t in _tri_names]
     _C_P = "rebeccapurple"
+    _w = 0.38
 
     _fig_ov, (_ax_r, _ax_p) = plt.subplots(2, 1, figsize=(10, 5), dpi=150, sharex=True)
 
-    # Top: Pearson r
-    _ax_r.bar(_x, _r_vals, color=_bar_cols, alpha=0.75)
+    # Top: Pearson r — raw (solid) and detrended (hatched, lighter)
+    _ax_r.bar(_x - _w/2, _df_ov["pearson_r"].values.astype(float),
+              width=_w, color=_bar_cols, alpha=0.80, label="Raw")
+    _ax_r.bar(_x + _w/2, _df_ov_dt["pearson_r"].values.astype(float),
+              width=_w, color=_bar_cols, alpha=0.40, hatch="///", edgecolor="white", label="Detrended")
     _ax_r.axhline(0, color="#AAAAAA", linewidth=0.7)
     _ax_r.set_ylim(-1, 1)
     _ax_r.set_ylabel("Pearson r")
+    _ax_r.legend(fontsize=7, loc="upper right")
     _ax_r.set_title(
         f"{_country_ov} — skill & forecast severity by trimester"
         f" — issued {calendar.month_abbr[issued_month]}"
@@ -968,12 +981,16 @@ def _(TRIMESTERS, calendar, df_skill_active, issued_month, np, pcode, plt, rainy
     _ax_r.spines["top"].set_visible(False)
     _ax_r.spines["right"].set_visible(False)
 
-    # Bottom: forecast percentile
-    _ax_p.plot(_x, _pct_vals, color=_C_P, linewidth=1.8, marker="o", markersize=5)
-    _ax_p.axhline(50, color=_C_P, linewidth=0.6, linestyle="--", alpha=0.4)
+    # Bottom: forecast percentile — raw (solid) and detrended (dashed)
+    _ax_p.plot(_x, _df_ov["forecast_percentile"].values.astype(float),
+               color=_C_P, linewidth=1.8, marker="o", markersize=5, label="Raw")
+    _ax_p.plot(_x, _df_ov_dt["forecast_percentile"].values.astype(float),
+               color=_C_P, linewidth=1.8, marker="s", markersize=5, linestyle="--", alpha=0.6, label="Detrended")
+    _ax_p.axhline(50, color=_C_P, linewidth=0.6, linestyle=":", alpha=0.4)
     _ax_p.set_ylim(0, 100)
     _ax_p.set_ylabel("Forecast percentile")
     _ax_p.set_xlabel("Valid trimester  (blue = rainy season)")
+    _ax_p.legend(fontsize=7, loc="upper right")
     _ax_p.spines["top"].set_visible(False)
     _ax_p.spines["right"].set_visible(False)
 
@@ -982,6 +999,60 @@ def _(TRIMESTERS, calendar, df_skill_active, issued_month, np, pcode, plt, rainy
 
     plt.tight_layout()
     _fig_ov
+
+
+@app.cell
+def _(calendar, df_paired, df_paired_dt, issued_month, np, pcode, plt, trimester):
+    def _ts(df):
+        return (
+            df[
+                (df["pcode"] == pcode)
+                & (df["issued_month"] == issued_month)
+                & (df["trimester"] == trimester)
+            ]
+            .dropna(subset=["forecast_mean", "obs_mean"])
+            .sort_values("season_year")
+        )
+
+    _raw = _ts(df_paired)
+    _det = _ts(df_paired_dt)
+
+    _fig_ts, (_ax_f, _ax_o) = plt.subplots(2, 1, figsize=(10, 5), dpi=150, sharex=True)
+    _C_F = "#3D85C8"
+    _C_O = "rebeccapurple"
+
+    # Forecast timeseries
+    if not _raw.empty:
+        _ax_f.plot(_raw["season_year"], np.expm1(_raw["forecast_mean"]),
+                   color=_C_F, linewidth=1.6, marker="o", markersize=4, label="Raw")
+    if not _det.empty:
+        _ax_f.plot(_det["season_year"], np.expm1(_det["forecast_mean"]),
+                   color=_C_F, linewidth=1.6, marker="o", markersize=4,
+                   linestyle="--", alpha=0.6, label="Detrended")
+    _ax_f.set_ylabel("SEAS5 forecast (mm/day)")
+    _ax_f.set_title(
+        f"Forecast & reanalysis timeseries — issued {calendar.month_abbr[issued_month]}, valid {trimester}"
+    )
+    _ax_f.legend(fontsize=7, loc="upper right")
+    _ax_f.spines["top"].set_visible(False)
+    _ax_f.spines["right"].set_visible(False)
+
+    # Observational timeseries
+    if not _raw.empty:
+        _ax_o.plot(_raw["season_year"], np.expm1(_raw["obs_mean"]),
+                   color=_C_O, linewidth=1.6, marker="o", markersize=4, label="Raw")
+    if not _det.empty:
+        _ax_o.plot(_det["season_year"], np.expm1(_det["obs_mean"]),
+                   color=_C_O, linewidth=1.6, marker="o", markersize=4,
+                   linestyle="--", alpha=0.6, label="Detrended")
+    _ax_o.set_ylabel("ERA5 observed (mm/day)")
+    _ax_o.set_xlabel("Year")
+    _ax_o.legend(fontsize=7, loc="upper right")
+    _ax_o.spines["top"].set_visible(False)
+    _ax_o.spines["right"].set_visible(False)
+
+    plt.tight_layout()
+    _fig_ts
 
 
 @app.cell
