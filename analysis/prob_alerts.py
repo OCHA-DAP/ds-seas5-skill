@@ -503,46 +503,45 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
     _leg_h   = 1.6    # inches for two legend rows
     _fig_h   = _map_h + _title_h + _leg_h
 
-    # ── Clip world to region ─────────────────────────────────────────────
+    # ── Assign categories and clip ───────────────────────────────────────
     _gdf = world_geo.dropna(subset=["geometry"]).copy()
     _gdf["cat"] = _gdf["iso3"].map(_iso3_cat).fillna("unmonitored")
     _gdf_clip = _gdf.cx[_xl[0]:_xl[1], _yl[0]:_yl[1]]
 
-    # ── Draw ─────────────────────────────────────────────────────────────
+    # ── Draw (batched for speed) ──────────────────────────────────────────
     _fig_m, _ax_m = plt.subplots(figsize=(_map_w, _fig_h), dpi=150)
 
-    # Unmonitored base layer
-    _gdf_clip.plot(ax=_ax_m, color="#F0F0F0", edgecolor="#DDDDDD", linewidth=0.3)
+    # Single fill pass: per-row face + edge colours, no separate loop per category
+    _fc_map = {c: st[0] for c, st in _STYLE.items()}
+    _ec_map = {c: st[1] for c, st in _STYLE.items()}
+    _fc_list = [_fc_map.get(c, "#F0F0F0") for c in _gdf_clip["cat"]]
+    _ec_list = [_ec_map.get(c, "#DDDDDD") for c in _gdf_clip["cat"]]
+    _gdf_clip.plot(ax=_ax_m, color=_fc_list, edgecolor=_ec_list, linewidth=0.3)
 
-    # Each monitored category
-    _CAT_ORDER = [
-        "off_season", "no_data", "high_none", "mid_none", "low_skill",
-        "drought_vsev_high", "drought_vsev_mod", "drought_sev_high", "drought_sev_mod",
-        "flood_vsev_high",   "flood_vsev_mod",   "flood_sev_high",   "flood_sev_mod",
-    ]
-    for _cat in _CAT_ORDER:
-        _st = _STYLE[_cat]
-        _sub = _gdf_clip[_gdf_clip["cat"] == _cat]
-        if _sub.empty:
-            continue
-        # Solid fill + border
-        _sub.plot(ax=_ax_m, color=_st[0], edgecolor=_st[1], linewidth=0.4)
-        # Hatch overlay (if any)
+    # Hatch overlays — one plot call per unique (hatch, hatch_colour) pair
+    _hatch_groups: dict = {}
+    for _c, _st in _STYLE.items():
         if _st[2]:
-            _sub.plot(ax=_ax_m, color="none", edgecolor=_st[3], hatch=_st[2], linewidth=0)
+            _hatch_groups.setdefault((_st[2], _st[3]), []).append(_c)
+    for (_h, _hc), _cats in _hatch_groups.items():
+        _sub = _gdf_clip[_gdf_clip["cat"].isin(_cats)]
+        if not _sub.empty:
+            _sub.plot(ax=_ax_m, color="none", edgecolor=_hc, hatch=_h, linewidth=0)
 
-    # Small island dots — all regions, monitored only, area < 0.5 sq deg
-    # Radius scaled to ~18px regardless of region width
-    _dot_r = 0.005 * (_xl[1] - _xl[0])
-    for _, _row in _gdf_clip.iterrows():
+    # ── Small island dots ─────────────────────────────────────────────────
+    # Iterate over ALL countries (not just clipped) so antimeridian islands
+    # (negative-longitude Pacific nations) are included.
+    _dot_r = 0.005 * _dx  # ~18px physical size across all regions
+    for _, _row in _gdf[_gdf["cat"] != "unmonitored"].iterrows():
         _geom = _row.geometry
         if _geom is None or _geom.area >= 0.5:
             continue
         _cat_dot = _row["cat"]
-        if _cat_dot == "unmonitored":
-            continue
         _cx, _cy = _geom.centroid.x, _geom.centroid.y
-        # Antimeridian: Pacific islands stored with negative longitudes
+        # Skip if outside latitude band
+        if _cy < _yl[0] or _cy > _yl[1]:
+            continue
+        # Wrap antimeridian (Pacific islands with negative longitudes)
         if _cx < _xl[0]:
             _cx_wrap = _cx + 360
             _cx = _cx_wrap if _cx_wrap <= _xl[1] else _xl[1] - _dot_r * 1.5
@@ -554,7 +553,7 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
             facecolor=_st_dot[0], edgecolor=_st_dot[1],
             linewidth=0.5, zorder=5,
         ))
-        if _st_dot[2]:  # hatch overlay
+        if _st_dot[2]:
             _ax_m.add_patch(_mpatch_m.Circle(
                 (_cx, _cy), _dot_r,
                 facecolor="none", edgecolor=_st_dot[3],
@@ -598,20 +597,16 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
         top=(_leg_h + _map_h) / _fig_h,
     )
 
-    # Row 1: upper edge flush with axes bottom — no gap
+    # Two legend rows stacked; each row ≈ 0.40" tall regardless of fig height
+    _row_h = 0.40 / _fig_h   # row height in figure fraction
     _axes_bot = _leg_h / _fig_h
+
     _leg1 = _fig_m.legend(handles=_h_row1, title="Hazard",
                            loc="upper center", bbox_to_anchor=(0.5, _axes_bot),
                            ncol=5, **_LEG_KW)
-    _fig_m.canvas.draw()
-    _leg1_bot = _leg1.get_window_extent().transformed(
-        _fig_m.transFigure.inverted()
-    ).y0
-
     _fig_m.add_artist(_leg1)
-    # Row 2: hangs immediately below row 1
     _fig_m.legend(handles=_h_row2, title="Filters (high skill prediction unless otherwise indicated)",
-                  loc="upper center", bbox_to_anchor=(0.5, _leg1_bot - 0.003),
+                  loc="upper center", bbox_to_anchor=(0.5, _axes_bot - _row_h - 0.003),
                   ncol=4, **_LEG_KW)
 
     _fig_m
