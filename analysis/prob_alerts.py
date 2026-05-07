@@ -1004,52 +1004,52 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_dt, issued_month, np, pcode, plt,
 
 
 @app.cell
-def _(calendar, df_paired, df_paired_dt, issued_month, np, pcode, plt, trimester):
-    def _ts(df):
-        return (
-            df[
-                (df["pcode"] == pcode)
-                & (df["issued_month"] == issued_month)
-                & (df["trimester"] == trimester)
-            ]
-            .dropna(subset=["forecast_mean", "obs_mean"])
-            .sort_values("season_year")
-        )
+def _(calendar, df_paired, issued_month, np, pcode, plt, trimester):
+    from scipy.stats import linregress as _linregress
 
-    _raw = _ts(df_paired)
-    _det = _ts(df_paired_dt)
+    _raw = (
+        df_paired[
+            (df_paired["pcode"] == pcode)
+            & (df_paired["issued_month"] == issued_month)
+            & (df_paired["trimester"] == trimester)
+        ]
+        .dropna(subset=["forecast_mean", "obs_mean"])
+        .sort_values("season_year")
+    )
 
-    _fig_ts, (_ax_f, _ax_o) = plt.subplots(2, 1, figsize=(10, 5), dpi=150, sharex=True)
+    def _add_trend(ax, x, y, color):
+        if len(x) < 3:
+            return
+        _lr = _linregress(x, y)
+        _xfit = np.array([x.min(), x.max()])
+        ax.plot(_xfit, _lr.slope * _xfit + _lr.intercept,
+                color=color, linewidth=1.4, linestyle="--", alpha=0.8,
+                label=f"Trend  p={_lr.pvalue:.3f}")
+        ax.legend(fontsize=7, loc="upper right")
+
     _C_F = "#3D85C8"
     _C_O = "rebeccapurple"
+    _fig_ts, (_ax_f, _ax_o) = plt.subplots(2, 1, figsize=(10, 5), dpi=150, sharex=True)
 
-    # Forecast timeseries
+    # Forecast
     if not _raw.empty:
-        _ax_f.plot(_raw["season_year"], np.expm1(_raw["forecast_mean"]),
-                   color=_C_F, linewidth=1.6, marker="o", markersize=4, label="Raw")
-    if not _det.empty:
-        _ax_f.plot(_det["season_year"], np.expm1(_det["forecast_mean"]),
-                   color=_C_F, linewidth=1.6, marker="o", markersize=4,
-                   linestyle="--", alpha=0.6, label="Detrended")
+        _yf = np.expm1(_raw["forecast_mean"].values)
+        _ax_f.scatter(_raw["season_year"], _yf, color=_C_F, s=20, zorder=3)
+        _add_trend(_ax_f, _raw["season_year"].values.astype(float), _yf, _C_F)
     _ax_f.set_ylabel("SEAS5 forecast (mm/day)")
     _ax_f.set_title(
         f"Forecast & reanalysis timeseries — issued {calendar.month_abbr[issued_month]}, valid {trimester}"
     )
-    _ax_f.legend(fontsize=7, loc="upper right")
     _ax_f.spines["top"].set_visible(False)
     _ax_f.spines["right"].set_visible(False)
 
-    # Observational timeseries
+    # Observed
     if not _raw.empty:
-        _ax_o.plot(_raw["season_year"], np.expm1(_raw["obs_mean"]),
-                   color=_C_O, linewidth=1.6, marker="o", markersize=4, label="Raw")
-    if not _det.empty:
-        _ax_o.plot(_det["season_year"], np.expm1(_det["obs_mean"]),
-                   color=_C_O, linewidth=1.6, marker="o", markersize=4,
-                   linestyle="--", alpha=0.6, label="Detrended")
+        _yo = np.expm1(_raw["obs_mean"].values)
+        _ax_o.scatter(_raw["season_year"], _yo, color=_C_O, s=20, zorder=3)
+        _add_trend(_ax_o, _raw["season_year"].values.astype(float), _yo, _C_O)
     _ax_o.set_ylabel("ERA5 observed (mm/day)")
     _ax_o.set_xlabel("Year")
-    _ax_o.legend(fontsize=7, loc="upper right")
     _ax_o.spines["top"].set_visible(False)
     _ax_o.spines["right"].set_visible(False)
 
