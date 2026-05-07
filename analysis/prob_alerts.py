@@ -564,7 +564,8 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
     _ax_m.set_ylim(_yl)
     _ax_m.set_aspect("equal")
     _ax_m.axis("off")
-    _yr_map = int(_df_m_all["current_forecast_year"].dropna().max()) if not _df_m_all["current_forecast_year"].dropna().empty else ""
+    _yr_map_s = df_skill_active[(df_skill_active["issued_month"] == issued_month) & (df_skill_active["trimester"] == trimester)]["current_forecast_year"].dropna()
+    _yr_map = int(_yr_map_s.max()) if not _yr_map_s.empty else ""
     _tri_str = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
     _ax_m.set_title(
         f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr_map}, valid {_tri_str}",
