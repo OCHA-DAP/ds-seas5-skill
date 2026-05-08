@@ -192,7 +192,7 @@ def _(mo):
     mo.hstack([
         detrend_sw,
         mo.Html(f'<span title="{_tip}" style="cursor:help;font-size:16px;color:#888;user-select:none">ⓘ</span>'),
-    ], align="center", gap="0.4rem")
+    ], align="center", justify="start", gap="0.4rem")
     return (detrend_sw,)
 
 
