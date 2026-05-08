@@ -83,10 +83,12 @@ def _(calendar, df_skill, mo):
         df_skill[df_skill["current_forecast_year"] == _max_year]["issued_month"].max()
     )
     _months_ordered = [((_latest_month - i - 1) % 12) + 1 for i in range(12)]
+    # Year for each selectable month: months after the latest get assigned to previous year
+    _yr_of = lambda m: _max_year if m <= _latest_month else _max_year - 1
     issued_month_dd = mo.ui.dropdown(
-        options={calendar.month_abbr[m]: m for m in _months_ordered},
+        options={f"{calendar.month_abbr[m]} {_yr_of(m)}": m for m in _months_ordered},
         label="Issued month:",
-        value=calendar.month_abbr[_latest_month],
+        value=f"{calendar.month_abbr[_latest_month]} {_max_year}",
     )
     return (issued_month_dd,)
 
@@ -94,11 +96,18 @@ def _(calendar, df_skill, mo):
 @app.cell
 def _(TRIMESTERS, issued_month_dd, mo):
     _im = issued_month_dd.value
+    # A trimester is valid if it has at least one month in the 1–6 month forecast
+    # window. Ignores months in the past (offset > 6 in mod-12 are actually past
+    # months). This fixes e.g. JJA for July-issued: June has offset 11 (past, not
+    # "11 months ahead"), but August has offset 1 → JJA is correctly valid.
     valid_trimesters = [
         name for name, months in TRIMESTERS.items()
-        if max((m - _im) % 12 for m in months) <= 6
+        if any(1 <= (m - _im) % 12 <= 6 for m in months)
     ]
-    # Default to the trimester whose first month is issued_month + 1 (e.g. May → JJA)
+    # Default: trimester whose minimum offset (all months, including 0) == 1.
+    # Using the full min (not filtered) so trimesters containing the issued month
+    # (e.g. NDJ for November has offset 0) are passed over in favour of purely-
+    # future ones (e.g. DJF where min == 1).
     _default_idx = next(
         (i for i, t in enumerate(valid_trimesters)
          if min((m - _im) % 12 for m in TRIMESTERS[t]) == 1),
@@ -109,13 +118,28 @@ def _(TRIMESTERS, issued_month_dd, mo):
 
 
 @app.cell
-def _(issued_month_dd, mo, trimester_sl, valid_trimesters):
+def _(TRIMESTERS, df_skill, issued_month_dd, mo, trimester_sl, valid_trimesters):
     issued_month = issued_month_dd.value
-    trimester = valid_trimesters[trimester_sl.value]
+    trimester    = valid_trimesters[trimester_sl.value]
+
+    # Issued year
+    _max_y  = int(df_skill["current_forecast_year"].dropna().max())
+    _late_m = int(df_skill[df_skill["current_forecast_year"] == _max_y]["issued_month"].max())
+    _iss_year = _max_y if issued_month <= _late_m else _max_y - 1
+
+    # Trimester year: look at the last FUTURE month (offset 1–6) and check if it
+    # falls earlier in the calendar year than the issued month (→ next year)
+    _future_offs = [o for m in TRIMESTERS[trimester] if 1 <= (o := (m - issued_month) % 12) <= 6]
+    if _future_offs:
+        _last_cal = ((issued_month - 1 + max(_future_offs)) % 12) + 1
+        _tri_year = _iss_year + (1 if _last_cal < issued_month else 0)
+    else:
+        _tri_year = _iss_year
+
     mo.hstack([
         issued_month_dd,
         mo.vstack([
-            mo.md(f"Valid trimester: **{trimester}**"),
+            mo.md(f"Valid trimester: **{trimester} {_tri_year}**"),
             trimester_sl,
         ], align="start"),
     ], justify="start")
