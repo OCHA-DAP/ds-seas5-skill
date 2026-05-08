@@ -203,20 +203,11 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill_active, issued_month, pd, plt, 
     _sev_pct  = 100 / _sev_rp
     _r_mod   = r_mod_sl.value
     _r_high  = r_high_sl.value
-    # 8 colors: dark/medium for RP severity, vivid/muted for skill (matches map)
-    _C_DVH = "#7B3A1A"  # drought vsev high
-    _C_DVM = "#A8623A"  # drought vsev mod
-    _C_DSH = "#C8844A"  # drought sev high
-    _C_DSM = "#DFAA80"  # drought sev mod
-    _C_FVH = "#0D40B0"  # flood vsev high
-    _C_FVM = "#2E60B8"  # flood vsev mod
-    _C_FSH = "#3D85C8"  # flood sev high
-    _C_FSM = "#7AAED8"  # flood sev mod
-    # Scatter zone fill colors (just 4 — hatching shows skill within each zone)
-    _C_DH = _C_DVH
-    _C_DM = _C_DSH
-    _C_FH = _C_FVH
-    _C_FM = _C_FSH
+    # 4 colours — one per RP level; skill shown via hatching only
+    _C_DH = "#7B3A1A"  # severe drought (vsev)
+    _C_DM = "#C8844A"  # drought (sev)
+    _C_FH = "#0D40B0"  # severe flood (vsev)
+    _C_FM = "#3D85C8"  # flood (sev)
     _HATCH = "/////"
     _detrend_sfx = {"raw": "", "detrended": " [detrended]", "best": " [best skill]"}.get(detrend_sw.value, "")
 
@@ -232,24 +223,18 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill_active, issued_month, pd, plt, 
             ))
 
     def _label_color_pct(pct, r):
-        if r < _r_mod:
-            return "#444444"
+        if r < _r_mod: return "#444444"
         _d = pct < 50
-        _hi = r >= _r_high
         if pct <= _vsev_pct or pct >= 100 - _vsev_pct:
-            return (_C_DVH if _hi else _C_DVM) if _d else (_C_FVH if _hi else _C_FVM)
+            return _C_DH if _d else _C_FH
         if pct <= _sev_pct or pct >= 100 - _sev_pct:
-            return (_C_DSH if _hi else _C_DSM) if _d else (_C_FSH if _hi else _C_FSM)
+            return _C_DM if _d else _C_FM
         return "#444444"
 
     def _label_color_rp(rp_abs, is_drought, r):
-        if r < _r_mod:
-            return "#444444"
-        _hi = r >= _r_high
-        if rp_abs >= _vsev_rp:
-            return (_C_DVH if _hi else _C_DVM) if is_drought else (_C_FVH if _hi else _C_FVM)
-        if rp_abs >= _sev_rp:
-            return (_C_DSH if _hi else _C_DSM) if is_drought else (_C_FSH if _hi else _C_FSM)
+        if r < _r_mod: return "#444444"
+        if rp_abs >= _vsev_rp: return _C_DH if is_drought else _C_FH
+        if rp_abs >= _sev_rp:  return _C_DM if is_drought else _C_FM
         return "#444444"
 
     if scatter_rp_sw.value:
@@ -483,14 +468,14 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
         "high_none":         ("#FFFFFF", "#AAAAAA", None,  None),
         "mid_none":          ("#FFFFFF", "#AAAAAA", "/////",  "#CCCCCC"),
         "low_skill":         ("#FFFFFF", "#AAAAAA", "xxxxxx", "#BBBBBB"),
-        "drought_vsev_high": ("#7B3A1A", "#5A2A0A", None,    None),
-        "drought_vsev_mod":  ("#A8623A", "#7B3A1A", "/////",  "white"),
-        "drought_sev_high":  ("#C8844A", "#A06030", None,    None),
-        "drought_sev_mod":   ("#DFAA80", "#C08050", "/////",  "white"),
-        "flood_vsev_high":   ("#0D40B0", "#092E88", None,    None),
-        "flood_vsev_mod":    ("#2E60B8", "#0D40B0", "/////",  "white"),
-        "flood_sev_high":    ("#3D85C8", "#2060A0", None,    None),
-        "flood_sev_mod":     ("#7AAED8", "#5090B8", "/////",  "white"),
+        "drought_vsev_high": ("#7B3A1A", "#5A2A0A", None,   None),
+        "drought_vsev_mod":  ("#7B3A1A", "#5A2A0A", "/////", "white"),  # same colour, hatched
+        "drought_sev_high":  ("#C8844A", "#A06030", None,   None),
+        "drought_sev_mod":   ("#C8844A", "#A06030", "/////", "white"),  # same colour, hatched
+        "flood_vsev_high":   ("#0D40B0", "#092E88", None,   None),
+        "flood_vsev_mod":    ("#0D40B0", "#092E88", "/////", "white"),  # same colour, hatched
+        "flood_sev_high":    ("#3D85C8", "#2060A0", None,   None),
+        "flood_sev_mod":     ("#3D85C8", "#2060A0", "/////", "white"),  # same colour, hatched
     }
 
     # ── Region bounds ───────────────────────────────────────────────────
@@ -642,12 +627,12 @@ def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, sev
     _r_mod   = r_mod_sl.value
     _r_high  = r_high_sl.value
 
-    # 8 colours matching the map
+    # 4 colours — one per RP level; skill shown via stripe pattern only
     _TC = {
-        "drought_vsev_high": "#7B3A1A", "drought_vsev_mod": "#A8623A",
-        "drought_sev_high":  "#C8844A", "drought_sev_mod":  "#DFAA80",
-        "flood_vsev_high":   "#0D40B0", "flood_vsev_mod":   "#2E60B8",
-        "flood_sev_high":    "#3D85C8", "flood_sev_mod":    "#7AAED8",
+        "drought_vsev_high": "#7B3A1A", "drought_vsev_mod": "#7B3A1A",
+        "drought_sev_high":  "#C8844A", "drought_sev_mod":  "#C8844A",
+        "flood_vsev_high":   "#0D40B0", "flood_vsev_mod":   "#0D40B0",
+        "flood_sev_high":    "#3D85C8", "flood_sev_mod":    "#3D85C8",
     }
     _BG = {
         "drought_vsev_high": "#F5EAE4", "drought_vsev_mod": "#F5EAE4",
