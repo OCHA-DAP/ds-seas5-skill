@@ -634,10 +634,12 @@ def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, sev
         "flood_vsev_high":   "#0D40B0", "flood_vsev_mod":   "#0D40B0",
         "flood_sev_high":    "#3D85C8", "flood_sev_mod":    "#3D85C8",
     }
-    # CSS diagonal stripe for mod-skill rows (white lines over the fill colour)
+    # Thin white diagonal lines layered over the solid fill — text stays readable
     def _stripe(bg):
-        return (f"repeating-linear-gradient(45deg,{bg},{bg} 5px,"
-                f"rgba(255,255,255,0.35) 5px,rgba(255,255,255,0.35) 10px)")
+        return (f"repeating-linear-gradient(45deg,"
+                f"rgba(255,255,255,0),rgba(255,255,255,0) 7px,"
+                f"rgba(255,255,255,0.35) 7px,rgba(255,255,255,0.35) 8px),"
+                f"{bg}")
 
     # Sort: high-skill first (vsev+high, sev+high), then mod (vsev+mod, sev+mod)
     _SORT = {"vsev_high": 0, "sev_high": 1, "vsev_mod": 2, "sev_mod": 3}
