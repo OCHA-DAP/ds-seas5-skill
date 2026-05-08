@@ -129,7 +129,7 @@ def _(TRIMESTERS, get_trimester_name, issued_month_dd, mo):
     # Default = index 0 (trimester starting with current issued month: MJJ for May,
     # DJF for Dec). Sticky: preserve previous selection if still valid.
     _prev = get_trimester_name()
-    _start = valid_trimesters.index(_prev) if _prev in valid_trimesters else 0
+    _start = valid_trimesters.index(_prev) if _prev in valid_trimesters else 1
     trimester_sl = mo.ui.slider(0, len(valid_trimesters) - 1, step=1, value=_start)
     return trimester_sl, valid_trimesters
 
