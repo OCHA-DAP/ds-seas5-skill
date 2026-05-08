@@ -413,11 +413,6 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month,
 
 
 @app.cell
-def _(detrend_sw):
-    detrend_sw
-
-
-@app.cell
 def _(mo):
     mo.md("### Severity × skill")
     return
