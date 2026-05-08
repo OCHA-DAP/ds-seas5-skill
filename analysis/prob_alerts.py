@@ -71,6 +71,12 @@ def _(TRIMESTERS, monthly_clim, pd, trimester_pct_sl, month_pct_sl):
 
 
 @app.cell
+def _(mo):
+    mo.md("# SEAS5 precipitation alerts")
+    return
+
+
+@app.cell
 def _(calendar, df_skill, mo):
     _max_year = int(df_skill["current_forecast_year"].dropna().max())
     _latest_month = int(
@@ -128,6 +134,15 @@ def _(mo):
 
 
 @app.cell
+def _(mo):
+    severe_rp_sl      = mo.ui.slider(2,    10,   1,    3,    label="Alert RP (yr)")
+    very_severe_rp_sl = mo.ui.slider(5,    25,   1,    10,   label="Severe Alert RP (yr)")
+    r_mod_sl          = mo.ui.slider(0.10, 0.60, 0.05, 0.25, label="Moderate skill (r ≥)")
+    r_high_sl         = mo.ui.slider(0.20, 0.80, 0.05, 0.50, label="High skill (r ≥)")
+    mo.hstack([severe_rp_sl, very_severe_rp_sl, r_mod_sl, r_high_sl], justify="start")
+    return r_high_sl, r_mod_sl, severe_rp_sl, very_severe_rp_sl
+
+@app.cell
 def _(df_skill, df_skill_dt, detrend_sw, pd):
     _KEY = ["pcode", "issued_month", "trimester"]
     if detrend_sw.value == "raw":
@@ -165,7 +180,7 @@ def _(best_dt_combos, df_paired, df_paired_dt, detrend_sw, pd):
 
 @app.cell
 def _(mo):
-    mo.md("## Deterministic")
+    mo.md("## Global")
     return
 
 
@@ -410,22 +425,6 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month,
                   ncol=4, **_LEG_KW)
 
     _fig_m
-
-
-@app.cell
-def _(mo):
-    mo.md("### Severity × skill")
-    return
-
-
-@app.cell
-def _(mo):
-    severe_rp_sl      = mo.ui.slider(2,    10,   1,    3,    label="Alert RP (yr)")
-    very_severe_rp_sl = mo.ui.slider(5,    25,   1,    10,   label="Severe Alert RP (yr)")
-    r_mod_sl          = mo.ui.slider(0.10, 0.60, 0.05, 0.25, label="Moderate skill (r ≥)")
-    r_high_sl         = mo.ui.slider(0.20, 0.80, 0.05, 0.50, label="High skill (r ≥)")
-    mo.hstack([severe_rp_sl, very_severe_rp_sl, r_mod_sl, r_high_sl], justify="start")
-    return r_high_sl, r_mod_sl, severe_rp_sl, very_severe_rp_sl
 
 
 @app.cell
@@ -731,7 +730,7 @@ def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, sev
 
 @app.cell
 def _(mo):
-    mo.md("### Per-country analysis")
+    mo.md("## Country")
     return
 
 
@@ -765,6 +764,12 @@ def _(mo):
     month_pct_sl     = mo.ui.slider(0.00, 0.20, 0.01, 0.05, label="Rainy: each month ≥ X of annual")
     mo.hstack([trimester_pct_sl, month_pct_sl], justify="start")
     return month_pct_sl, trimester_pct_sl
+
+
+@app.cell
+def _(mo):
+    mo.md("### Climatology")
+    return
 
 
 @app.cell
@@ -842,8 +847,9 @@ def _(TRIMESTERS, df_skill, mo, month_pct_sl, monthly_clim, pcode, plt, trimeste
 
 
 @app.cell
-def _(detrend_sw):
-    detrend_sw
+def _(mo):
+    mo.md("### Forecast skill and outlook")
+    return
 
 
 @app.cell
