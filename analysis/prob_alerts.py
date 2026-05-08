@@ -77,18 +77,25 @@ def _(mo):
 
 
 @app.cell
-def _(calendar, df_skill, mo):
-    _max_year = int(df_skill["current_forecast_year"].dropna().max())
-    _latest_month = int(
-        df_skill[df_skill["current_forecast_year"] == _max_year]["issued_month"].max()
-    )
+def _(TRIMESTERS, calendar, df_skill, mo):
+    # Use actual issued year, not season_year (which can be year+1 for cross-year
+    # trimesters like JFM issued in May: season_year=2027 but issued_year=2026).
+    def _actual_issued_year(row):
+        tri = TRIMESTERS[row["trimester"]]
+        is_wrap = 12 in tri and 1 in tri
+        is_cross = not is_wrap and min(tri) < row["issued_month"]
+        return int(row["current_forecast_year"]) - (1 if is_cross else 0)
+
+    _df_iy = df_skill[df_skill["current_forecast_year"].notna()].copy()
+    _df_iy["_iy"] = _df_iy.apply(_actual_issued_year, axis=1)
+    _max_issued_year = int(_df_iy["_iy"].max())
+    _latest_month = int(_df_iy[_df_iy["_iy"] == _max_issued_year]["issued_month"].max())
     _months_ordered = [((_latest_month - i - 1) % 12) + 1 for i in range(12)]
-    # Year for each selectable month: months after the latest get assigned to previous year
-    _yr_of = lambda m: _max_year if m <= _latest_month else _max_year - 1
+    _yr_of = lambda m: _max_issued_year if m <= _latest_month else _max_issued_year - 1
     issued_month_dd = mo.ui.dropdown(
         options={f"{calendar.month_abbr[m]} {_yr_of(m)}": m for m in _months_ordered},
         label="Issued month:",
-        value=f"{calendar.month_abbr[_latest_month]} {_max_year}",
+        value=f"{calendar.month_abbr[_latest_month]} {_max_issued_year}",
     )
     return (issued_month_dd,)
 
@@ -96,18 +103,32 @@ def _(calendar, df_skill, mo):
 @app.cell
 def _(TRIMESTERS, issued_month_dd, mo):
     _im = issued_month_dd.value
-    # A trimester is valid if it has at least one month in the 1–6 month forecast
-    # window. Ignores months in the past (offset > 6 in mod-12 are actually past
-    # months). This fixes e.g. JJA for July-issued: June has offset 11 (past, not
-    # "11 months ahead"), but August has offset 1 → JJA is correctly valid.
+
+    def _tri_valid(months, im):
+        """Valid if all non-past months are within the 0–6 month forecast window.
+        Past months: in a straddling trimester (issued month IN the trimester),
+        months before the issued month get offset > 6 — treat as past, ignore them.
+        Non-straddling trimesters: all offsets taken at face value; max must be ≤ 6."""
+        offsets = [(m - im) % 12 for m in months]
+        has_straddle = 0 in offsets
+        effective = []
+        for o in offsets:
+            if o == 0:
+                effective.append(0)
+            elif o <= 6:
+                effective.append(o)
+            else:
+                effective.append(o - 12 if has_straddle else o)  # past OR far-future
+        future = [e for e in effective if e > 0]
+        return bool(future) and max(future) <= 6
+
     valid_trimesters = [
         name for name, months in TRIMESTERS.items()
-        if any(1 <= (m - _im) % 12 <= 6 for m in months)
+        if _tri_valid(months, _im)
     ]
-    # Default: trimester whose minimum offset (all months, including 0) == 1.
-    # Using the full min (not filtered) so trimesters containing the issued month
-    # (e.g. NDJ for November has offset 0) are passed over in favour of purely-
-    # future ones (e.g. DJF where min == 1).
+    # Default: first purely-future trimester (no past months) starting 1 month after
+    # issued. Uses full min (includes 0) so straddling trimesters like NDJ-for-Nov
+    # (min=0 because Nov is in NDJ) are skipped in favour of DJF (min=1).
     _default_idx = next(
         (i for i, t in enumerate(valid_trimesters)
          if min((m - _im) % 12 for m in TRIMESTERS[t]) == 1),
@@ -122,10 +143,14 @@ def _(TRIMESTERS, df_skill, issued_month_dd, mo, trimester_sl, valid_trimesters)
     issued_month = issued_month_dd.value
     trimester    = valid_trimesters[trimester_sl.value]
 
-    # Issued year
-    _max_y  = int(df_skill["current_forecast_year"].dropna().max())
-    _late_m = int(df_skill[df_skill["current_forecast_year"] == _max_y]["issued_month"].max())
-    _iss_year = _max_y if issued_month <= _late_m else _max_y - 1
+    # Issued year: filter to rows for this issued_month and infer from current_forecast_year
+    def _iy_for_row(row):
+        tri = TRIMESTERS[row["trimester"]]
+        is_wrap = 12 in tri and 1 in tri
+        is_cross = not is_wrap and min(tri) < row["issued_month"]
+        return int(row["current_forecast_year"]) - (1 if is_cross else 0)
+    _rows_im = df_skill[(df_skill["issued_month"] == issued_month) & df_skill["current_forecast_year"].notna()]
+    _iss_year = int(_rows_im.apply(_iy_for_row, axis=1).max()) if not _rows_im.empty else 2026
 
     # Trimester year: match the season_year used in the pipeline.
     # Wrapping trimesters (DJF, NDJ — contain both month 12 and month 1) are
