@@ -415,7 +415,7 @@ def _(mo):
 
 
 @app.cell
-def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl, world_geo):
+def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl, world_geo):
     import geopandas as _gpd_map  # needed for GeoDataFrame methods in this cell
     import matplotlib.patches as _mpatch_m
 
@@ -570,8 +570,9 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
     _yr_map_s = df_skill_active[(df_skill_active["issued_month"] == issued_month) & (df_skill_active["trimester"] == trimester)]["current_forecast_year"].dropna()
     _yr_map = int(_yr_map_s.max()) if not _yr_map_s.empty else ""
     _tri_str = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
+    _map_detrend_sfx = {"raw": "", "detrended": " [detrended]", "best": " [best skill]"}.get(detrend_sw.value, "")
     _ax_m.set_title(
-        f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr_map}, valid {_tri_str}",
+        f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr_map}, valid {_tri_str}{_map_detrend_sfx}",
         fontsize=11, pad=8,
     )
 
@@ -637,12 +638,12 @@ def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, sev
     # Thin white diagonal lines layered over the solid fill — text stays readable
     def _stripe(bg):
         return (f"repeating-linear-gradient(45deg,"
-                f"rgba(255,255,255,0),rgba(255,255,255,0) 7px,"
-                f"rgba(255,255,255,0.35) 7px,rgba(255,255,255,0.35) 8px),"
+                f"rgba(255,255,255,0),rgba(255,255,255,0) 6px,"
+                f"rgba(255,255,255,0.35) 6px,rgba(255,255,255,0.35) 8px),"
                 f"{bg}")
 
     # Sort: high-skill first (vsev+high, sev+high), then mod (vsev+mod, sev+mod)
-    _SORT = {"vsev_high": 0, "sev_high": 1, "vsev_mod": 2, "sev_mod": 3}
+    _SORT = {"vsev_high": 0, "vsev_mod": 1, "sev_high": 2, "sev_mod": 3}
 
     _df_t = df_skill_active[
         (df_skill_active["issued_month"] == issued_month)
