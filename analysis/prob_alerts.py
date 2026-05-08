@@ -92,7 +92,13 @@ def _(TRIMESTERS, issued_month_dd, mo):
         name for name, months in TRIMESTERS.items()
         if max((m - _im) % 12 for m in months) <= 6
     ]
-    trimester_sl = mo.ui.slider(0, len(valid_trimesters) - 1, step=1, value=0)
+    # Default to the trimester whose first month is issued_month + 1 (e.g. May → JJA)
+    _default_idx = next(
+        (i for i, t in enumerate(valid_trimesters)
+         if min((m - _im) % 12 for m in TRIMESTERS[t]) == 1),
+        0,
+    )
+    trimester_sl = mo.ui.slider(0, len(valid_trimesters) - 1, step=1, value=_default_idx)
     return trimester_sl, valid_trimesters
 
 
@@ -114,7 +120,7 @@ def _(issued_month_dd, mo, trimester_sl, valid_trimesters):
 def _(mo):
     detrend_sw = mo.ui.dropdown(
         options={"Raw": "raw", "Detrended": "detrended", "Best skill": "best"},
-        value="Raw",
+        value="Best skill",
         label="Forecast version:",
     )
     detrend_sw
