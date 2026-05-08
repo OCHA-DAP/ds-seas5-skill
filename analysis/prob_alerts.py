@@ -184,7 +184,15 @@ def _(mo):
         value="Best skill",
         label="Forecast version:",
     )
-    detrend_sw
+    _tip = (
+        "Raw: forecast only normalized to observational distribution&#10;"
+        "Detrended: forecast and observational also detrended with linear fit in log-normal space&#10;"
+        "Best skill: predictions taken from whichever of Raw and Detrended have better skill, per country"
+    )
+    mo.hstack([
+        detrend_sw,
+        mo.Html(f'<span title="{_tip}" style="cursor:help;font-size:16px;color:#888;user-select:none">ⓘ</span>'),
+    ], align="center", gap="0.4rem")
     return (detrend_sw,)
 
 
