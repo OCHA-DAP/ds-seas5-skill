@@ -627,25 +627,20 @@ def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, sev
     _r_mod   = r_mod_sl.value
     _r_high  = r_high_sl.value
 
-    # 4 colours — one per RP level; skill shown via stripe pattern only
-    _TC = {
+    # Background = category fill colour (matches map); white text on top
+    _BG = {
         "drought_vsev_high": "#7B3A1A", "drought_vsev_mod": "#7B3A1A",
         "drought_sev_high":  "#C8844A", "drought_sev_mod":  "#C8844A",
         "flood_vsev_high":   "#0D40B0", "flood_vsev_mod":   "#0D40B0",
         "flood_sev_high":    "#3D85C8", "flood_sev_mod":    "#3D85C8",
     }
-    _BG = {
-        "drought_vsev_high": "#F5EAE4", "drought_vsev_mod": "#F5EAE4",
-        "drought_sev_high":  "#FBF2EC", "drought_sev_mod":  "#FBF2EC",
-        "flood_vsev_high":   "#E4EAF5", "flood_vsev_mod":   "#E4EAF5",
-        "flood_sev_high":    "#ECF2FB", "flood_sev_mod":    "#ECF2FB",
-    }
-    # CSS diagonal stripe — approximates the map's white hatch for mod-skill rows
+    # CSS diagonal stripe for mod-skill rows (white lines over the fill colour)
     def _stripe(bg):
         return (f"repeating-linear-gradient(45deg,{bg},{bg} 5px,"
-                f"rgba(255,255,255,0.45) 5px,rgba(255,255,255,0.45) 10px)")
+                f"rgba(255,255,255,0.35) 5px,rgba(255,255,255,0.35) 10px)")
 
-    _SORT = {"vsev_high": 0, "vsev_mod": 1, "sev_high": 2, "sev_mod": 3}
+    # Sort: high-skill first (vsev+high, sev+high), then mod (vsev+mod, sev+mod)
+    _SORT = {"vsev_high": 0, "sev_high": 1, "vsev_mod": 2, "sev_mod": 3}
 
     _df_t = df_skill_active[
         (df_skill_active["issued_month"] == issued_month)
@@ -696,17 +691,17 @@ def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, sev
         )
         for _, row in rows.iterrows():
             cat    = row["_cat"]
-            tc     = _TC[cat]
-            bg_css = _stripe(_BG[cat]) if "_mod" in cat else f"background:{_BG[cat]}"
+            bg_col = _BG[cat]
+            bg_css = _stripe(bg_col) if "_mod" in cat else bg_col
             rp_val = row[rp_col]
             rp_str = f"{rp_val:.1f}" if pd.notna(rp_val) else "—"
             r_str  = f"{row['pearson_r']:.2f}"
             html += (
-                f"<tr style='background:{bg_css};border-bottom:1px solid #e8e8e8'>"
-                f"<td style='padding:5px 8px;font-weight:600;color:{tc}'>{row['country_name']}</td>"
-                f"<td style='padding:5px 8px;color:{tc}'>{row['iso3']}</td>"
-                f"<td style='padding:5px 8px;text-align:right;color:{tc};font-weight:600'>{rp_str}</td>"
-                f"<td style='padding:5px 8px;text-align:right;color:{tc}'>{r_str}</td>"
+                f"<tr style='background:{bg_css};border-bottom:1px solid rgba(255,255,255,0.2)'>"
+                f"<td style='padding:5px 8px;font-weight:600;color:white'>{row['country_name']}</td>"
+                f"<td style='padding:5px 8px;color:white'>{row['iso3']}</td>"
+                f"<td style='padding:5px 8px;text-align:right;color:white;font-weight:600'>{rp_str}</td>"
+                f"<td style='padding:5px 8px;text-align:right;color:white'>{r_str}</td>"
                 "</tr>"
             )
         html += "</tbody></table>"
