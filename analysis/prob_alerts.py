@@ -170,225 +170,6 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    mo.md("### Severity × skill")
-    return
-
-
-@app.cell
-def _(mo):
-    severe_rp_sl      = mo.ui.slider(2,    10,   1,    3,    label="Alert RP (yr)")
-    very_severe_rp_sl = mo.ui.slider(5,    25,   1,    10,   label="Severe Alert RP (yr)")
-    r_mod_sl          = mo.ui.slider(0.10, 0.60, 0.05, 0.25, label="Moderate skill (r ≥)")
-    r_high_sl         = mo.ui.slider(0.20, 0.80, 0.05, 0.50, label="High skill (r ≥)")
-    mo.hstack([severe_rp_sl, very_severe_rp_sl, r_mod_sl, r_high_sl], justify="start")
-    return r_high_sl, r_mod_sl, severe_rp_sl, very_severe_rp_sl
-
-
-@app.cell
-def _(mo):
-    rainy_only_sw = mo.ui.switch(label="Show all countries (incl. off-season)", value=False)
-    scatter_rp_sw = mo.ui.switch(label="RP view", value=False)
-    mo.hstack([rainy_only_sw, scatter_rp_sw], justify="start")
-    return rainy_only_sw, scatter_rp_sw
-
-
-@app.cell
-def _(TRIMESTERS, calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, scatter_rp_sw, severe_rp_sl, trimester, very_severe_rp_sl):
-    import matplotlib.patches as _mpatch_sc
-
-    _vsev_rp = very_severe_rp_sl.value
-    _sev_rp  = severe_rp_sl.value
-    _vsev_pct = 100 / _vsev_rp
-    _sev_pct  = 100 / _sev_rp
-    _r_mod   = r_mod_sl.value
-    _r_high  = r_high_sl.value
-    # 4 colours — one per RP level; skill shown via hatching only
-    _C_DH = "#7B3A1A"  # severe drought (vsev)
-    _C_DM = "#C8844A"  # drought (sev)
-    _C_FH = "#0D40B0"  # severe flood (vsev)
-    _C_FM = "#3D85C8"  # flood (sev)
-    _HATCH = "/////"
-    _detrend_sfx = {"raw": "", "detrended": " [detrended]", "best": " [best skill]"}.get(detrend_sw.value, "")
-
-    def _zone(ax, x0, x1, y0, y1, color, hatch=None, hatch_color="white", alpha=0.20):
-        ax.add_patch(_mpatch_sc.Rectangle(
-            (x0, y0), x1 - x0, y1 - y0,
-            facecolor=color, alpha=alpha, linewidth=0, zorder=0,
-        ))
-        if hatch:
-            ax.add_patch(_mpatch_sc.Rectangle(
-                (x0, y0), x1 - x0, y1 - y0,
-                facecolor="none", edgecolor=hatch_color, hatch=hatch, linewidth=0, zorder=0,
-            ))
-
-    def _label_color_pct(pct, r):
-        if r < _r_mod: return "#444444"
-        _d = pct < 50
-        if pct <= _vsev_pct or pct >= 100 - _vsev_pct:
-            return _C_DH if _d else _C_FH
-        if pct <= _sev_pct or pct >= 100 - _sev_pct:
-            return _C_DM if _d else _C_FM
-        return "#444444"
-
-    def _label_color_rp(rp_abs, is_drought, r):
-        if r < _r_mod: return "#444444"
-        if rp_abs >= _vsev_rp: return _C_DH if is_drought else _C_FH
-        if rp_abs >= _sev_rp:  return _C_DM if is_drought else _C_FM
-        return "#444444"
-
-    if scatter_rp_sw.value:
-        # ── RP view ─────────────────────────────────────────────────────
-        _df = df_skill_active[
-            (df_skill_active["issued_month"] == issued_month)
-            & (df_skill_active["trimester"] == trimester)
-            & df_skill_active["forecast_percentile"].notna()
-            & df_skill_active["pearson_r"].notna()
-            & df_skill_active["forecast_rp"].notna()
-            & df_skill_active["flood_rp"].notna()
-        ].copy()
-        if not rainy_only_sw.value:
-            _df = _df[_df["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
-        _df["_x"] = _df.apply(
-            lambda row: -row["forecast_rp"] if row["forecast_percentile"] < 50 else row["flood_rp"],
-            axis=1,
-        )
-        _max_rp = max(
-            _df["forecast_rp"].max() if not _df.empty else _vsev_rp,
-            _df["flood_rp"].max()    if not _df.empty else _vsev_rp,
-            _vsev_rp,
-        )
-        _xlim = _max_rp + 2
-
-        plt.close("all")
-        _fig, _ax = plt.subplots(figsize=(9, 5.5), dpi=150)
-        _ax.set_xlim(-_xlim, _xlim)
-        _ax.set_ylim(0, 1.0)
-
-        # Grey background zones (drawn first)
-        _zone(_ax, -_xlim, _xlim, 0, _r_mod, "white", "xxxxxx", "#CCCCCC", 1.0)          # low skill (cross hatch)
-        _zone(_ax, -_sev_rp, _sev_rp, _r_mod, _r_high, "white", "/////", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
-
-        # Drought zones (x < 0; more negative = worse)
-        _zone(_ax, -_xlim, -_vsev_rp, _r_high, 1.0,    _C_DH)               # vsev + high skill
-        _zone(_ax, -_xlim, -_vsev_rp, _r_mod,  _r_high, _C_DH, _HATCH)      # vsev + mod skill
-        _zone(_ax, -_vsev_rp, -_sev_rp, _r_high, 1.0,  _C_DM)               # sev + high skill
-        _zone(_ax, -_vsev_rp, -_sev_rp, _r_mod, _r_high, _C_DM, _HATCH)     # sev + mod skill
-        # Flood zones (x > 0)
-        _zone(_ax, _sev_rp, _vsev_rp, _r_high, 1.0,    _C_FM)               # sev + high skill
-        _zone(_ax, _sev_rp, _vsev_rp, _r_mod,  _r_high, _C_FM, _HATCH)      # sev + mod skill
-        _zone(_ax, _vsev_rp, _xlim,   _r_high, 1.0,    _C_FH)               # vsev + high skill
-        _zone(_ax, _vsev_rp, _xlim,   _r_mod,  _r_high, _C_FH, _HATCH)      # vsev + mod skill
-
-        _ax.axvspan(-1, 1, color="#EEEEEE", zorder=0)
-        _ax.axvline(0, color="#BBBBBB", linewidth=0.6, zorder=2)
-        for _xv in [-_vsev_rp, -_sev_rp, _sev_rp, _vsev_rp]:
-            _ax.axvline(_xv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=2)
-        for _yv in [_r_mod, _r_high]:
-            _ax.axhline(_yv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=2)
-
-        _ax.text(-_vsev_rp, 0.98, f"{_vsev_rp}yr", ha="center", va="top", fontsize=8, color="#666")
-        _ax.text(-_sev_rp,  0.98, f"{_sev_rp}yr",  ha="center", va="top", fontsize=8, color="#666")
-        _ax.text( _sev_rp,  0.98, f"{_sev_rp}yr",  ha="center", va="top", fontsize=8, color="#666")
-        _ax.text( _vsev_rp, 0.98, f"{_vsev_rp}yr", ha="center", va="top", fontsize=8, color="#666")
-        _ax.text(-_xlim + 0.5, _r_mod + 0.01,  f"r = {_r_mod:.2f}",  ha="left", va="bottom", fontsize=8, color="#666")
-        _ax.text(-_xlim + 0.5, _r_high + 0.01, f"r = {_r_high:.2f}", ha="left", va="bottom", fontsize=8, color="#666")
-        _ax.text(-_xlim * 0.7, 0.01, "← drought", ha="center", va="bottom", fontsize=8, color="#999", style="italic")
-        _ax.text( _xlim * 0.7, 0.01, "flood →",   ha="center", va="bottom", fontsize=8, color="#999", style="italic")
-
-        for _, _row in _df.iterrows():
-            _r  = _row["pearson_r"]
-            _x  = _row["_x"]
-            _iso = _row["iso3"]
-            _col = _label_color_rp(abs(_x), _row["forecast_percentile"] < 50, _r)
-            if _r >= 0:
-                _ax.text(_x, _r, _iso, ha="center", va="center",
-                         color=_col, fontsize=9, fontweight="bold", zorder=4)
-            else:
-                _ax.text(_x, 0.025, _iso, ha="center", va="bottom",
-                         color=_col, fontsize=9, fontweight="bold", zorder=4)
-                _ax.annotate("", xy=(_x, 0.002), xytext=(_x, 0.022),
-                             arrowprops=dict(arrowstyle="-|>", color=_col, lw=0.9, mutation_scale=6), zorder=4)
-
-        _ax.set_xlabel("← Drought RP (yr)   |   Flood RP (yr) →")
-        _ax.set_ylabel("Skill (Pearson r)")
-        _ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: str(int(abs(x)))))
-        _yr = int(_df["current_forecast_year"].dropna().max()) if not _df["current_forecast_year"].dropna().empty else "—"
-        _tri_str_sc = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
-        _ax.set_title(f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr}, valid {_tri_str_sc}{_detrend_sfx}")
-
-    else:
-        # ── Percentile view (default) ────────────────────────────────────
-        _df = df_skill_active[
-            (df_skill_active["issued_month"] == issued_month)
-            & (df_skill_active["trimester"] == trimester)
-            & df_skill_active["forecast_percentile"].notna()
-            & df_skill_active["pearson_r"].notna()
-        ].copy()
-        if not rainy_only_sw.value:
-            _df = _df[_df["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
-
-        plt.close("all")
-        _fig, _ax = plt.subplots(figsize=(9, 5.5), dpi=150)
-        _ax.set_xlim(0, 100)
-        _ax.set_ylim(0, 1.0)
-
-        # Grey background zones (drawn first)
-        _zone(_ax, 0, 100, 0, _r_mod, "white", "xxxxxx", "#CCCCCC", 1.0)                    # low skill (cross hatch)
-        _zone(_ax, _sev_pct, 100 - _sev_pct, _r_mod, _r_high, "white", "/////", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
-
-        # Drought zones (left)
-        _zone(_ax, 0, _vsev_pct, _r_high, 1.0,     _C_DH)                        # vsev + high skill
-        _zone(_ax, 0, _vsev_pct, _r_mod,  _r_high,  _C_DH, _HATCH)               # vsev + mod skill
-        _zone(_ax, _vsev_pct, _sev_pct, _r_high, 1.0,  _C_DM)                    # sev + high skill
-        _zone(_ax, _vsev_pct, _sev_pct, _r_mod,  _r_high, _C_DM, _HATCH)         # sev + mod skill
-        # Flood zones (right)
-        _zone(_ax, 100 - _sev_pct, 100 - _vsev_pct, _r_high, 1.0, _C_FM)         # sev + high skill
-        _zone(_ax, 100 - _sev_pct, 100 - _vsev_pct, _r_mod, _r_high, _C_FM, _HATCH)  # sev + mod skill
-        _zone(_ax, 100 - _vsev_pct, 100, _r_high, 1.0,  _C_FH)                   # vsev + high skill
-        _zone(_ax, 100 - _vsev_pct, 100, _r_mod,  _r_high, _C_FH, _HATCH)        # vsev + mod skill
-
-        for _xv in [_vsev_pct, _sev_pct, 100 - _sev_pct, 100 - _vsev_pct]:
-            _ax.axvline(_xv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=2)
-        for _yv in [_r_mod, _r_high]:
-            _ax.axhline(_yv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=2)
-
-        _ax.text(_vsev_pct,       0.98, f"{_vsev_rp}yr", ha="center", va="top", fontsize=8, color="#666")
-        _ax.text(_sev_pct,        0.98, f"{_sev_rp}yr",  ha="center", va="top", fontsize=8, color="#666")
-        _ax.text(100 - _sev_pct,  0.98, f"{_sev_rp}yr",  ha="center", va="top", fontsize=8, color="#666")
-        _ax.text(100 - _vsev_pct, 0.98, f"{_vsev_rp}yr", ha="center", va="top", fontsize=8, color="#666")
-        _ax.text(1, _r_mod + 0.01,  f"r = {_r_mod:.2f}",  ha="left", va="bottom", fontsize=8, color="#666")
-        _ax.text(1, _r_high + 0.01, f"r = {_r_high:.2f}", ha="left", va="bottom", fontsize=8, color="#666")
-        _ax.text(5,  0.01, "← drought", ha="center", va="bottom", fontsize=8, color="#999", style="italic")
-        _ax.text(95, 0.01, "flood →",   ha="center", va="bottom", fontsize=8, color="#999", style="italic")
-
-        for _, _row in _df.iterrows():
-            _pct = _row["forecast_percentile"]
-            _r   = _row["pearson_r"]
-            _iso = _row["iso3"]
-            _col = _label_color_pct(_pct, _r)
-            if _r >= 0:
-                _ax.text(_pct, _r, _iso, ha="center", va="center",
-                         color=_col, fontsize=9, fontweight="bold", zorder=4)
-            else:
-                _ax.text(_pct, 0.025, _iso, ha="center", va="bottom",
-                         color=_col, fontsize=9, fontweight="bold", zorder=4)
-                _ax.annotate("", xy=(_pct, 0.002), xytext=(_pct, 0.022),
-                             arrowprops=dict(arrowstyle="-|>", color=_col, lw=0.9, mutation_scale=6), zorder=4)
-
-        _ax.set_xlabel("Forecast percentile among historical (0 = driest, 100 = wettest)")
-        _ax.set_ylabel("Skill (Pearson r)")
-        _yr = int(_df["current_forecast_year"].dropna().max()) if not _df["current_forecast_year"].dropna().empty else "—"
-        _tri_str_sc = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
-        _ax.set_title(f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr}, valid {_tri_str_sc}{_detrend_sfx}")
-
-    _ax.spines["top"].set_visible(False)
-    _ax.spines["right"].set_visible(False)
-    plt.tight_layout()
-    _fig
-
-
-@app.cell
 def _():
     import geopandas as _gpd
     from pathlib import Path as _Path
@@ -634,6 +415,225 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month,
 @app.cell
 def _(detrend_sw):
     detrend_sw
+
+
+@app.cell
+def _(mo):
+    mo.md("### Severity × skill")
+    return
+
+
+@app.cell
+def _(mo):
+    severe_rp_sl      = mo.ui.slider(2,    10,   1,    3,    label="Alert RP (yr)")
+    very_severe_rp_sl = mo.ui.slider(5,    25,   1,    10,   label="Severe Alert RP (yr)")
+    r_mod_sl          = mo.ui.slider(0.10, 0.60, 0.05, 0.25, label="Moderate skill (r ≥)")
+    r_high_sl         = mo.ui.slider(0.20, 0.80, 0.05, 0.50, label="High skill (r ≥)")
+    mo.hstack([severe_rp_sl, very_severe_rp_sl, r_mod_sl, r_high_sl], justify="start")
+    return r_high_sl, r_mod_sl, severe_rp_sl, very_severe_rp_sl
+
+
+@app.cell
+def _(mo):
+    rainy_only_sw = mo.ui.switch(label="Show all countries (incl. off-season)", value=False)
+    scatter_rp_sw = mo.ui.switch(label="RP view", value=False)
+    mo.hstack([rainy_only_sw, scatter_rp_sw], justify="start")
+    return rainy_only_sw, scatter_rp_sw
+
+
+@app.cell
+def _(TRIMESTERS, calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, scatter_rp_sw, severe_rp_sl, trimester, very_severe_rp_sl):
+    import matplotlib.patches as _mpatch_sc
+
+    _vsev_rp = very_severe_rp_sl.value
+    _sev_rp  = severe_rp_sl.value
+    _vsev_pct = 100 / _vsev_rp
+    _sev_pct  = 100 / _sev_rp
+    _r_mod   = r_mod_sl.value
+    _r_high  = r_high_sl.value
+    # 4 colours — one per RP level; skill shown via hatching only
+    _C_DH = "#7B3A1A"  # severe drought (vsev)
+    _C_DM = "#C8844A"  # drought (sev)
+    _C_FH = "#0D40B0"  # severe flood (vsev)
+    _C_FM = "#3D85C8"  # flood (sev)
+    _HATCH = "/////"
+    _detrend_sfx = {"raw": "", "detrended": " [detrended]", "best": " [best skill]"}.get(detrend_sw.value, "")
+
+    def _zone(ax, x0, x1, y0, y1, color, hatch=None, hatch_color="white", alpha=0.20):
+        ax.add_patch(_mpatch_sc.Rectangle(
+            (x0, y0), x1 - x0, y1 - y0,
+            facecolor=color, alpha=alpha, linewidth=0, zorder=0,
+        ))
+        if hatch:
+            ax.add_patch(_mpatch_sc.Rectangle(
+                (x0, y0), x1 - x0, y1 - y0,
+                facecolor="none", edgecolor=hatch_color, hatch=hatch, linewidth=0, zorder=0,
+            ))
+
+    def _label_color_pct(pct, r):
+        if r < _r_mod: return "#444444"
+        _d = pct < 50
+        if pct <= _vsev_pct or pct >= 100 - _vsev_pct:
+            return _C_DH if _d else _C_FH
+        if pct <= _sev_pct or pct >= 100 - _sev_pct:
+            return _C_DM if _d else _C_FM
+        return "#444444"
+
+    def _label_color_rp(rp_abs, is_drought, r):
+        if r < _r_mod: return "#444444"
+        if rp_abs >= _vsev_rp: return _C_DH if is_drought else _C_FH
+        if rp_abs >= _sev_rp:  return _C_DM if is_drought else _C_FM
+        return "#444444"
+
+    if scatter_rp_sw.value:
+        # ── RP view ─────────────────────────────────────────────────────
+        _df = df_skill_active[
+            (df_skill_active["issued_month"] == issued_month)
+            & (df_skill_active["trimester"] == trimester)
+            & df_skill_active["forecast_percentile"].notna()
+            & df_skill_active["pearson_r"].notna()
+            & df_skill_active["forecast_rp"].notna()
+            & df_skill_active["flood_rp"].notna()
+        ].copy()
+        if not rainy_only_sw.value:
+            _df = _df[_df["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
+        _df["_x"] = _df.apply(
+            lambda row: -row["forecast_rp"] if row["forecast_percentile"] < 50 else row["flood_rp"],
+            axis=1,
+        )
+        _max_rp = max(
+            _df["forecast_rp"].max() if not _df.empty else _vsev_rp,
+            _df["flood_rp"].max()    if not _df.empty else _vsev_rp,
+            _vsev_rp,
+        )
+        _xlim = _max_rp + 2
+
+        plt.close("all")
+        _fig, _ax = plt.subplots(figsize=(9, 5.5), dpi=150)
+        _ax.set_xlim(-_xlim, _xlim)
+        _ax.set_ylim(0, 1.0)
+
+        # Grey background zones (drawn first)
+        _zone(_ax, -_xlim, _xlim, 0, _r_mod, "white", "xxxxxx", "#CCCCCC", 1.0)          # low skill (cross hatch)
+        _zone(_ax, -_sev_rp, _sev_rp, _r_mod, _r_high, "white", "/////", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
+
+        # Drought zones (x < 0; more negative = worse)
+        _zone(_ax, -_xlim, -_vsev_rp, _r_high, 1.0,    _C_DH)               # vsev + high skill
+        _zone(_ax, -_xlim, -_vsev_rp, _r_mod,  _r_high, _C_DH, _HATCH)      # vsev + mod skill
+        _zone(_ax, -_vsev_rp, -_sev_rp, _r_high, 1.0,  _C_DM)               # sev + high skill
+        _zone(_ax, -_vsev_rp, -_sev_rp, _r_mod, _r_high, _C_DM, _HATCH)     # sev + mod skill
+        # Flood zones (x > 0)
+        _zone(_ax, _sev_rp, _vsev_rp, _r_high, 1.0,    _C_FM)               # sev + high skill
+        _zone(_ax, _sev_rp, _vsev_rp, _r_mod,  _r_high, _C_FM, _HATCH)      # sev + mod skill
+        _zone(_ax, _vsev_rp, _xlim,   _r_high, 1.0,    _C_FH)               # vsev + high skill
+        _zone(_ax, _vsev_rp, _xlim,   _r_mod,  _r_high, _C_FH, _HATCH)      # vsev + mod skill
+
+        _ax.axvspan(-1, 1, color="#EEEEEE", zorder=0)
+        _ax.axvline(0, color="#BBBBBB", linewidth=0.6, zorder=2)
+        for _xv in [-_vsev_rp, -_sev_rp, _sev_rp, _vsev_rp]:
+            _ax.axvline(_xv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=2)
+        for _yv in [_r_mod, _r_high]:
+            _ax.axhline(_yv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=2)
+
+        _ax.text(-_vsev_rp, 0.98, f"{_vsev_rp}yr", ha="center", va="top", fontsize=8, color="#666")
+        _ax.text(-_sev_rp,  0.98, f"{_sev_rp}yr",  ha="center", va="top", fontsize=8, color="#666")
+        _ax.text( _sev_rp,  0.98, f"{_sev_rp}yr",  ha="center", va="top", fontsize=8, color="#666")
+        _ax.text( _vsev_rp, 0.98, f"{_vsev_rp}yr", ha="center", va="top", fontsize=8, color="#666")
+        _ax.text(-_xlim + 0.5, _r_mod + 0.01,  f"r = {_r_mod:.2f}",  ha="left", va="bottom", fontsize=8, color="#666")
+        _ax.text(-_xlim + 0.5, _r_high + 0.01, f"r = {_r_high:.2f}", ha="left", va="bottom", fontsize=8, color="#666")
+        _ax.text(-_xlim * 0.7, 0.01, "← drought", ha="center", va="bottom", fontsize=8, color="#999", style="italic")
+        _ax.text( _xlim * 0.7, 0.01, "flood →",   ha="center", va="bottom", fontsize=8, color="#999", style="italic")
+
+        for _, _row in _df.iterrows():
+            _r  = _row["pearson_r"]
+            _x  = _row["_x"]
+            _iso = _row["iso3"]
+            _col = _label_color_rp(abs(_x), _row["forecast_percentile"] < 50, _r)
+            if _r >= 0:
+                _ax.text(_x, _r, _iso, ha="center", va="center",
+                         color=_col, fontsize=9, fontweight="bold", zorder=4)
+            else:
+                _ax.text(_x, 0.025, _iso, ha="center", va="bottom",
+                         color=_col, fontsize=9, fontweight="bold", zorder=4)
+                _ax.annotate("", xy=(_x, 0.002), xytext=(_x, 0.022),
+                             arrowprops=dict(arrowstyle="-|>", color=_col, lw=0.9, mutation_scale=6), zorder=4)
+
+        _ax.set_xlabel("← Drought RP (yr)   |   Flood RP (yr) →")
+        _ax.set_ylabel("Skill (Pearson r)")
+        _ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: str(int(abs(x)))))
+        _yr = int(_df["current_forecast_year"].dropna().max()) if not _df["current_forecast_year"].dropna().empty else "—"
+        _tri_str_sc = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
+        _ax.set_title(f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr}, valid {_tri_str_sc}{_detrend_sfx}")
+
+    else:
+        # ── Percentile view (default) ────────────────────────────────────
+        _df = df_skill_active[
+            (df_skill_active["issued_month"] == issued_month)
+            & (df_skill_active["trimester"] == trimester)
+            & df_skill_active["forecast_percentile"].notna()
+            & df_skill_active["pearson_r"].notna()
+        ].copy()
+        if not rainy_only_sw.value:
+            _df = _df[_df["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
+
+        plt.close("all")
+        _fig, _ax = plt.subplots(figsize=(9, 5.5), dpi=150)
+        _ax.set_xlim(0, 100)
+        _ax.set_ylim(0, 1.0)
+
+        # Grey background zones (drawn first)
+        _zone(_ax, 0, 100, 0, _r_mod, "white", "xxxxxx", "#CCCCCC", 1.0)                    # low skill (cross hatch)
+        _zone(_ax, _sev_pct, 100 - _sev_pct, _r_mod, _r_high, "white", "/////", "#DDDDDD", 1.0)  # mod skill no alert (single hatch)
+
+        # Drought zones (left)
+        _zone(_ax, 0, _vsev_pct, _r_high, 1.0,     _C_DH)                        # vsev + high skill
+        _zone(_ax, 0, _vsev_pct, _r_mod,  _r_high,  _C_DH, _HATCH)               # vsev + mod skill
+        _zone(_ax, _vsev_pct, _sev_pct, _r_high, 1.0,  _C_DM)                    # sev + high skill
+        _zone(_ax, _vsev_pct, _sev_pct, _r_mod,  _r_high, _C_DM, _HATCH)         # sev + mod skill
+        # Flood zones (right)
+        _zone(_ax, 100 - _sev_pct, 100 - _vsev_pct, _r_high, 1.0, _C_FM)         # sev + high skill
+        _zone(_ax, 100 - _sev_pct, 100 - _vsev_pct, _r_mod, _r_high, _C_FM, _HATCH)  # sev + mod skill
+        _zone(_ax, 100 - _vsev_pct, 100, _r_high, 1.0,  _C_FH)                   # vsev + high skill
+        _zone(_ax, 100 - _vsev_pct, 100, _r_mod,  _r_high, _C_FH, _HATCH)        # vsev + mod skill
+
+        for _xv in [_vsev_pct, _sev_pct, 100 - _sev_pct, 100 - _vsev_pct]:
+            _ax.axvline(_xv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=2)
+        for _yv in [_r_mod, _r_high]:
+            _ax.axhline(_yv, color="#888", linewidth=0.8, linestyle="--", alpha=0.7, zorder=2)
+
+        _ax.text(_vsev_pct,       0.98, f"{_vsev_rp}yr", ha="center", va="top", fontsize=8, color="#666")
+        _ax.text(_sev_pct,        0.98, f"{_sev_rp}yr",  ha="center", va="top", fontsize=8, color="#666")
+        _ax.text(100 - _sev_pct,  0.98, f"{_sev_rp}yr",  ha="center", va="top", fontsize=8, color="#666")
+        _ax.text(100 - _vsev_pct, 0.98, f"{_vsev_rp}yr", ha="center", va="top", fontsize=8, color="#666")
+        _ax.text(1, _r_mod + 0.01,  f"r = {_r_mod:.2f}",  ha="left", va="bottom", fontsize=8, color="#666")
+        _ax.text(1, _r_high + 0.01, f"r = {_r_high:.2f}", ha="left", va="bottom", fontsize=8, color="#666")
+        _ax.text(5,  0.01, "← drought", ha="center", va="bottom", fontsize=8, color="#999", style="italic")
+        _ax.text(95, 0.01, "flood →",   ha="center", va="bottom", fontsize=8, color="#999", style="italic")
+
+        for _, _row in _df.iterrows():
+            _pct = _row["forecast_percentile"]
+            _r   = _row["pearson_r"]
+            _iso = _row["iso3"]
+            _col = _label_color_pct(_pct, _r)
+            if _r >= 0:
+                _ax.text(_pct, _r, _iso, ha="center", va="center",
+                         color=_col, fontsize=9, fontweight="bold", zorder=4)
+            else:
+                _ax.text(_pct, 0.025, _iso, ha="center", va="bottom",
+                         color=_col, fontsize=9, fontweight="bold", zorder=4)
+                _ax.annotate("", xy=(_pct, 0.002), xytext=(_pct, 0.022),
+                             arrowprops=dict(arrowstyle="-|>", color=_col, lw=0.9, mutation_scale=6), zorder=4)
+
+        _ax.set_xlabel("Forecast percentile among historical (0 = driest, 100 = wettest)")
+        _ax.set_ylabel("Skill (Pearson r)")
+        _yr = int(_df["current_forecast_year"].dropna().max()) if not _df["current_forecast_year"].dropna().empty else "—"
+        _tri_str_sc = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
+        _ax.set_title(f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr}, valid {_tri_str_sc}{_detrend_sfx}")
+
+    _ax.spines["top"].set_visible(False)
+    _ax.spines["right"].set_visible(False)
+    plt.tight_layout()
+    _fig
 
 
 @app.cell
