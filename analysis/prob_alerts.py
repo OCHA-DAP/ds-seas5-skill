@@ -101,7 +101,14 @@ def _(TRIMESTERS, calendar, df_skill, mo):
 
 
 @app.cell
-def _(TRIMESTERS, issued_month_dd, mo):
+def _(mo):
+    # Sticky trimester state: persists the selected trimester across issued-month changes
+    get_trimester_name, set_trimester_name = mo.state("JJA")
+    return get_trimester_name, set_trimester_name
+
+
+@app.cell
+def _(TRIMESTERS, get_trimester_name, issued_month_dd, mo):
     _im = issued_month_dd.value
 
     def _tri_valid(months, im):
@@ -126,22 +133,26 @@ def _(TRIMESTERS, issued_month_dd, mo):
         name for name, months in TRIMESTERS.items()
         if _tri_valid(months, _im)
     ]
-    # Default: first purely-future trimester (no past months) starting 1 month after
-    # issued. Uses full min (includes 0) so straddling trimesters like NDJ-for-Nov
-    # (min=0 because Nov is in NDJ) are skipped in favour of DJF (min=1).
-    _default_idx = next(
+    # Lead-time-1 default: first purely-future trimester starting 1 month after issued
+    _lead1_idx = next(
         (i for i, t in enumerate(valid_trimesters)
          if min((m - _im) % 12 for m in TRIMESTERS[t]) == 1),
         0,
     )
-    trimester_sl = mo.ui.slider(0, len(valid_trimesters) - 1, step=1, value=_default_idx)
+    # Sticky: if the previously selected trimester is still valid, keep it; else default
+    _prev = get_trimester_name()
+    _start = valid_trimesters.index(_prev) if _prev in valid_trimesters else _lead1_idx
+    trimester_sl = mo.ui.slider(0, len(valid_trimesters) - 1, step=1, value=_start)
     return trimester_sl, valid_trimesters
 
 
 @app.cell
-def _(TRIMESTERS, df_skill, issued_month_dd, mo, trimester_sl, valid_trimesters):
+def _(TRIMESTERS, df_skill, get_trimester_name, issued_month_dd, mo, set_trimester_name, trimester_sl, valid_trimesters):
     issued_month = issued_month_dd.value
     trimester    = valid_trimesters[trimester_sl.value]
+    # Update sticky state only when trimester actually changes (prevents infinite loops)
+    if trimester != get_trimester_name():
+        set_trimester_name(trimester)
 
     # Issued year: filter to rows for this issued_month and infer from current_forecast_year
     def _iy_for_row(row):
