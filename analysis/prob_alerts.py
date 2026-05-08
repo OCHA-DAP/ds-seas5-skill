@@ -528,9 +528,18 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month,
     # Iterate over ALL countries (not just clipped) so antimeridian islands
     # (negative-longitude Pacific nations) are included.
     _dot_r = 0.0035 * _dx  # ~12px physical size across all regions
+
+    def _is_dot_country(geom):
+        if geom is None: return False
+        if geom.area < 0.5: return True          # tiny total area (existing condition)
+        # Larger countries: archipelagos and narrow/elongated shapes
+        _max_p = max(p.area for p in geom.geoms) if hasattr(geom, "geoms") else geom.area
+        _compact = 4 * np.pi * geom.area / (geom.length ** 2) if geom.length > 0 else 1.0
+        return _max_p < 1.5 and _compact < 0.4
+
     for _, _row in _gdf[_gdf["cat"] != "unmonitored"].iterrows():
         _geom = _row.geometry
-        if _geom is None or _geom.area >= 0.5:
+        if not _is_dot_country(_geom):
             continue
         _cat_dot = _row["cat"]
         _rp = _geom.representative_point()  # always inside polygon; avoids broken centroids for antimeridian-crossing countries
