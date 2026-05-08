@@ -269,6 +269,7 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill_active, issued_month, pd, plt, 
         )
         _xlim = _max_rp + 2
 
+        plt.close("all")
         _fig, _ax = plt.subplots(figsize=(9, 5.5), dpi=150)
         _ax.set_xlim(-_xlim, _xlim)
         _ax.set_ylim(0, 1.0)
@@ -336,6 +337,7 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill_active, issued_month, pd, plt, 
         if not rainy_only_sw.value:
             _df = _df[_df["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
 
+        plt.close("all")
         _fig, _ax = plt.subplots(figsize=(9, 5.5), dpi=150)
         _ax.set_xlim(0, 100)
         _ax.set_ylim(0, 1.0)
@@ -511,6 +513,7 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
     _gdf_clip = _gdf.cx[_xl[0]:_xl[1], _yl[0]:_yl[1]]
 
     # ── Draw (batched for speed) ──────────────────────────────────────────
+    plt.close("all")
     _fig_m, _ax_m = plt.subplots(figsize=(_map_w, _fig_h), dpi=150)
 
     # Single fill pass: per-row face + edge colours, no separate loop per category
@@ -764,6 +767,7 @@ def _(TRIMESTER_NAMES, TRIMESTERS, df_skill, monthly_clim, pd, pcode, plt, rainy
     _tri_thresh_line = _annual_tri * trimester_pct_sl.value / 3
     _face_colors = ["rebeccapurple" if t == trimester else "lightgrey" for t in _df_clim["trimester"]]
     _edge_colors = ["royalblue" if (pcode, t) in rainy_set else "none" for t in _df_clim["trimester"]]
+    plt.close("all")
     _fig_clim2, _ax = plt.subplots(figsize=(10, 4), dpi=150)
     _ax.bar(
         _df_clim["trimester"], _df_clim["mean_mm_day"],
@@ -806,6 +810,7 @@ def _(TRIMESTERS, df_skill, mo, month_pct_sl, monthly_clim, pcode, plt, trimeste
     _face_c = ["rebeccapurple" if m in _tri_months else "lightgrey" for m in range(1, 13)]
     _edge_c = ["royalblue" if _mon_ok[m] else "none" for m in range(1, 13)]
 
+    plt.close("all")
     _fig_mon, _ax_mon = plt.subplots(figsize=(10, 3.5), dpi=150)
     _ax_mon.bar(_mon_labels, _heights, color=_face_c, edgecolor=_edge_c, linewidth=2.5)
     _thresh_line = _mon_thresh2 * _annual2
@@ -878,6 +883,7 @@ def _(
         & (df_skill_active["trimester"] == trimester)
     ]
 
+    plt.close("all")
     _fig_scatter2, _ax2 = plt.subplots(figsize=(7, 7), dpi=150)
 
     if _df_s2.empty or _skill_row2.empty:
@@ -1023,6 +1029,7 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_dt, issued_month, np, pcode, plt,
     _C_P = "rebeccapurple"
     _w = 0.38
 
+    plt.close("all")
     _fig_ov, (_ax_r, _ax_p) = plt.subplots(2, 1, figsize=(10, 5), dpi=150, sharex=True)
 
     # Top: Pearson r — raw (solid) and detrended (hatched, lighter)
@@ -1089,6 +1096,7 @@ def _(calendar, df_paired, issued_month, np, pcode, plt, trimester):
 
     _C_F = "#3D85C8"
     _C_O = "rebeccapurple"
+    plt.close("all")
     _fig_ts, (_ax_f, _ax_o) = plt.subplots(2, 1, figsize=(10, 5), dpi=150, sharex=True)
 
     # Forecast
@@ -1222,6 +1230,7 @@ def _(TRIMESTER_NAMES, calendar, df_skill_active, np, pcode, plt, rainy_set):
         _j = TRIMESTER_NAMES.index(_r["trimester"])
         _matrix[_i, _j] = _r["pearson_r"]
 
+    plt.close("all")
     _fig, _ax = plt.subplots(figsize=(10, 8), dpi=150)
     _nan_mask = np.where(np.isnan(_matrix), 1.0, np.nan)
     _ax.imshow(_nan_mask, cmap="Greys", vmin=0, vmax=1, aspect="auto", alpha=0.25)
@@ -1323,6 +1332,7 @@ def _(
     _era5_log = _era5_df["obs_mean"].values          # log-space (for sorting)
     _era5_orig = np.expm1(_era5_log)                  # mm/day (for display)
 
+    plt.close("all")
     _fig_bell, _ax = plt.subplots(figsize=(9, 5), dpi=150)
 
     if not _has_skill or len(_era5_log) == 0 or pd.isna(_row.iloc[0]["current_forecast_mean"]):
@@ -1508,6 +1518,7 @@ def _(df_paired_active, df_skill_active, issued_month, np, pcode, plt, trimester
         & (df_skill_active["trimester"] == trimester)
     ]
 
+    plt.close("all")
     _fig_hp, _ax = plt.subplots(figsize=(5, 5), dpi=150)
 
     if _df_hp.empty or _skill_row_hp.empty:
@@ -1589,6 +1600,7 @@ def _(df_paired_active, pd, plt):
         .dropna(subset=["predicted"])
     )
 
+    plt.close("all")
     _fig_cal, _ax = plt.subplots(figsize=(6, 6), dpi=150)
     _ax.plot([0, 1], [0, 1], "k--", linewidth=1, alpha=0.5, label="Perfect calibration")
     _ax.axhline(1 / 3, color="chocolate", linestyle=":", linewidth=0.8, alpha=0.6)
@@ -1713,6 +1725,7 @@ def _(
         _pdf_s_raw = norm.pdf(np.log1p(_x), loc=_s_mean_raw, scale=_s_std_raw) / (1 + _x)
         _pdf_e = norm.pdf(np.log1p(_x), loc=_era5_mean_log, scale=_era5_std_log) / (1 + _x)
 
+        plt.close("all")
         _fig1, (_axB, _axA) = plt.subplots(1, 2, figsize=(11, 4), sharey=True)
         # Before
         _axB.plot(_x, _pdf_e, color="grey", linewidth=2, linestyle="--", label="ERA5")
@@ -1745,6 +1758,7 @@ def _(
         plt.tight_layout()
 
         # ── Tab 2: Climatology + reference lines ────────────────────────────
+        plt.close("all")
         _fig2, _ax2 = plt.subplots(figsize=(7, 4))
         _ax2.plot(_x, _clim_pdf, color="grey", linewidth=2, linestyle="--")
         _ax2.plot(_era5_orig, np.zeros_like(_era5_orig), "|",
@@ -1761,6 +1775,7 @@ def _(
         plt.tight_layout()
 
         # ── Tab 3: Add normalized forecast ────────────────────────────────
+        plt.close("all")
         _fig3, _ax3 = plt.subplots(figsize=(7, 4))
         _ax3.plot(_x, _clim_pdf, color="grey", linewidth=2, linestyle="--", alpha=0.7)
         _ax3.plot(_era5_orig, np.zeros_like(_era5_orig), "|",
@@ -1775,6 +1790,7 @@ def _(
         plt.tight_layout()
 
         # ── Tab 4: Shrinkage / conditional mean ────────────────────────────
+        plt.close("all")
         _fig4, _ax4 = plt.subplots(figsize=(7, 4))
         _ax4.plot(_x, _clim_pdf, color="grey", linewidth=2, linestyle="--", alpha=0.7)
         _ax4.plot(_era5_orig, np.zeros_like(_era5_orig), "|",
@@ -1799,6 +1815,7 @@ def _(
         plt.tight_layout()
 
         # ── Tab 5: Conditional distribution ───────────────────────────────
+        plt.close("all")
         _fig5, _ax5 = plt.subplots(figsize=(7, 4))
         _ax5.plot(_x, _clim_pdf, color="grey", linewidth=2, linestyle="--", alpha=0.7)
         _ax5.plot(_era5_orig, np.zeros_like(_era5_orig), "|",
@@ -1817,6 +1834,7 @@ def _(
         plt.tight_layout()
 
         # ── Tab 6: Probability ─────────────────────────────────────────────
+        plt.close("all")
         _fig6, _ax6 = plt.subplots(figsize=(7, 4))
         _ax6.plot(_x, _clim_pdf, color="grey", linewidth=2, linestyle="--", alpha=0.7)
         _ax6.plot(_era5_orig, np.zeros_like(_era5_orig), "|",
@@ -1908,6 +1926,7 @@ def _(df_skill_active, issued_month, mo, norm, np, pcode, pd, plt, trimester):
             _all_cond_pdfs.append(_c_tmp)
         _global_ymax = max(max(c.max() for c in _all_cond_pdfs), _clim_ex_max) * 1.3
 
+        plt.close("all")
         _fig_ex, _axes_2d = plt.subplots(2, 2, figsize=(10, 8))
         _axes = _axes_2d.flatten()
 
