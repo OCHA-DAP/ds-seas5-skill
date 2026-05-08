@@ -112,36 +112,24 @@ def _(TRIMESTERS, get_trimester_name, issued_month_dd, mo):
     _im = issued_month_dd.value
 
     def _tri_valid(months, im):
-        """Valid if all non-past months are within the 0–6 month forecast window.
-        Past months: in a straddling trimester (issued month IN the trimester),
-        months before the issued month get offset > 6 — treat as past, ignore them.
-        Non-straddling trimesters: all offsets taken at face value; max must be ≤ 6."""
-        offsets = [(m - im) % 12 for m in months]
-        has_straddle = 0 in offsets
-        effective = []
-        for o in offsets:
-            if o == 0:
-                effective.append(0)
-            elif o <= 6:
-                effective.append(o)
-            else:
-                effective.append(o - 12 if has_straddle else o)  # past OR far-future
-        future = [e for e in effective if e > 0]
-        return bool(future) and max(future) <= 6
+        """Valid if NO month is in the past AND at least one future month <= 6 ahead.
+        Signed offset: raw mod-12 if <=6 (present/future), else minus 12 (past).
+        Gives exactly 5 trimesters: current-month trimester + 4 purely-future ones."""
+        signed = [o if (o := (m - im) % 12) <= 6 else o - 12 for m in months]
+        future = [s for s in signed if s > 0]
+        return all(s >= 0 for s in signed) and bool(future) and max(future) <= 6
 
-    valid_trimesters = [
-        name for name, months in TRIMESTERS.items()
-        if _tri_valid(months, _im)
-    ]
-    # Lead-time-1 default: first purely-future trimester starting 1 month after issued
-    _lead1_idx = next(
-        (i for i, t in enumerate(valid_trimesters)
-         if min((m - _im) % 12 for m in TRIMESTERS[t]) == 1),
-        0,
+    def _min_signed(tri_months, im):
+        return min(o if (o := (m - im) % 12) <= 6 else o - 12 for m in tri_months)
+
+    valid_trimesters = sorted(
+        [name for name, months in TRIMESTERS.items() if _tri_valid(months, _im)],
+        key=lambda t: _min_signed(TRIMESTERS[t], _im),
     )
-    # Sticky: if the previously selected trimester is still valid, keep it; else default
+    # Default = index 0 (trimester starting with current issued month: MJJ for May,
+    # DJF for Dec). Sticky: preserve previous selection if still valid.
     _prev = get_trimester_name()
-    _start = valid_trimesters.index(_prev) if _prev in valid_trimesters else _lead1_idx
+    _start = valid_trimesters.index(_prev) if _prev in valid_trimesters else 0
     trimester_sl = mo.ui.slider(0, len(valid_trimesters) - 1, step=1, value=_start)
     return trimester_sl, valid_trimesters
 
