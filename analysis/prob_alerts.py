@@ -127,14 +127,21 @@ def _(TRIMESTERS, df_skill, issued_month_dd, mo, trimester_sl, valid_trimesters)
     _late_m = int(df_skill[df_skill["current_forecast_year"] == _max_y]["issued_month"].max())
     _iss_year = _max_y if issued_month <= _late_m else _max_y - 1
 
-    # Trimester year: look at the last FUTURE month (offset 1–6) and check if it
-    # falls earlier in the calendar year than the issued month (→ next year)
-    _future_offs = [o for m in TRIMESTERS[trimester] if 1 <= (o := (m - issued_month) % 12) <= 6]
-    if _future_offs:
-        _last_cal = ((issued_month - 1 + max(_future_offs)) % 12) + 1
-        _tri_year = _iss_year + (1 if _last_cal < issued_month else 0)
+    # Trimester year: match the season_year used in the pipeline.
+    # Wrapping trimesters (DJF, NDJ — contain both month 12 and month 1) are
+    # anchored to December, which is always in the issued year → tri_year = iss_year.
+    # Non-wrapping: use year of the last future month.
+    _tri_months = TRIMESTERS[trimester]
+    _is_wrap = 12 in _tri_months and 1 in _tri_months
+    if _is_wrap:
+        _tri_year = _iss_year  # December anchor: Dec 2025 + Jan/Feb 2026 = "DJF 2025"
     else:
-        _tri_year = _iss_year
+        _future_offs = [o for m in _tri_months if 1 <= (o := (m - issued_month) % 12) <= 6]
+        if _future_offs:
+            _last_cal = ((issued_month - 1 + max(_future_offs)) % 12) + 1
+            _tri_year = _iss_year + (1 if _last_cal < issued_month else 0)
+        else:
+            _tri_year = _iss_year
 
     mo.hstack([
         issued_month_dd,
