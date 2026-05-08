@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(app_title="SEAS5 Skill — Probabilistic Drought Alerts", width="medium")
+app = marimo.App(app_title="SEAS5 precipitation alerts", width="medium", html_head_file="_head.html")
 
 
 @app.cell
