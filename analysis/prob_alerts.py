@@ -325,8 +325,8 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month,
         "drought_sev_mod":   ("#C8844A", "#A06030", "/////", "white"),  # same colour, hatched
         "flood_vsev_high":   ("#0D40B0", "#092E88", None,   None),
         "flood_vsev_mod":    ("#0D40B0", "#092E88", "/////", "white"),  # same colour, hatched
-        "flood_sev_high":    ("#3D85C8", "#2060A0", None,   None),
-        "flood_sev_mod":     ("#3D85C8", "#2060A0", "/////", "white"),  # same colour, hatched
+        "flood_sev_high":    ("#71B3E5", "#4A90C8", None,   None),
+        "flood_sev_mod":     ("#71B3E5", "#4A90C8", "/////", "white"),  # same colour, hatched
     }
 
     # ── Region bounds ───────────────────────────────────────────────────
@@ -450,7 +450,7 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month,
         _mpatch_m.Patch(facecolor="#7B3A1A", edgecolor="#5A2A0A", linewidth=0.5, label="Severe drought"),
         _mpatch_m.Patch(facecolor="#C8844A", edgecolor="#A06030", linewidth=0.5, label="Drought"),
         _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#AAAAAA", linewidth=0.5, label="Neither"),
-        _mpatch_m.Patch(facecolor="#3D85C8", edgecolor="#2060A0", linewidth=0.5, label="Flood"),
+        _mpatch_m.Patch(facecolor="#71B3E5", edgecolor="#4A90C8", linewidth=0.5, label="Flood"),
         _mpatch_m.Patch(facecolor="#0D40B0", edgecolor="#092E88", linewidth=0.5, label="Severe flood"),
     ]
     _h_row2 = [
@@ -504,7 +504,7 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill_active, issued_month, pd, plt, 
     _C_DH = "#7B3A1A"  # severe drought (vsev)
     _C_DM = "#C8844A"  # drought (sev)
     _C_FH = "#0D40B0"  # severe flood (vsev)
-    _C_FM = "#3D85C8"  # flood (sev)
+    _C_FM = "#71B3E5"  # flood (sev)
     _HATCH = "/////"
     _detrend_sfx = {"raw": "", "detrended": " [detrended]", "best": " [best skill]"}.get(detrend_sw.value, "")
 
@@ -697,7 +697,7 @@ def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, sev
         "drought_vsev_high": "#7B3A1A", "drought_vsev_mod": "#7B3A1A",
         "drought_sev_high":  "#C8844A", "drought_sev_mod":  "#C8844A",
         "flood_vsev_high":   "#0D40B0", "flood_vsev_mod":   "#0D40B0",
-        "flood_sev_high":    "#3D85C8", "flood_sev_mod":    "#3D85C8",
+        "flood_sev_high":    "#71B3E5", "flood_sev_mod":    "#71B3E5",
     }
     # Thin white diagonal lines layered over the solid fill — text stays readable
     def _stripe(bg):
@@ -988,7 +988,7 @@ def _(
         _C_DH = "#7B3A1A"
         _C_DM = "#C8844A"
         _C_FH = "#0D40B0"
-        _C_FM = "#3D85C8"
+        _C_FM = "#71B3E5"
 
         # RP quantile thresholds on both axes
         _x_sev_d  = float(_df_s2["forecast_orig"].quantile(1 / _sev_rp))
@@ -1170,7 +1170,7 @@ def _(calendar, df_paired, issued_month, np, pcode, plt, trimester):
                 label=f"Trend  p={_lr.pvalue:.3f}")
         ax.legend(fontsize=7, loc="upper right")
 
-    _C_F = "#3D85C8"
+    _C_F = "#71B3E5"
     _C_O = "rebeccapurple"
     plt.close("all")
     _fig_ts, (_ax_f, _ax_o) = plt.subplots(2, 1, figsize=(10, 5), dpi=150, sharex=True)
