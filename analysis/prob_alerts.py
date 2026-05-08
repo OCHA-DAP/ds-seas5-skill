@@ -637,43 +637,66 @@ def _(detrend_sw):
 
 @app.cell
 def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
-    _vsev_pct = 100 / very_severe_rp_sl.value
-    _sev_pct  = 100 / severe_rp_sl.value
-    _r_mod    = r_mod_sl.value
-    _r_high   = r_high_sl.value
+    _vsev_rp = very_severe_rp_sl.value
+    _sev_rp  = severe_rp_sl.value
+    _r_mod   = r_mod_sl.value
+    _r_high  = r_high_sl.value
 
-    _vsev_yr = very_severe_rp_sl.value
-    _sev_yr  = severe_rp_sl.value
+    # 8 colours matching the map
+    _TC = {
+        "drought_vsev_high": "#7B3A1A", "drought_vsev_mod": "#A8623A",
+        "drought_sev_high":  "#C8844A", "drought_sev_mod":  "#DFAA80",
+        "flood_vsev_high":   "#0D40B0", "flood_vsev_mod":   "#2E60B8",
+        "flood_sev_high":    "#3D85C8", "flood_sev_mod":    "#7AAED8",
+    }
+    _BG = {
+        "drought_vsev_high": "#F5EAE4", "drought_vsev_mod": "#F5EAE4",
+        "drought_sev_high":  "#FBF2EC", "drought_sev_mod":  "#FBF2EC",
+        "flood_vsev_high":   "#E4EAF5", "flood_vsev_mod":   "#E4EAF5",
+        "flood_sev_high":    "#ECF2FB", "flood_sev_mod":    "#ECF2FB",
+    }
+    # CSS diagonal stripe — approximates the map's white hatch for mod-skill rows
+    def _stripe(bg):
+        return (f"repeating-linear-gradient(45deg,{bg},{bg} 5px,"
+                f"rgba(255,255,255,0.45) 5px,rgba(255,255,255,0.45) 10px)")
+
+    _SORT = {"vsev_high": 0, "vsev_mod": 1, "sev_high": 2, "sev_mod": 3}
 
     _df_t = df_skill_active[
         (df_skill_active["issued_month"] == issued_month)
         & (df_skill_active["trimester"] == trimester)
         & df_skill_active["pearson_r"].notna()
-        & df_skill_active["forecast_percentile"].notna()
+        & df_skill_active["forecast_rp"].notna()
+        & df_skill_active["flood_rp"].notna()
     ].copy()
     _df_t = _df_t[_df_t["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
 
-    def _tier(pct, r):
-        _vsev = pct <= _vsev_pct or pct >= 100 - _vsev_pct
-        _sev  = (_vsev_pct < pct <= _sev_pct) or (100 - _sev_pct <= pct < 100 - _vsev_pct)
-        if _vsev and r >= _r_high: return 1   # very severe + high skill
-        if _vsev and r >= _r_mod:  return 2   # very severe + mod skill
-        if _sev  and r >= _r_high: return 3   # severe + high skill
-        return 0
+    def _categorise(row):
+        r = row["pearson_r"]
+        if pd.isna(r) or r < _r_mod:
+            return None
+        sk = "high" if r >= _r_high else "mod"
+        pct = row.get("forecast_percentile", 50)
+        if pd.notna(pct) and pct < 50:
+            rp = row["forecast_rp"]
+            if pd.isna(rp): return None
+            if rp >= _vsev_rp: return f"drought_vsev_{sk}"
+            if rp >= _sev_rp:  return f"drought_sev_{sk}"
+        else:
+            rp = row["flood_rp"]
+            if pd.isna(rp): return None
+            if rp >= _vsev_rp: return f"flood_vsev_{sk}"
+            if rp >= _sev_rp:  return f"flood_sev_{sk}"
+        return None
 
-    _df_t["_tier"] = _df_t.apply(lambda r: _tier(r["forecast_percentile"], r["pearson_r"]), axis=1)
-    _df_t = _df_t[_df_t["_tier"] > 0].copy()
-    _df_t["_drought"] = _df_t["forecast_percentile"] < 50
-
-    # (drought, tier): (dark_color, light_color, bg)
-    _dark  = {True: "#7B3A1A", False: "#0D40B0"}
-    _light = {True: "#C8844A", False: "#3D85C8"}
-    _bg    = {(True, 1): "#F9EDE8", (True, 2): "#FDF3EC", (True, 3): "#FDF3EC",
-              (False, 1): "#E8EEF9", (False, 2): "#ECF3FD", (False, 3): "#ECF3FD"}
+    _df_t["_cat"]     = _df_t.apply(_categorise, axis=1)
+    _df_t             = _df_t[_df_t["_cat"].notna()].copy()
+    _df_t["_drought"] = _df_t["_cat"].str.startswith("drought")
+    _df_t["_sort"]    = _df_t["_cat"].map(lambda c: _SORT.get("_".join(c.split("_")[1:]), 9))
 
     def _html_table(df, drought: bool, rp_col: str, rp_label: str) -> str:
         rows = df[df["_drought"] == drought].sort_values(
-            ["_tier", rp_col, "pearson_r"], ascending=[True, False, False]
+            ["_sort", rp_col, "pearson_r"], ascending=[True, False, False]
         )
         if rows.empty:
             return "<p style='color:#888;font-style:italic;margin:4px 0'>No alerts</p>"
@@ -687,25 +710,18 @@ def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, sev
             "</tr></thead><tbody>"
         )
         for _, row in rows.iterrows():
-            tier  = int(row["_tier"])
-            dk    = _dark[drought]
-            lk    = _light[drought]
-            bg    = _bg[(drought, tier)]
+            cat    = row["_cat"]
+            tc     = _TC[cat]
+            bg_css = _stripe(_BG[cat]) if "_mod" in cat else f"background:{_BG[cat]}"
             rp_val = row[rp_col]
             rp_str = f"{rp_val:.1f}" if pd.notna(rp_val) else "—"
             r_str  = f"{row['pearson_r']:.2f}"
-            if tier == 1:
-                name_c, rp_c, r_c = dk, dk, dk
-            elif tier == 2:   # very severe + mod skill → highlight RP
-                name_c, rp_c, r_c = lk, dk, lk
-            else:             # severe + high skill → highlight r
-                name_c, rp_c, r_c = lk, lk, dk
             html += (
-                f"<tr style='background:{bg};border-bottom:1px solid #e8e8e8'>"
-                f"<td style='padding:5px 8px;font-weight:600;color:{name_c}'>{row['country_name']}</td>"
-                f"<td style='padding:5px 8px;color:{name_c}'>{row['iso3']}</td>"
-                f"<td style='padding:5px 8px;text-align:right;color:{rp_c};font-weight:{'600' if tier==2 else '400'}'>{rp_str}</td>"
-                f"<td style='padding:5px 8px;text-align:right;color:{r_c};font-weight:{'600' if tier==3 else '400'}'>{r_str}</td>"
+                f"<tr style='background:{bg_css};border-bottom:1px solid #e8e8e8'>"
+                f"<td style='padding:5px 8px;font-weight:600;color:{tc}'>{row['country_name']}</td>"
+                f"<td style='padding:5px 8px;color:{tc}'>{row['iso3']}</td>"
+                f"<td style='padding:5px 8px;text-align:right;color:{tc};font-weight:600'>{rp_str}</td>"
+                f"<td style='padding:5px 8px;text-align:right;color:{tc}'>{r_str}</td>"
                 "</tr>"
             )
         html += "</tbody></table>"
