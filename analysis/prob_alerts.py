@@ -524,6 +524,9 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month,
         if not _sub.empty:
             _sub.plot(ax=_ax_m, color="none", edgecolor=_hc, hatch=_h, linewidth=0)
 
+    # Redraw borders on top so hatching doesn't cover country outlines
+    _gdf_clip.plot(ax=_ax_m, color="none", edgecolor="#CCCCCC", linewidth=0.3)
+
     # ── Small island dots ─────────────────────────────────────────────────
     # Iterate over ALL countries (not just clipped) so antimeridian islands
     # (negative-longitude Pacific nations) are included.
@@ -542,7 +545,10 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month,
         if not _is_dot_country(_geom):
             continue
         _cat_dot = _row["cat"]
-        _rp = _geom.representative_point()  # always inside polygon; avoids broken centroids for antimeridian-crossing countries
+        # Use representative_point of the largest sub-polygon so archipelago dots
+        # land on the main island, not a random outlier
+        _largest = max(_geom.geoms, key=lambda p: p.area) if hasattr(_geom, "geoms") else _geom
+        _rp = _largest.representative_point()
         _cx, _cy = _rp.x, _rp.y
         # Skip if outside latitude band
         if _cy < _yl[0] or _cy > _yl[1]:
