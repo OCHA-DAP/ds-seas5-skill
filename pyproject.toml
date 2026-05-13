@@ -13,6 +13,7 @@ dependencies = [
     "geopandas>=0.14.0",
     "geodatasets>=2023.3.0",
     "plotly>=5.0.0",
+    "anywidget>=0.11.0",
 ]
 
 [build-system]
