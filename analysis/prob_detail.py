@@ -112,7 +112,7 @@ def _(issued_month_dd, mo, trimester_sl, valid_trimesters):
 def _(mo):
     detrend_sw = mo.ui.dropdown(
         options={"Raw": "raw", "Detrended": "detrended", "Best skill": "best"},
-        value="Raw",
+        value="Detrended",
         label="Forecast version:",
     )
     detrend_sw
@@ -587,11 +587,11 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
                    handlelength=2.0, handletextpad=0.5, title_fontsize=7.5)
 
     _h_row1 = [
-        _mpatch_m.Patch(facecolor="#7B3A1A", edgecolor="#5A2A0A", linewidth=0.5, label="Severe drought"),
-        _mpatch_m.Patch(facecolor="#C8844A", edgecolor="#A06030", linewidth=0.5, label="Drought"),
-        _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#AAAAAA", linewidth=0.5, label="Neither"),
-        _mpatch_m.Patch(facecolor="#3D85C8", edgecolor="#2060A0", linewidth=0.5, label="Flood"),
-        _mpatch_m.Patch(facecolor="#0D40B0", edgecolor="#092E88", linewidth=0.5, label="Severe flood"),
+        _mpatch_m.Patch(facecolor="#7B3A1A", edgecolor="#5A2A0A", linewidth=0.5, label="Strongly below normal"),
+        _mpatch_m.Patch(facecolor="#C8844A", edgecolor="#A06030", linewidth=0.5, label="Below normal"),
+        _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#AAAAAA", linewidth=0.5, label="Roughly normal"),
+        _mpatch_m.Patch(facecolor="#3D85C8", edgecolor="#2060A0", linewidth=0.5, label="Above normal"),
+        _mpatch_m.Patch(facecolor="#0D40B0", edgecolor="#092E88", linewidth=0.5, label="Strongly above normal"),
     ]
     _h_row2 = [
         _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#CCCCCC", hatch="/////",  linewidth=0.5, label="Mod skill"),
@@ -611,7 +611,7 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_active, issued_month, map_region_
     _row_h = 0.40 / _fig_h   # row height in figure fraction
     _axes_bot = _leg_h / _fig_h
 
-    _leg1 = _fig_m.legend(handles=_h_row1, title="Hazard",
+    _leg1 = _fig_m.legend(handles=_h_row1, title="Forecasted precipitation",
                            loc="upper center", bbox_to_anchor=(0.5, _axes_bot),
                            ncol=5, **_LEG_KW)
     _fig_m.add_artist(_leg1)

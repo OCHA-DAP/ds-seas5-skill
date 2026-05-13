@@ -1,7 +1,11 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(app_title="SEAS5 precipitation alerts", width="medium", html_head_file="_head.html")
+app = marimo.App(
+    width="medium",
+    app_title="SEAS5 precipitation alerts",
+    html_head_file="_head.html",
+)
 
 
 @app.cell
@@ -15,7 +19,7 @@ def _():
     import pandas as pd
     from scipy.stats import norm
 
-    return calendar, mo, norm, np, pd, plt, stratus
+    return calendar, mo, np, pd, plt, stratus
 
 
 @app.cell
@@ -23,7 +27,7 @@ def _():
     from src.constants import PROJECT_PREFIX, TRIMESTERS
 
     TRIMESTER_NAMES = list(TRIMESTERS.keys())
-    return PROJECT_PREFIX, TRIMESTER_NAMES, TRIMESTERS
+    return PROJECT_PREFIX, TRIMESTERS, TRIMESTER_NAMES
 
 
 @app.cell
@@ -51,7 +55,7 @@ def _(PROJECT_PREFIX, pd, stratus):
 
 
 @app.cell
-def _(TRIMESTERS, monthly_clim, pd, trimester_pct_sl, month_pct_sl):
+def _(TRIMESTERS, month_pct_sl, monthly_clim, pd, trimester_pct_sl):
     _mc = monthly_clim.copy()
     _annual = _mc.groupby("pcode")["mean_mm_day"].sum().rename("annual")
     _mc = _mc.merge(_annual.reset_index(), on="pcode")
@@ -72,7 +76,9 @@ def _(TRIMESTERS, monthly_clim, pd, trimester_pct_sl, month_pct_sl):
 
 @app.cell
 def _(mo):
-    mo.md("# SEAS5 precipitation alerts")
+    mo.md("""
+    # SEAS5 precipitation alerts
+    """)
     return
 
 
@@ -135,7 +141,16 @@ def _(TRIMESTERS, get_trimester_name, issued_month_dd, mo):
 
 
 @app.cell
-def _(TRIMESTERS, df_skill, get_trimester_name, issued_month_dd, mo, set_trimester_name, trimester_sl, valid_trimesters):
+def _(
+    TRIMESTERS,
+    df_skill,
+    get_trimester_name,
+    issued_month_dd,
+    mo,
+    set_trimester_name,
+    trimester_sl,
+    valid_trimesters,
+):
     issued_month = issued_month_dd.value
     trimester    = valid_trimesters[trimester_sl.value]
     # Update sticky state only when trimester actually changes (prevents infinite loops)
@@ -181,7 +196,7 @@ def _(TRIMESTERS, df_skill, get_trimester_name, issued_month_dd, mo, set_trimest
 def _(mo):
     detrend_sw = mo.ui.dropdown(
         options={"Raw": "raw", "Detrended": "detrended", "Best skill": "best"},
-        value="Best skill",
+        value="Detrended",
         label="Forecast version:",
     )
     _tip = (
@@ -205,8 +220,9 @@ def _(mo):
     mo.hstack([severe_rp_sl, very_severe_rp_sl, r_mod_sl, r_high_sl], justify="start")
     return r_high_sl, r_mod_sl, severe_rp_sl, very_severe_rp_sl
 
+
 @app.cell
-def _(df_skill, df_skill_dt, detrend_sw, pd):
+def _(detrend_sw, df_skill, df_skill_dt, pd):
     _KEY = ["pcode", "issued_month", "trimester"]
     if detrend_sw.value == "raw":
         df_skill_active = df_skill
@@ -224,11 +240,11 @@ def _(df_skill, df_skill_dt, detrend_sw, pd):
         _raw_rows = df_skill[~df_skill.set_index(_KEY).index.isin(best_dt_combos)]
         _dt_rows  = df_skill_dt[df_skill_dt.set_index(_KEY).index.isin(best_dt_combos)]
         df_skill_active = pd.concat([_raw_rows, _dt_rows], ignore_index=True)
-    return df_skill_active, best_dt_combos
+    return best_dt_combos, df_skill_active
 
 
 @app.cell
-def _(best_dt_combos, df_paired, df_paired_dt, detrend_sw, pd):
+def _(best_dt_combos, detrend_sw, df_paired, df_paired_dt, pd):
     if detrend_sw.value == "raw":
         df_paired_active = df_paired
     elif detrend_sw.value == "detrended":
@@ -243,7 +259,9 @@ def _(best_dt_combos, df_paired, df_paired_dt, detrend_sw, pd):
 
 @app.cell
 def _(mo):
-    mo.md("## Global")
+    mo.md("""
+    ## Global
+    """)
     return
 
 
@@ -274,7 +292,25 @@ def _(mo):
 
 
 @app.cell
-def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month, map_region_dd, pd, plt, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl, world_geo):
+def _(
+    TRIMESTERS,
+    calendar,
+    detrend_sw,
+    df_skill,
+    df_skill_active,
+    issued_month,
+    map_region_dd,
+    np,
+    pd,
+    plt,
+    r_high_sl,
+    r_mod_sl,
+    rainy_set,
+    severe_rp_sl,
+    trimester,
+    very_severe_rp_sl,
+    world_geo,
+):
     import geopandas as _gpd_map  # needed for GeoDataFrame methods in this cell
     import matplotlib.patches as _mpatch_m
 
@@ -455,11 +491,11 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month,
                    handlelength=2.0, handletextpad=0.5, title_fontsize=7.5)
 
     _h_row1 = [
-        _mpatch_m.Patch(facecolor="#7B3A1A", edgecolor="#5A2A0A", linewidth=0.5, label="Severe drought"),
-        _mpatch_m.Patch(facecolor="#C8844A", edgecolor="#A06030", linewidth=0.5, label="Drought"),
-        _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#AAAAAA", linewidth=0.5, label="Neither"),
-        _mpatch_m.Patch(facecolor="#71B3E5", edgecolor="#4A90C8", linewidth=0.5, label="Flood"),
-        _mpatch_m.Patch(facecolor="#0D40B0", edgecolor="#092E88", linewidth=0.5, label="Severe flood"),
+        _mpatch_m.Patch(facecolor="#7B3A1A", edgecolor="#5A2A0A", linewidth=0.5, label="Strongly below normal"),
+        _mpatch_m.Patch(facecolor="#C8844A", edgecolor="#A06030", linewidth=0.5, label="Below normal"),
+        _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#AAAAAA", linewidth=0.5, label="Roughly normal"),
+        _mpatch_m.Patch(facecolor="#71B3E5", edgecolor="#4A90C8", linewidth=0.5, label="Above normal"),
+        _mpatch_m.Patch(facecolor="#0D40B0", edgecolor="#092E88", linewidth=0.5, label="Strongly above normal"),
     ]
     _h_row2 = [
         _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#CCCCCC", hatch="/////",  linewidth=0.5, label="Mod skill"),
@@ -479,7 +515,7 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month,
     _row_h = 0.40 / _fig_h   # row height in figure fraction
     _axes_bot = _leg_h / _fig_h
 
-    _leg1 = _fig_m.legend(handles=_h_row1, title="Hazard",
+    _leg1 = _fig_m.legend(handles=_h_row1, title="Forecasted precipitation",
                            loc="upper center", bbox_to_anchor=(0.5, _axes_bot),
                            ncol=5, **_LEG_KW)
     _fig_m.add_artist(_leg1)
@@ -488,6 +524,7 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill, df_skill_active, issued_month,
                   ncol=4, **_LEG_KW)
 
     _fig_m
+    return
 
 
 @app.cell
@@ -499,7 +536,22 @@ def _(mo):
 
 
 @app.cell
-def _(TRIMESTERS, calendar, detrend_sw, df_skill_active, issued_month, pd, plt, r_high_sl, r_mod_sl, rainy_only_sw, rainy_set, scatter_rp_sw, severe_rp_sl, trimester, very_severe_rp_sl):
+def _(
+    TRIMESTERS,
+    calendar,
+    detrend_sw,
+    df_skill_active,
+    issued_month,
+    plt,
+    r_high_sl,
+    r_mod_sl,
+    rainy_only_sw,
+    rainy_set,
+    scatter_rp_sw,
+    severe_rp_sl,
+    trimester,
+    very_severe_rp_sl,
+):
     import matplotlib.patches as _mpatch_sc
 
     _vsev_rp = very_severe_rp_sl.value
@@ -691,10 +743,22 @@ def _(TRIMESTERS, calendar, detrend_sw, df_skill_active, issued_month, pd, plt, 
     _ax.spines["right"].set_visible(False)
     plt.tight_layout()
     _fig
+    return
 
 
 @app.cell
-def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, severe_rp_sl, trimester, very_severe_rp_sl):
+def _(
+    df_skill_active,
+    issued_month,
+    mo,
+    pd,
+    r_high_sl,
+    r_mod_sl,
+    rainy_set,
+    severe_rp_sl,
+    trimester,
+    very_severe_rp_sl,
+):
     _vsev_rp = very_severe_rp_sl.value
     _sev_rp  = severe_rp_sl.value
     _r_mod   = r_mod_sl.value
@@ -789,11 +853,14 @@ def _(df_skill_active, issued_month, mo, pd, r_high_sl, r_mod_sl, rainy_set, sev
         mo.vstack([mo.md("**Drought alerts**"), mo.Html(_drought_html)]),
         mo.vstack([mo.md("**Flood alerts**"),   mo.Html(_flood_html)]),
     ], justify="start", gap="2rem")
+    return
 
 
 @app.cell
 def _(mo):
-    mo.md("## Country")
+    mo.md("""
+    ## Country
+    """)
     return
 
 
@@ -831,12 +898,25 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    mo.md("### Climatology")
+    mo.md("""
+    ### Climatology
+    """)
     return
 
 
 @app.cell
-def _(TRIMESTER_NAMES, TRIMESTERS, df_skill, monthly_clim, pd, pcode, plt, rainy_set, trimester, trimester_pct_sl):
+def _(
+    TRIMESTERS,
+    TRIMESTER_NAMES,
+    df_skill,
+    monthly_clim,
+    pcode,
+    pd,
+    plt,
+    rainy_set,
+    trimester,
+    trimester_pct_sl,
+):
     _mc_p = monthly_clim[monthly_clim["pcode"] == pcode].set_index("month")["mean_mm_day"]
     _df_clim = pd.DataFrame([
         {"trimester": _tri, "mean_mm_day": _mc_p.reindex(_months).mean()}
@@ -866,10 +946,21 @@ def _(TRIMESTER_NAMES, TRIMESTERS, df_skill, monthly_clim, pd, pcode, plt, rainy
     _ax.spines["right"].set_visible(False)
     plt.tight_layout()
     _fig_clim2
+    return
 
 
 @app.cell
-def _(TRIMESTERS, df_skill, mo, month_pct_sl, monthly_clim, pcode, plt, trimester, trimester_pct_sl):
+def _(
+    TRIMESTERS,
+    df_skill,
+    mo,
+    month_pct_sl,
+    monthly_clim,
+    pcode,
+    plt,
+    trimester,
+    trimester_pct_sl,
+):
     _country2 = (
         df_skill[df_skill["pcode"] == pcode]["country_name"].iloc[0]
         if not df_skill[df_skill["pcode"] == pcode].empty else pcode
@@ -907,16 +998,19 @@ def _(TRIMESTERS, df_skill, mo, month_pct_sl, monthly_clim, pcode, plt, trimeste
     _ax_mon.spines["right"].set_visible(False)
     plt.tight_layout()
     mo.accordion({"Monthly climatology": _fig_mon})
-
-
-@app.cell
-def _(mo):
-    mo.md("### Forecast skill and outlook")
     return
 
 
 @app.cell
-def _(df_skill_active, issued_month, mo, pd, pcode, trimester):
+def _(mo):
+    mo.md("""
+    ### Forecast skill and outlook
+    """)
+    return
+
+
+@app.cell
+def _(df_skill_active, issued_month, mo, pcode, pd, trimester):
     _row = df_skill_active[
         (df_skill_active["pcode"] == pcode)
         & (df_skill_active["issued_month"] == issued_month)
@@ -1083,10 +1177,21 @@ def _(
         plt.tight_layout()
 
     _fig_scatter2
+    return
 
 
 @app.cell
-def _(TRIMESTERS, calendar, df_skill, df_skill_dt, issued_month, np, pcode, plt, rainy_set):
+def _(
+    TRIMESTERS,
+    calendar,
+    df_skill,
+    df_skill_dt,
+    issued_month,
+    np,
+    pcode,
+    plt,
+    rainy_set,
+):
     # Valid trimesters sorted by lead time (earliest first)
     _valid = sorted(
         [(name, months) for name, months in TRIMESTERS.items()
@@ -1152,6 +1257,7 @@ def _(TRIMESTERS, calendar, df_skill, df_skill_dt, issued_month, np, pcode, plt,
 
     plt.tight_layout()
     _fig_ov
+    return
 
 
 @app.cell
@@ -1207,6 +1313,7 @@ def _(calendar, df_paired, issued_month, np, pcode, plt, trimester):
 
     plt.tight_layout()
     _fig_ts
+    return
 
 
 @app.cell
@@ -1224,7 +1331,6 @@ def _(PROJECT_PREFIX, stratus):
         f"{PROJECT_PREFIX}/processed/paired_yearly_detrended.parquet", stage="dev"
     )
     return (df_paired_dt,)
-
 
 
 if __name__ == "__main__":
