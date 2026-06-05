@@ -108,8 +108,9 @@ def _(TRIMESTERS, calendar, df_skill, mo):
 
 @app.cell
 def _(mo):
-    # Sticky trimester state: persists the selected trimester across issued-month changes
-    get_trimester_name, set_trimester_name = mo.state("JJA")
+    # Sticky trimester state: persists the selected trimester across issued-month changes.
+    # Seeded None so the initial default falls through to the second valid trimester.
+    get_trimester_name, set_trimester_name = mo.state(None)
     return get_trimester_name, set_trimester_name
 
 
@@ -132,8 +133,8 @@ def _(TRIMESTERS, get_trimester_name, issued_month_dd, mo):
         [name for name, months in TRIMESTERS.items() if _tri_valid(months, _im)],
         key=lambda t: _min_signed(TRIMESTERS[t], _im),
     )
-    # Default = index 0 (trimester starting with current issued month: MJJ for May,
-    # DJF for Dec). Sticky: preserve previous selection if still valid.
+    # Default = index 1 (second valid trimester: JAS for Jun-issued, one month past the
+    # current-issued-month trimester). Sticky: preserve previous selection if still valid.
     _prev = get_trimester_name()
     _start = valid_trimesters.index(_prev) if _prev in valid_trimesters else 1
     trimester_sl = mo.ui.slider(0, len(valid_trimesters) - 1, step=1, value=_start)
