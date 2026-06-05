@@ -135,6 +135,63 @@ def empirical_rp(
     return (n + 1) / rank
 
 
+def season_year_for(
+    issued_month: int,
+    issued_year: int,
+    valid_months: list[int],
+) -> int:
+    """Forward map (issued_month, issued_year, trimester) -> season_year.
+
+    Inverse of the season_year assignment in aggregate_seas5_trimester. Wrapping
+    trimesters (contain both Dec and Jan) anchor on December → season_year = issued_year;
+    non-wrapping trimesters use the year of the last future (<=6 ahead) month.
+    """
+    is_wrap = 12 in valid_months and 1 in valid_months
+    if is_wrap:
+        return issued_year
+    future_offs = [o for m in valid_months if 1 <= (o := (m - issued_month) % 12) <= 6]
+    if not future_offs:
+        return issued_year
+    last_cal = ((issued_month - 1 + max(future_offs)) % 12) + 1
+    return issued_year + (1 if last_cal < issued_month else 0)
+
+
+def forecast_metrics_for_year(
+    combo_df: pd.DataFrame,
+    season_year: int,
+) -> dict[str, float | bool | None]:
+    """Recompute a single forecast's position metrics for a chosen season_year.
+
+    `combo_df` is the paired_yearly rows for one (pcode, issued_month, trimester),
+    with columns season_year, forecast_mean (normalized log-space), obs_mean. The
+    historical forecast distribution is the overlap years (forecast & obs both present),
+    matching how the pipeline computes the latest forecast at run_all_combinations.
+
+    Returns forecast_mean / forecast_percentile / forecast_rp / flood_rp / is_predictive,
+    all None/NaN if the chosen year has no forecast.
+    """
+    hist_F = combo_df.loc[
+        combo_df["forecast_mean"].notna() & combo_df["obs_mean"].notna(), "forecast_mean"
+    ].values
+    sel = combo_df[combo_df["season_year"] == season_year]
+    if sel.empty or pd.isna(sel["forecast_mean"].iloc[0]) or len(hist_F) == 0:
+        return {
+            "forecast_mean": None,
+            "forecast_percentile": None,
+            "forecast_rp": None,
+            "flood_rp": None,
+            "is_predictive": False,
+        }
+    fc = float(sel["forecast_mean"].iloc[0])
+    return {
+        "forecast_mean": fc,
+        "forecast_percentile": float(100.0 * np.sum(hist_F <= fc) / len(hist_F)),
+        "forecast_rp": empirical_rp(fc, hist_F, higher_is_more_extreme=False),
+        "flood_rp": empirical_rp(fc, hist_F, higher_is_more_extreme=True),
+        "is_predictive": bool(pd.isna(sel["obs_mean"].iloc[0])),
+    }
+
+
 def run_all_combinations(
     pcode: str,
     iso3: str,

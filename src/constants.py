@@ -2,6 +2,10 @@ PROJECT_PREFIX = "ds-seas5-skill"
 
 MIN_YEARS: int = 10
 
+# First year of the SEAS5 record (reforecast/hindcast start). Used to populate the
+# historical issued-year selector; the record is continuous from here to the present.
+SEAS5_FORECAST_START_YEAR: int = 1981
+
 TRIMESTERS: dict[str, list[int]] = {
     "JFM": [1, 2, 3],
     "FMA": [2, 3, 4],

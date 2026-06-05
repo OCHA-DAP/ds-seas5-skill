@@ -24,10 +24,18 @@ def _():
 
 @app.cell
 def _():
-    from src.constants import PROJECT_PREFIX, TRIMESTERS
+    from src.constants import PROJECT_PREFIX, SEAS5_FORECAST_START_YEAR, TRIMESTERS
+    from src.skill import forecast_metrics_for_year, season_year_for
 
     TRIMESTER_NAMES = list(TRIMESTERS.keys())
-    return PROJECT_PREFIX, TRIMESTERS, TRIMESTER_NAMES
+    return (
+        PROJECT_PREFIX,
+        SEAS5_FORECAST_START_YEAR,
+        TRIMESTERS,
+        TRIMESTER_NAMES,
+        forecast_metrics_for_year,
+        season_year_for,
+    )
 
 
 @app.cell
@@ -84,8 +92,8 @@ def _(mo):
 
 @app.cell
 def _(TRIMESTERS, calendar, df_skill, mo):
-    # Use actual issued year, not season_year (which can be year+1 for cross-year
-    # trimesters like JFM issued in May: season_year=2027 but issued_year=2026).
+    # Latest issue year available per issued month, mapping season_year (which can be
+    # year+1 for cross-year trimesters like JFM issued in May) back to the issue year.
     def _actual_issued_year(row):
         tri = TRIMESTERS[row["trimester"]]
         is_wrap = 12 in tri and 1 in tri
@@ -94,16 +102,31 @@ def _(TRIMESTERS, calendar, df_skill, mo):
 
     _df_iy = df_skill[df_skill["current_forecast_year"].notna()].copy()
     _df_iy["_iy"] = _df_iy.apply(_actual_issued_year, axis=1)
-    _max_issued_year = int(_df_iy["_iy"].max())
-    _latest_month = int(_df_iy[_df_iy["_iy"] == _max_issued_year]["issued_month"].max())
-    _months_ordered = [((_latest_month - i - 1) % 12) + 1 for i in range(12)]
-    _yr_of = lambda m: _max_issued_year if m <= _latest_month else _max_issued_year - 1
+    max_iy_by_month = _df_iy.groupby("issued_month")["_iy"].max().astype(int).to_dict()
+    # Default = month of the most recent issue (latest month among the latest year).
+    _global_max_iy = max(max_iy_by_month.values())
+    _default_month = max(m for m, iy in max_iy_by_month.items() if iy == _global_max_iy)
     issued_month_dd = mo.ui.dropdown(
-        options={f"{calendar.month_abbr[m]} {_yr_of(m)}": m for m in _months_ordered},
+        options={calendar.month_name[m]: m for m in range(1, 13)},
         label="Issued month:",
-        value=f"{calendar.month_abbr[_latest_month]} {_max_issued_year}",
+        value=calendar.month_name[_default_month],
     )
-    return (issued_month_dd,)
+    return issued_month_dd, max_iy_by_month
+
+
+@app.cell
+def _(SEAS5_FORECAST_START_YEAR, issued_month_dd, max_iy_by_month, mo):
+    # Year options depend on the selected month — all years from the SEAS5 record start
+    # up to that month's latest available issue year, newest first. Resets to newest when
+    # the month changes.
+    _max_iy = max_iy_by_month.get(issued_month_dd.value, SEAS5_FORECAST_START_YEAR)
+    _years = list(range(_max_iy, SEAS5_FORECAST_START_YEAR - 1, -1))
+    issued_year_dd = mo.ui.dropdown(
+        options={str(y): y for y in _years},
+        label="Issued year:",
+        value=str(_max_iy),
+    )
+    return (issued_year_dd,)
 
 
 @app.cell
@@ -144,53 +167,33 @@ def _(TRIMESTERS, get_trimester_name, issued_month_dd, mo):
 @app.cell
 def _(
     TRIMESTERS,
-    df_skill,
     get_trimester_name,
     issued_month_dd,
+    issued_year_dd,
     mo,
+    season_year_for,
     set_trimester_name,
     trimester_sl,
     valid_trimesters,
 ):
     issued_month = issued_month_dd.value
+    issued_year  = issued_year_dd.value
     trimester    = valid_trimesters[trimester_sl.value]
     # Update sticky state only when trimester actually changes (prevents infinite loops)
     if trimester != get_trimester_name():
         set_trimester_name(trimester)
 
-    # Issued year: filter to rows for this issued_month and infer from current_forecast_year
-    def _iy_for_row(row):
-        tri = TRIMESTERS[row["trimester"]]
-        is_wrap = 12 in tri and 1 in tri
-        is_cross = not is_wrap and min(tri) < row["issued_month"]
-        return int(row["current_forecast_year"]) - (1 if is_cross else 0)
-    _rows_im = df_skill[(df_skill["issued_month"] == issued_month) & df_skill["current_forecast_year"].notna()]
-    _iss_year = int(_rows_im.apply(_iy_for_row, axis=1).max()) if not _rows_im.empty else 2026
-
-    # Trimester year: match the season_year used in the pipeline.
-    # Wrapping trimesters (DJF, NDJ — contain both month 12 and month 1) are
-    # anchored to December, which is always in the issued year → tri_year = iss_year.
-    # Non-wrapping: use year of the last future month.
-    _tri_months = TRIMESTERS[trimester]
-    _is_wrap = 12 in _tri_months and 1 in _tri_months
-    if _is_wrap:
-        _tri_year = _iss_year  # December anchor: Dec 2025 + Jan/Feb 2026 = "DJF 2025"
-    else:
-        _future_offs = [o for m in _tri_months if 1 <= (o := (m - issued_month) % 12) <= 6]
-        if _future_offs:
-            _last_cal = ((issued_month - 1 + max(_future_offs)) % 12) + 1
-            _tri_year = _iss_year + (1 if _last_cal < issued_month else 0)
-        else:
-            _tri_year = _iss_year
+    # Season year used in paired_yearly / skill_stats for the selected forecast.
+    season_year = season_year_for(issued_month, issued_year, TRIMESTERS[trimester])
 
     mo.hstack([
-        issued_month_dd,
+        mo.vstack([issued_month_dd, issued_year_dd], align="start"),
         mo.vstack([
-            mo.md(f"Valid trimester: **{trimester} {_tri_year}**"),
+            mo.md(f"Valid trimester: **{trimester} {season_year}**"),
             trimester_sl,
         ], align="start"),
     ], justify="start")
-    return issued_month, trimester
+    return issued_month, issued_year, season_year, trimester
 
 
 @app.cell
@@ -259,6 +262,44 @@ def _(best_dt_combos, detrend_sw, df_paired, df_paired_dt, pd):
 
 
 @app.cell
+def _(
+    df_paired_active,
+    df_skill_active,
+    forecast_metrics_for_year,
+    issued_month,
+    season_year,
+    trimester,
+):
+    # Year-aware active frame: skill_stats rows for the selected (issued_month, trimester)
+    # across all pcodes (year-independent skill fields preserved), with the forecast-position
+    # fields overridden by the SELECTED year's forecast, recomputed from paired_yearly. When
+    # the selected year is the latest, these reproduce the precomputed skill_stats values.
+    _sk = df_skill_active[
+        (df_skill_active["issued_month"] == issued_month)
+        & (df_skill_active["trimester"] == trimester)
+    ].copy()
+    _pr = df_paired_active[
+        (df_paired_active["issued_month"] == issued_month)
+        & (df_paired_active["trimester"] == trimester)
+    ]
+    _metrics = {
+        _pc: forecast_metrics_for_year(_cdf, season_year)
+        for _pc, _cdf in _pr.groupby("pcode")
+    }
+    _empty = {"forecast_mean": None, "forecast_percentile": None, "forecast_rp": None,
+              "flood_rp": None, "is_predictive": False}
+    _get = lambda pc: _metrics.get(pc, _empty)
+    _sk["forecast_percentile"]   = _sk["pcode"].map(lambda p: _get(p)["forecast_percentile"])
+    _sk["forecast_rp"]           = _sk["pcode"].map(lambda p: _get(p)["forecast_rp"])
+    _sk["flood_rp"]              = _sk["pcode"].map(lambda p: _get(p)["flood_rp"])
+    _sk["current_forecast_mean"] = _sk["pcode"].map(lambda p: _get(p)["forecast_mean"])
+    _sk["is_predictive"]         = _sk["pcode"].map(lambda p: bool(_get(p)["is_predictive"]))
+    _sk["current_forecast_year"] = season_year
+    df_active = _sk
+    return (df_active,)
+
+
+@app.cell
 def _(mo):
     mo.md("""
     ## Global
@@ -297,9 +338,10 @@ def _(
     TRIMESTERS,
     calendar,
     detrend_sw,
+    df_active,
     df_skill,
-    df_skill_active,
     issued_month,
+    issued_year,
     map_region_dd,
     np,
     pd,
@@ -325,10 +367,7 @@ def _(
     # ── Build per-country category ──────────────────────────────────────
     _pcode_to_iso3 = df_skill.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
     _monitored_pcodes = set(_pcode_to_iso3.keys())
-    _df_m = df_skill_active[
-        (df_skill_active["issued_month"] == issued_month)
-        & (df_skill_active["trimester"] == trimester)
-    ]
+    _df_m = df_active
     _iso3_cat: dict = {}
     for _, _rm in _df_m.iterrows():
         _pc = _rm["pcode"]
@@ -478,12 +517,10 @@ def _(
     _ax_m.set_ylim(_yl)
     _ax_m.set_aspect("equal")
     _ax_m.axis("off")
-    _yr_map_s = df_skill_active[(df_skill_active["issued_month"] == issued_month) & (df_skill_active["trimester"] == trimester)]["current_forecast_year"].dropna()
-    _yr_map = int(_yr_map_s.max()) if not _yr_map_s.empty else ""
     _tri_str = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
     _map_detrend_sfx = {"raw": "", "detrended": " [detrended]", "best": " [best skill]"}.get(detrend_sw.value, "")
     _ax_m.set_title(
-        f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr_map}, valid {_tri_str}{_map_detrend_sfx}",
+        f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {issued_year}, valid {_tri_str}{_map_detrend_sfx}",
         fontsize=11, pad=8,
     )
 
@@ -541,8 +578,9 @@ def _(
     TRIMESTERS,
     calendar,
     detrend_sw,
-    df_skill_active,
+    df_active,
     issued_month,
+    issued_year,
     plt,
     r_high_sl,
     r_mod_sl,
@@ -597,13 +635,11 @@ def _(
 
     if scatter_rp_sw.value:
         # ── RP view ─────────────────────────────────────────────────────
-        _df = df_skill_active[
-            (df_skill_active["issued_month"] == issued_month)
-            & (df_skill_active["trimester"] == trimester)
-            & df_skill_active["forecast_percentile"].notna()
-            & df_skill_active["pearson_r"].notna()
-            & df_skill_active["forecast_rp"].notna()
-            & df_skill_active["flood_rp"].notna()
+        _df = df_active[
+            df_active["forecast_percentile"].notna()
+            & df_active["pearson_r"].notna()
+            & df_active["forecast_rp"].notna()
+            & df_active["flood_rp"].notna()
         ].copy()
         if not rainy_only_sw.value:
             _df = _df[_df["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
@@ -671,17 +707,14 @@ def _(
         _ax.set_xlabel("← Drought RP (yr)   |   Flood RP (yr) →")
         _ax.set_ylabel("Skill (Pearson r)")
         _ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: str(int(abs(x)))))
-        _yr = int(_df["current_forecast_year"].dropna().max()) if not _df["current_forecast_year"].dropna().empty else "—"
         _tri_str_sc = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
-        _ax.set_title(f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr}, valid {_tri_str_sc}{_detrend_sfx}")
+        _ax.set_title(f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {issued_year}, valid {_tri_str_sc}{_detrend_sfx}")
 
     else:
         # ── Percentile view (default) ────────────────────────────────────
-        _df = df_skill_active[
-            (df_skill_active["issued_month"] == issued_month)
-            & (df_skill_active["trimester"] == trimester)
-            & df_skill_active["forecast_percentile"].notna()
-            & df_skill_active["pearson_r"].notna()
+        _df = df_active[
+            df_active["forecast_percentile"].notna()
+            & df_active["pearson_r"].notna()
         ].copy()
         if not rainy_only_sw.value:
             _df = _df[_df["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
@@ -736,9 +769,8 @@ def _(
 
         _ax.set_xlabel("Forecast percentile among historical (0 = driest, 100 = wettest)")
         _ax.set_ylabel("Skill (Pearson r)")
-        _yr = int(_df["current_forecast_year"].dropna().max()) if not _df["current_forecast_year"].dropna().empty else "—"
         _tri_str_sc = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
-        _ax.set_title(f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {_yr}, valid {_tri_str_sc}{_detrend_sfx}")
+        _ax.set_title(f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {issued_year}, valid {_tri_str_sc}{_detrend_sfx}")
 
     _ax.spines["top"].set_visible(False)
     _ax.spines["right"].set_visible(False)
@@ -749,8 +781,7 @@ def _(
 
 @app.cell
 def _(
-    df_skill_active,
-    issued_month,
+    df_active,
     mo,
     pd,
     r_high_sl,
@@ -782,12 +813,10 @@ def _(
     # Sort: high-skill first (vsev+high, sev+high), then mod (vsev+mod, sev+mod)
     _SORT = {"vsev_high": 0, "vsev_mod": 1, "sev_high": 2, "sev_mod": 3}
 
-    _df_t = df_skill_active[
-        (df_skill_active["issued_month"] == issued_month)
-        & (df_skill_active["trimester"] == trimester)
-        & df_skill_active["pearson_r"].notna()
-        & df_skill_active["forecast_rp"].notna()
-        & df_skill_active["flood_rp"].notna()
+    _df_t = df_active[
+        df_active["pearson_r"].notna()
+        & df_active["forecast_rp"].notna()
+        & df_active["flood_rp"].notna()
     ].copy()
     _df_t = _df_t[_df_t["pcode"].apply(lambda p: (p, trimester) in rainy_set)]
 
@@ -1011,12 +1040,8 @@ def _(mo):
 
 
 @app.cell
-def _(df_skill_active, issued_month, mo, pcode, pd, trimester):
-    _row = df_skill_active[
-        (df_skill_active["pcode"] == pcode)
-        & (df_skill_active["issued_month"] == issued_month)
-        & (df_skill_active["trimester"] == trimester)
-    ]
+def _(df_active, mo, pcode, pd):
+    _row = df_active[df_active["pcode"] == pcode]
     _pct = (
         float(_row.iloc[0]["forecast_percentile"])
         if not _row.empty and pd.notna(_row.iloc[0].get("forecast_percentile"))
@@ -1033,9 +1058,10 @@ def _(
     best_dt_combos,
     calendar,
     detrend_sw,
+    df_active,
     df_paired_active,
-    df_skill_active,
     issued_month,
+    issued_year,
     np,
     pcode,
     pd,
@@ -1056,11 +1082,7 @@ def _(
     _df_s2["forecast_orig"] = np.expm1(_df_s2["forecast_mean"])
     _df_s2["obs_orig"] = np.expm1(_df_s2["obs_mean"])
 
-    _skill_row2 = df_skill_active[
-        (df_skill_active["pcode"] == pcode)
-        & (df_skill_active["issued_month"] == issued_month)
-        & (df_skill_active["trimester"] == trimester)
-    ]
+    _skill_row2 = df_active[df_active["pcode"] == pcode]
 
     plt.close("all")
     _fig_scatter2, _ax2 = plt.subplots(figsize=(7, 7), dpi=150)
@@ -1070,10 +1092,10 @@ def _(
         _ax2.set_axis_off()
     else:
         _sr2 = _skill_row2.iloc[0]
-        # Include current forecast in x range so the forecast line is never clipped
+        # Include the selected year's forecast in x range so its line is never clipped
         _cf_orig2_for_range = (
             float(np.expm1(_sr2["current_forecast_mean"]))
-            if bool(_sr2.get("is_predictive")) and pd.notna(_sr2.get("current_forecast_mean"))
+            if pd.notna(_sr2.get("current_forecast_mean"))
             else None
         )
         _x_vals = list(_df_s2["forecast_orig"])
@@ -1130,18 +1152,23 @@ def _(
             _ax2.plot([_diag_min, _diag_max], [_diag_min, _diag_max],
                       color="#AAAAAA", linewidth=0.9, linestyle="--", zorder=-1)
 
+        _sel_year2 = int(_sr2["current_forecast_year"])
         for _, _yr2 in _df_s2.iterrows():
+            _is_sel2 = int(_yr2["season_year"]) == _sel_year2
             _ax2.annotate(
                 str(int(_yr2["season_year"])),
                 (_yr2["forecast_orig"], _yr2["obs_orig"]),
-                fontsize=8, ha="center", va="center", color="k", zorder=3,
+                fontsize=9 if _is_sel2 else 8, ha="center", va="center",
+                color="mediumorchid" if _is_sel2 else "k",
+                fontweight="bold" if _is_sel2 else "normal", zorder=4 if _is_sel2 else 3,
             )
 
-        if bool(_sr2["is_predictive"]) and pd.notna(_sr2["current_forecast_mean"]):
+        # Selected year's forecast line (always shown, in- or out-of-sample)
+        if pd.notna(_sr2["current_forecast_mean"]):
             _cf_orig2 = float(np.expm1(_sr2["current_forecast_mean"]))
             _ax2.axvline(_cf_orig2, color="mediumorchid", linestyle="--", zorder=-1)
             _ax2.annotate(
-                f"  {int(_sr2['current_forecast_year'])} forecast",
+                f"  {_sel_year2} forecast",
                 (_cf_orig2, _ylim2[0]),
                 rotation=90, va="bottom", ha="right",
                 color="mediumorchid", fontstyle="italic",
@@ -1164,7 +1191,7 @@ def _(
         )
         _data_lbl2 = f" [{'detrended' if _is_dt2 else 'raw'}]" if detrend_sw.value in ("detrended", "best") else ""
         _ax2.set_title(
-            f"{_country2} — issued {calendar.month_abbr[issued_month]}, valid {trimester}{_data_lbl2}"
+            f"{_country2} — issued {calendar.month_abbr[issued_month]} {issued_year}, valid {trimester}{_data_lbl2}"
             + ("  ⚠ negative skill" if _r_val2 < 0 else ""),
             color="darkred" if _r_val2 < 0 else "black",
         )
@@ -1185,13 +1212,18 @@ def _(
 def _(
     TRIMESTERS,
     calendar,
+    df_paired,
+    df_paired_dt,
     df_skill,
     df_skill_dt,
+    forecast_metrics_for_year,
     issued_month,
+    issued_year,
     np,
     pcode,
     plt,
     rainy_set,
+    season_year_for,
 ):
     # Valid trimesters sorted by lead time (earliest first)
     _valid = sorted(
@@ -1206,6 +1238,21 @@ def _(
             df[(df["pcode"] == pcode) & (df["issued_month"] == issued_month)]
             .set_index("trimester").reindex(_tri_names)
         )
+
+    # Forecast percentile per trimester for the SELECTED issued year, recomputed from
+    # paired_yearly (raw + detrended) — mirrors the year-aware df_active recompute.
+    def _pct_by_tri(df_paired_src):
+        _vals = []
+        for _t in _tri_names:
+            _sy = season_year_for(issued_month, issued_year, TRIMESTERS[_t])
+            _cdf = df_paired_src[
+                (df_paired_src["pcode"] == pcode)
+                & (df_paired_src["issued_month"] == issued_month)
+                & (df_paired_src["trimester"] == _t)
+            ]
+            _m = forecast_metrics_for_year(_cdf, _sy)
+            _vals.append(_m["forecast_percentile"] if _m["forecast_percentile"] is not None else np.nan)
+        return np.array(_vals, dtype=float)
 
     _df_ov    = _skill_row(df_skill)
     _df_ov_dt = _skill_row(df_skill_dt)
@@ -1233,14 +1280,14 @@ def _(
     _ax_r.legend(fontsize=7, loc="upper right")
     _ax_r.set_title(
         f"{_country_ov} — skill & forecast severity by trimester"
-        f" — issued {calendar.month_abbr[issued_month]}"
+        f" — issued {calendar.month_abbr[issued_month]} {issued_year}"
     )
     _ax_r.spines["top"].set_visible(False)
     _ax_r.spines["right"].set_visible(False)
 
     # Bottom: forecast percentile — bars centred on 50th percentile
-    _pct_raw = _df_ov["forecast_percentile"].values.astype(float)
-    _pct_det = _df_ov_dt["forecast_percentile"].values.astype(float)
+    _pct_raw = _pct_by_tri(df_paired)
+    _pct_det = _pct_by_tri(df_paired_dt)
     _ax_p.bar(_x - _w/2, _pct_raw - 50,
               bottom=50, width=_w, color=_bar_cols, alpha=0.80, label="Raw")
     _ax_p.bar(_x + _w/2, _pct_det - 50,
