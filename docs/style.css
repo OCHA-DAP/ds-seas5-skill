@@ -1,0 +1,42 @@
+:root { --ink: #222; --muted: #666; --line: #ddd; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0 16px 32px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink); max-width: 1200px; margin: 0 auto;
+}
+header { padding: 16px 0 4px; }
+h1 { font-size: 1.35rem; margin: 0 0 2px; }
+#subtitle { margin: 0; color: var(--muted); font-size: 0.95rem; }
+
+#controls {
+  display: flex; flex-wrap: wrap; gap: 20px; align-items: center;
+  padding: 12px 0; border-bottom: 1px solid var(--line); margin-bottom: 8px;
+}
+#controls label { font-size: 0.9rem; }
+#controls select { font-size: 0.9rem; padding: 3px 6px; margin-left: 4px; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+#map-wrap { position: relative; }
+#map { width: 100%; height: auto; display: block; background: #fff; }
+.country { stroke-linejoin: round; cursor: pointer; }
+.country:hover { stroke: #000; stroke-width: 1px; }
+.dot { cursor: pointer; }
+.dot:hover { stroke: #000; stroke-width: 1.2px; }
+
+#tooltip {
+  position: absolute; pointer-events: none; background: rgba(255,255,255,0.97);
+  border: 1px solid #bbb; border-radius: 4px; padding: 6px 9px; font-size: 0.8rem;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15); max-width: 240px; line-height: 1.35;
+}
+#tooltip.hidden { display: none; }
+#tooltip .name { font-weight: 600; margin-bottom: 2px; }
+#tooltip .cat { font-weight: 600; }
+
+#legend { display: flex; flex-wrap: wrap; gap: 14px 20px; padding: 14px 0; font-size: 0.8rem; }
+.legend-group { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.swatch { width: 16px; height: 12px; border: 1px solid #999; display: inline-block; }
+
+footer { color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 10px; }
+footer p { margin: 4px 0; }
