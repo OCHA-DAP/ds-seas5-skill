@@ -56,27 +56,29 @@ function buildPatterns(svg) {
   for (const [cat, [fill, , hatch]] of Object.entries(STYLE)) {
     if (!hatch) { fillFor[cat] = fill; continue; }
     const id = "pat-" + cat;
-    const stroke = hatch === "white" ? "rgba(255,255,255,0.65)"
+    const stroke = hatch === "white" ? "rgba(255,255,255,0.7)"
                  : hatch === "grey" ? "#CCCCCC" : "#BBBBBB";
     const p = defs.append("pattern")
       .attr("id", id).attr("patternUnits", "userSpaceOnUse")
       .attr("width", 5).attr("height", 5);
     p.append("rect").attr("width", 5).attr("height", 5).attr("fill", fill);
+    // Full-length lines + rotate(45) give continuous straight "/" stripes (no tapering);
+    // the crosshatch adds the perpendicular set.
+    p.attr("patternTransform", "rotate(45)");
+    const sw = hatch === "cross" ? 1.1 : 1.4;
+    p.append("line").attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", 5)
+      .attr("stroke", stroke).attr("stroke-width", sw);
     if (hatch === "cross") {
-      p.append("path").attr("d", "M0,0 l5,5 M0,5 l5,-5")
-        .attr("stroke", stroke).attr("stroke-width", 0.8);
-    } else {
-      p.attr("patternTransform", "rotate(45)");
-      p.append("line").attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", 5)
-        .attr("stroke", stroke).attr("stroke-width", 1);
+      p.append("line").attr("x1", 0).attr("y1", 0).attr("x2", 5).attr("y2", 0)
+        .attr("stroke", stroke).attr("stroke-width", sw);
     }
     fillFor[cat] = `url(#${id})`;
   }
   return fillFor;
 }
 
-const fmtPct = (v) => v == null ? "—" : v.toFixed(0);
 const fmtR = (v) => v == null ? "—" : v.toFixed(2);
+const fmtRp = (v) => v == null ? "—" : v.toFixed(1);
 
 Promise.all([
   d3.json("data/forecast.json"),
@@ -126,13 +128,19 @@ Promise.all([
     const rec = (fc.data[iso3] || {})[currentTri()];
     const cat = catOf(f, currentTri(), seasonalityOn());
     const [mx, my] = d3.pointer(event, mapWrap);
+    let rpLine = "";
+    if (rec && rec.rp != null) {
+      rpLine = `<div>Return period: ${fmtRp(rec.rp)} yr</div><div>Correlation: ${fmtR(rec.r)}</div>`;
+    } else if (rec) {
+      rpLine = `<div>Correlation: ${fmtR(rec.r)}</div>`;
+    }
     tooltip.classed("hidden", false)
       .style("left", (mx + 14) + "px")
       .style("top", (my + 12) + "px")
       .html(
         `<div class="name">${f.properties.name}</div>` +
         `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>` +
-        (rec ? `<div>Percentile: ${fmtPct(rec.pct)} · skill r = ${fmtR(rec.r)}</div>` : "")
+        rpLine
       );
   }
   const hideTooltip = () => tooltip.classed("hidden", true);
@@ -166,6 +174,14 @@ Promise.all([
   buildLegend();
 });
 
+// CSS hatch fill for legend swatches — crosshatch for "cross", single stripe otherwise.
+function hatchBg(hatch) {
+  const color = hatch === "white" ? "rgba(255,255,255,0.7)" : hatch === "grey" ? "#CCC" : "#BBB";
+  // 135deg → "/" stripes, matching the map's SVG hatch direction.
+  const stripe = (deg) => `repeating-linear-gradient(${deg}deg, ${color} 0 1.5px, transparent 1.5px 5px)`;
+  return hatch === "cross" ? `${stripe(45)}, ${stripe(135)}` : stripe(135);
+}
+
 function buildLegend() {
   const groups = [
     ["Forecast (high skill)", ["drought_vsev_high", "drought_sev_high", "high_none", "flood_sev_high", "flood_vsev_high"]],
@@ -180,8 +196,7 @@ function buildLegend() {
       const item = g.append("span").attr("class", "legend-item");
       const sw = item.append("span").attr("class", "swatch")
         .style("background", fill).style("border-color", edge);
-      if (hatch) sw.style("background-image",
-        `repeating-linear-gradient(45deg, ${hatch === "white" ? "rgba(255,255,255,0.65)" : "#BBB"} 0 1px, transparent 1px 4px)`);
+      if (hatch) sw.style("background-image", hatchBg(hatch));
       item.append("span").text(CAT_LABEL[catBase(cat)] || cat);
     }
   }

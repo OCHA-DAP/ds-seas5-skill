@@ -137,9 +137,16 @@ def main() -> None:
                 continue
             pct = row["forecast_percentile"]
             r = row["pearson_r"]
+            # Directional return period: drought RP (forecast_rp) when dry (pct<50),
+            # else flood RP (flood_rp). Matches the alert tables / scatter RP view.
+            if pd.notna(pct):
+                rp = row["forecast_rp"] if pct < 50 else row["flood_rp"]
+            else:
+                rp = None
             data.setdefault(iso3, {})[tri] = {
                 "pct": round(float(pct), 2) if pd.notna(pct) else None,
                 "r": round(float(r), 3) if pd.notna(r) else None,
+                "rp": round(float(rp), 1) if pd.notna(rp) else None,
                 "rainy": (pc, tri) in rainy_set,
             }
 
