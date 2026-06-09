@@ -219,7 +219,7 @@ def _(mo):
 def _(mo):
     severe_rp_sl      = mo.ui.slider(2,    10,   1,    3,    label="Alert RP (yr)")
     very_severe_rp_sl = mo.ui.slider(5,    25,   1,    10,   label="Severe Alert RP (yr)")
-    r_mod_sl          = mo.ui.slider(0.10, 0.60, 0.05, 0.25, label="Moderate skill (r ≥)")
+    r_mod_sl          = mo.ui.slider(0.10, 0.60, 0.05, 0.30, label="Moderate skill (r ≥)")
     r_high_sl         = mo.ui.slider(0.20, 0.80, 0.05, 0.50, label="High skill (r ≥)")
     mo.hstack([severe_rp_sl, very_severe_rp_sl, r_mod_sl, r_high_sl], justify="start")
     return r_high_sl, r_mod_sl, severe_rp_sl, very_severe_rp_sl
@@ -329,20 +329,21 @@ def _(mo):
         label="Map region:",
         value="Global",
     )
-    map_region_dd
-    return (map_region_dd,)
+    map_show_all_sw = mo.ui.switch(label="Show alerts outside rainy season", value=False)
+    mo.hstack([map_region_dd, map_show_all_sw], justify="start", align="center", gap="1.5rem")
+    return map_region_dd, map_show_all_sw
 
 
 @app.cell
 def _(
     TRIMESTERS,
     calendar,
-    detrend_sw,
     df_active,
     df_skill,
     issued_month,
     issued_year,
     map_region_dd,
+    map_show_all_sw,
     np,
     pd,
     plt,
@@ -376,7 +377,7 @@ def _(
         _ic  = _pcode_to_iso3[_pc]
         _r   = float(_rm["pearson_r"])           if pd.notna(_rm.get("pearson_r"))           else None
         _pct = float(_rm["forecast_percentile"]) if pd.notna(_rm.get("forecast_percentile")) else None
-        if (_pc, trimester) not in rainy_set:
+        if (_pc, trimester) not in rainy_set and not map_show_all_sw.value:
             _iso3_cat[_ic] = "off_season"
         elif _r is None or _pct is None:
             _iso3_cat[_ic] = "no_data"
@@ -430,7 +431,7 @@ def _(
     _map_w   = 12.0
     _map_h   = _map_w * _dy / _dx
     _title_h = 0.30   # inches for title
-    _leg_h   = 1.6    # inches for two legend rows
+    _leg_h   = 2.0    # inches for two legend rows (row1 labels are two lines)
     _fig_h   = _map_h + _title_h + _leg_h
 
     # ── Assign categories and clip ───────────────────────────────────────
@@ -518,9 +519,8 @@ def _(
     _ax_m.set_aspect("equal")
     _ax_m.axis("off")
     _tri_str = "-".join(calendar.month_abbr[m] for m in TRIMESTERS[trimester])
-    _map_detrend_sfx = {"raw": "", "detrended": " [detrended]", "best": " [best skill]"}.get(detrend_sw.value, "")
     _ax_m.set_title(
-        f"ECMWF SEAS5 precipitation alerts — forecast issued {calendar.month_name[issued_month]} {issued_year}, valid {_tri_str}{_map_detrend_sfx}",
+        f"ECMWF SEAS5 precipitation — forecast issued {calendar.month_name[issued_month]} {issued_year}, valid {_tri_str}",
         fontsize=11, pad=8,
     )
 
@@ -528,19 +528,31 @@ def _(
     _LEG_KW = dict(fontsize=7, framealpha=0.95, edgecolor="#CCCCCC",
                    handlelength=2.0, handletextpad=0.5, title_fontsize=7.5)
 
+    # Fraction label from the alert RP threshold: 10yr→decile, 5yr→quintile,
+    # 4yr→quartile, 3yr→tercile; otherwise the explicit percentage.
+    def _frac(rp, low):
+        _name = {10: "decile", 5: "quintile", 4: "quartile", 3: "tercile"}.get(int(rp))
+        _side = "lowest" if low else "highest"
+        return f"{_side} {_name}" if _name else f"{_side} {100 / rp:.0f}%"
+
     _h_row1 = [
-        _mpatch_m.Patch(facecolor="#7B3A1A", edgecolor="#5A2A0A", linewidth=0.5, label="Strongly below normal"),
-        _mpatch_m.Patch(facecolor="#C8844A", edgecolor="#A06030", linewidth=0.5, label="Below normal"),
+        _mpatch_m.Patch(facecolor="#7B3A1A", edgecolor="#5A2A0A", linewidth=0.5,
+                        label=f"Strongly below normal\n({_frac(_vsev_yr, True)})"),
+        _mpatch_m.Patch(facecolor="#C8844A", edgecolor="#A06030", linewidth=0.5,
+                        label=f"Below normal\n({_frac(_sev_yr, True)})"),
         _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#AAAAAA", linewidth=0.5, label="Roughly normal"),
-        _mpatch_m.Patch(facecolor="#71B3E5", edgecolor="#4A90C8", linewidth=0.5, label="Above normal"),
-        _mpatch_m.Patch(facecolor="#0D40B0", edgecolor="#092E88", linewidth=0.5, label="Strongly above normal"),
+        _mpatch_m.Patch(facecolor="#71B3E5", edgecolor="#4A90C8", linewidth=0.5,
+                        label=f"Above normal\n({_frac(_sev_yr, False)})"),
+        _mpatch_m.Patch(facecolor="#0D40B0", edgecolor="#092E88", linewidth=0.5,
+                        label=f"Strongly above normal\n({_frac(_vsev_yr, False)})"),
     ]
     _h_row2 = [
         _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#CCCCCC", hatch="/////",  linewidth=0.5, label="Mod skill"),
         _mpatch_m.Patch(facecolor="#FFFFFF", edgecolor="#BBBBBB", hatch="xxxxxx", linewidth=0.5, label="Low skill"),
-        _mpatch_m.Patch(facecolor="#D0D0D0", edgecolor="#BBBBBB",               linewidth=0.5, label="Off season"),
-        _mpatch_m.Patch(facecolor="#F0F0F0", edgecolor="#DDDDDD",               linewidth=0.5, label="Not monitored"),
     ]
+    if not map_show_all_sw.value:
+        _h_row2.append(_mpatch_m.Patch(facecolor="#D0D0D0", edgecolor="#BBBBBB", linewidth=0.5, label="Off season"))
+    _h_row2.append(_mpatch_m.Patch(facecolor="#F0F0F0", edgecolor="#DDDDDD", linewidth=0.5, label="Not monitored"))
 
     # Place axes to fill exactly the map slice — no tight_layout gaps
     plt.subplots_adjust(
@@ -549,17 +561,17 @@ def _(
         top=(_leg_h + _map_h) / _fig_h,
     )
 
-    # Two legend rows stacked; each row ≈ 0.40" tall regardless of fig height
-    _row_h = 0.40 / _fig_h   # row height in figure fraction
+    # Two legend rows stacked; row1 labels span two lines so it needs more height
     _axes_bot = _leg_h / _fig_h
+    _row1_h = 0.55 / _fig_h   # gap to row2 (smaller = boxes closer together)
 
     _leg1 = _fig_m.legend(handles=_h_row1, title="Forecasted precipitation",
                            loc="upper center", bbox_to_anchor=(0.5, _axes_bot),
                            ncol=5, **_LEG_KW)
     _fig_m.add_artist(_leg1)
     _fig_m.legend(handles=_h_row2, title="Filters (high skill prediction unless otherwise indicated)",
-                  loc="upper center", bbox_to_anchor=(0.5, _axes_bot - _row_h - 0.003),
-                  ncol=4, **_LEG_KW)
+                  loc="upper center", bbox_to_anchor=(0.5, _axes_bot - _row1_h),
+                  ncol=len(_h_row2), **_LEG_KW)
 
     _fig_m
     return
@@ -921,7 +933,7 @@ def _(pcode_dd):
 @app.cell
 def _(mo):
     trimester_pct_sl = mo.ui.slider(0.10, 0.50, 0.05, 0.25, label="Rainy: trimester ≥ X of annual")
-    month_pct_sl     = mo.ui.slider(0.00, 0.20, 0.01, 0.05, label="Rainy: each month ≥ X of annual")
+    month_pct_sl     = mo.ui.slider(0.00, 0.20, 0.01, 0.00, label="Rainy: each month ≥ X of annual")
     mo.hstack([trimester_pct_sl, month_pct_sl], justify="start")
     return month_pct_sl, trimester_pct_sl
 
