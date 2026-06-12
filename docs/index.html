@@ -69,10 +69,12 @@
           forecast is averaged over the 3-month target season (e.g. a June issue → Jul–Aug–Sep),
           giving one forecast value per year. ERA5 is aggregated the same way (complete seasons
           only).</li>
-        <li><strong>Transform &amp; normalise.</strong> Values are log-transformed, and the
-          forecast is rescaled to match the ERA5 mean and spread over the overlapping years, so the
-          forecast and observations are comparable. The default <em>Detrended</em> version also
-          removes a linear trend (in log space) from both series.</li>
+        <li><strong>Transform, normalise &amp; detrend.</strong> Values are log-transformed, and
+          the forecast is rescaled to match the ERA5 mean and spread, so the two are comparable. A
+          linear trend is then removed from both the forecast and the observations (in log space,
+          keeping each series' mean) — so the forecast is judged against recent conditions rather
+          than the full historical range, and cases where SEAS5 and ERA5 trend in opposite
+          directions are corrected.</li>
         <li><strong>Locate the forecast.</strong> The forecast's <em>percentile</em> within the
           historical forecast distribution is computed, along with an empirical (Weibull)
           <em>return period</em> — how often a forecast this dry (or this wet) has occurred.</li>
@@ -82,8 +84,8 @@
 
       <h3>3. Skill</h3>
       <p>
-        Skill is the temporal <strong>Pearson correlation (r)</strong> between the normalised
-        hindcast forecast and ERA5 observations across overlapping years (minimum 10 years).
+        Skill is the temporal <strong>Pearson correlation (r)</strong> between the normalised,
+        detrended hindcast forecast and ERA5 observations across the full record (1981–present).
         Countries are only alerted where the forecast is skilful:
       </p>
       <ul>
@@ -114,14 +116,11 @@
       <h3>Default settings</h3>
       <table>
         <tr><th>Setting</th><th>Default</th></tr>
-        <tr><td>Forecast version</td><td>Detrended</td></tr>
         <tr><td>Below / Above normal</td><td>3-yr return period (lowest/highest tercile)</td></tr>
         <tr><td>Strongly below / above normal</td><td>10-yr return period (lowest/highest decile)</td></tr>
         <tr><td>Moderate skill</td><td>r ≥ 0.30</td></tr>
         <tr><td>High skill</td><td>r ≥ 0.50</td></tr>
         <tr><td>Rainy season: trimester share</td><td>≥ 25% of annual rainfall</td></tr>
-        <tr><td>Rainy season: per-month minimum</td><td>0% (off)</td></tr>
-        <tr><td>Minimum hindcast years</td><td>10</td></tr>
       </table>
 
       <h3>Where this runs</h3>
