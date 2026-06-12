@@ -6,7 +6,8 @@ to GitHub Pages.
 
 ## Files
 - `index.html`, `app.js`, `style.css` — the page (loads D3 from a CDN; queries nothing else).
-- `data/forecast.json` — latest forecast per country per valid trimester (`pct`, `r`, `rainy`).
+- `data/forecast.json` — latest forecast per country per valid trimester (`pct` percentile,
+  `r` correlation, `rp` directional return period, `rainy` flag) plus the threshold defaults.
 - `data/countries.geojson` — simplified country boundaries.
 
 The page reads only the two files in `data/`. The categorisation and colours are a faithful port
@@ -22,10 +23,16 @@ uv run python pipeline/export_static_site.py
 
 This overwrites `docs/data/forecast.json` and `docs/data/countries.geojson`. Commit the result.
 
-## Enable GitHub Pages
-Repo **Settings → Pages → Build and deployment → Source: Deploy from a branch →
-Branch: `main`, folder: `/docs`**. The site publishes at
-`https://<org>.github.io/<repo>/`.
+## GitHub Pages
+Live at **https://ocha-dap.github.io/ds-seas5-skill/**.
+
+Configured under **Settings → Pages → Deploy from a branch**. It is currently served from the
+`prob-rp-alerts` branch `/docs` (so it could go live before the PR merges). **After this PR merges
+to `main`, repoint Pages to `main` / `/docs`** (the feature branch will likely be deleted):
+
+```bash
+gh api -X PUT repos/OCHA-DAP/ds-seas5-skill/pages -f "source[branch]=main" -f "source[path]=/docs"
+```
 
 ## Local preview
 ```bash
