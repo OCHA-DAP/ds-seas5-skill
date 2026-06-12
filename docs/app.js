@@ -174,6 +174,23 @@ Promise.all([
   buildLegend();
 });
 
+// Tabs (Map / Methodology) with #hash deep-linking.
+(function setupTabs() {
+  const buttons = document.querySelectorAll(".tab");
+  function show(name) {
+    buttons.forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+    document.querySelectorAll(".tab-panel").forEach((p) => {
+      p.hidden = p.id !== "tab-" + name;
+    });
+  }
+  buttons.forEach((b) => b.addEventListener("click", () => {
+    show(b.dataset.tab);
+    history.replaceState(null, "", "#" + b.dataset.tab);
+  }));
+  const initial = location.hash.replace("#", "");
+  if (initial === "methods" || initial === "map") show(initial);
+})();
+
 // CSS hatch fill for legend swatches — crosshatch for "cross", single stripe otherwise.
 function hatchBg(hatch) {
   const color = hatch === "white" ? "rgba(255,255,255,0.7)" : hatch === "grey" ? "#CCC" : "#BBB";

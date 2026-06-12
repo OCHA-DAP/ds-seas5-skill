@@ -9,6 +9,29 @@ header { padding: 16px 0 4px; }
 h1 { font-size: 1.35rem; margin: 0 0 2px; }
 #subtitle { margin: 0; color: var(--muted); font-size: 0.95rem; }
 
+#tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-top: 10px; }
+.tab {
+  appearance: none; background: none; border: none; cursor: pointer;
+  font: inherit; font-size: 0.9rem; color: var(--muted);
+  padding: 8px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tab:hover { color: var(--ink); }
+.tab.active { color: var(--ink); font-weight: 600; border-bottom-color: #2a6db0; }
+
+.note { color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
+
+.prose { max-width: 760px; line-height: 1.5; }
+.prose h2 { font-size: 1.2rem; margin: 14px 0 6px; }
+.prose h3 { font-size: 1.0rem; margin: 20px 0 4px; }
+.prose ul, .prose ol { margin: 6px 0; padding-left: 22px; }
+.prose li { margin: 3px 0; }
+.prose p { margin: 8px 0; }
+.prose .small { font-size: 0.82rem; color: var(--muted); }
+.prose table { border-collapse: collapse; font-size: 0.88rem; margin: 8px 0; }
+.prose th, .prose td { border: 1px solid var(--line); padding: 5px 10px; text-align: left; }
+.prose th { background: #f5f5f5; }
+.prose a { color: #2a6db0; }
+
 #controls {
   display: flex; flex-wrap: wrap; gap: 20px; align-items: center;
   padding: 12px 0; border-bottom: 1px solid var(--line); margin-bottom: 8px;
