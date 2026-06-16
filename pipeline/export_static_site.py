@@ -26,7 +26,7 @@ from src.constants import PROJECT_PREFIX, TRIMESTERS
 # Defaults mirror the marimo app's out-of-the-box controls.
 USE_DETRENDED = True  # app default "Forecast version: Detrended"
 RAINY_TRIMESTER_PCT = 0.25  # trimester_pct_sl default
-RAINY_MONTH_PCT = 0.05  # month_pct_sl default
+RAINY_MONTH_PCT = 0.00  # month_pct_sl default (no per-month minimum)
 THRESHOLDS = {"sev_rp": 3, "vsev_rp": 10, "r_mod": 0.3, "r_high": 0.5}
 
 DOCS_DATA = Path(__file__).resolve().parent.parent / "docs" / "data"
