@@ -37,8 +37,10 @@ h1 { font-size: 1.35rem; margin: 0 0 2px; }
   padding: 12px 0; border-bottom: 1px solid var(--line); margin-bottom: 8px;
 }
 #controls label { font-size: 0.9rem; }
-#controls select { font-size: 0.9rem; padding: 3px 6px; margin-left: 4px; }
 .toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.slider-control { display: flex; flex-direction: column; gap: 4px; }
+.slider-control label { white-space: nowrap; }
+.slider-control input[type="range"] { width: 240px; accent-color: #2a6db0; cursor: pointer; }
 
 #map-wrap { position: relative; }
 #map { width: 100%; height: auto; display: block; background: #fff; }

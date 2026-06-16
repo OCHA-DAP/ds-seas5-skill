@@ -89,11 +89,15 @@ Promise.all([
     `Most recent forecast — issued ${fc.issued_label}`;
   document.getElementById("issued-label").textContent = fc.issued_label;
 
-  const triSel = d3.select("#trimester");
-  triSel.selectAll("option").data(fc.trimesters).join("option")
-    .attr("value", (d) => d.key)
-    .text((d) => `${d.key}  (${d.label})`);
-  triSel.property("value", fc.default_trimester);
+  const triSlider = document.getElementById("trimester");
+  const triLabel = document.getElementById("trimester-label");
+  triSlider.max = fc.trimesters.length - 1;
+  triSlider.value = Math.max(0, fc.trimesters.findIndex((t) => t.key === fc.default_trimester));
+  const updateTriLabel = () => {
+    const t = fc.trimesters[+triSlider.value];
+    triLabel.textContent = `${t.key} (${t.label})`;
+  };
+  updateTriLabel();
 
   const svg = d3.select("#map");
   const width = 1100, height = 560;
@@ -114,7 +118,7 @@ Promise.all([
   const smallFeatures = monitored.features.filter((f) => path.area(f) < 60);
 
   const mapWrap = document.getElementById("map-wrap");
-  const currentTri = () => triSel.property("value");
+  const currentTri = () => fc.trimesters[+triSlider.value].key;
   const seasonalityOn = () => d3.select("#seasonality").property("checked");
   const catOf = (f, tri, rainyOn) => {
     const iso3 = f.properties.iso3;
@@ -168,7 +172,7 @@ Promise.all([
       .on("mouseleave", hideTooltip);
   }
 
-  triSel.on("change", render);
+  triSlider.addEventListener("input", () => { updateTriLabel(); render(); });
   d3.select("#seasonality").on("change", render);
   render();
   buildLegend();

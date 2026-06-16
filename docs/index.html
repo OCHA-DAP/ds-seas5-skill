@@ -19,9 +19,10 @@
 
   <section id="tab-map" class="tab-panel">
     <div id="controls">
-      <label>Valid trimester:
-        <select id="trimester"></select>
-      </label>
+      <div class="slider-control">
+        <label for="trimester">Valid trimester: <strong id="trimester-label">—</strong></label>
+        <input type="range" id="trimester" min="0" max="0" step="1" value="0" />
+      </div>
       <label class="toggle">
         <input type="checkbox" id="seasonality" />
         Show alerts outside rainy season
