@@ -1,0 +1,103 @@
+# Skill sensitivity
+
+Of all the tunable knobs, the **skill gate** — the correlation cutoff below which
+we declare SEAS5 untrustworthy and withhold a forecast — moves the alert set the
+most. This chapter quantifies that sensitivity. The cutoff is *chosen* in the next
+chapter, by backtesting; here we just map the terrain.
+
+The sweep driver is `skill_sweep.py`; it re-runs the pipeline at
+r ∈ {0.20, 0.25, 0.30, 0.35} and writes `../data/sweep/`. This chapter reads those
+outputs, so it renders without Earth Engine.
+
+```{python}
+#| label: setup
+import pandas as pd
+import matplotlib.pyplot as plt
+
+THRESHOLDS = [0.20, 0.25, 0.30, 0.35]
+TAGS = {r: "r%02d" % int(round(r * 100)) for r in THRESHOLDS}
+adm0 = {r: pd.read_parquet(f"../data/sweep/adm0_{t}.parquet") for r, t in TAGS.items()}
+KEY = ["admin", "season"]
+```
+
+## The gate dominates the analysed universe
+
+```{python}
+#| label: tbl-coverage
+rows = []
+for r in THRESHOLDS:
+    d = adm0[r]
+    ev = d[d.state == "evaluable"]
+    rows.append(dict(r=r, evaluable=len(ev),
+                     not_evaluable=(d.state == "not_evaluable_low_skill").sum(),
+                     alert=(ev.tier == "alert").sum(),
+                     watch=(ev.tier == "watch").sum()))
+summary = pd.DataFrame(rows)
+summary
+```
+
+```{python}
+#| label: fig-coverage
+#| fig-cap: "Evaluable (admin × season) rows and drought alerts rise sharply as the skill gate relaxes."
+fig, ax = plt.subplots(figsize=(6, 3.5))
+ax.plot(summary.r, summary.evaluable, "o-", label="evaluable rows")
+ax.plot(summary.r, summary.alert, "s-", label="alert")
+ax.plot(summary.r, summary.watch, "^-", label="watch")
+ax.set_xlabel("skill cutoff  (Spearman r)")
+ax.set_ylabel("count (adm0, issued June 2026)")
+ax.invert_xaxis()
+ax.legend(frameon=False, fontsize=8)
+fig.tight_layout()
+plt.show()
+```
+
+Relaxing 0.35 → 0.20 nearly **doubles** the evaluable set. Wherever we draw this
+line dominates everything downstream — so it deserves a real criterion.
+
+## A stable core, and a threshold-sensitive tail
+
+If an alert fires regardless of the cutoff, it isn't an artefact of where the line
+was drawn. We pivot every (admin × season) cell *ever* flagged `alert` and count how
+many thresholds it survives.
+
+```{python}
+#| label: tbl-robustness
+piv = None
+for r in THRESHOLDS:
+    s = adm0[r].set_index(KEY)["tier"].rename(TAGS[r])
+    piv = s.to_frame() if piv is None else piv.join(s, how="outer")
+piv = piv.fillna("not_eval")
+
+is_alert = piv[list(TAGS.values())] == "alert"
+ever = piv[is_alert.any(axis=1)].copy()
+ever["n_thresh_alert"] = is_alert.loc[ever.index].sum(axis=1)
+robust = int((ever[TAGS[0.35]] == "alert").sum())
+
+print(f"(admin × season) cells ever flagged alert: {len(ever)}")
+print(f"  robust core (alert even at r ≥ 0.35): {robust}")
+print(f"  threshold-sensitive:                   {len(ever) - robust}")
+ever.n_thresh_alert.value_counts().sort_index().rename("n_alerts").to_frame()
+```
+
+About 85 alerts fire at all four thresholds — a high-confidence core. The handful
+firing at only one cutoff are the most likely to be noise.
+
+## What relaxing the gate surfaces
+
+The interesting cases appear only once the gate relaxes. Are they credible signal,
+or noise we were right to exclude?
+
+```{python}
+#| label: tbl-surfaced
+d20 = adm0[0.20].set_index(KEY)
+d35 = adm0[0.35].set_index(KEY)
+surfaced = d20[(d20.tier == "alert") &
+               (d35.reindex(d20.index).state != "evaluable")]
+print(f"alerts at r=0.20 not even evaluable at r=0.35: {len(surfaced)}")
+surfaced.sort_values("z")[["z", "dry_rp", "cov_combined", "dry_frac_footprint"]].head(15)
+```
+
+Several are severe and near-total in extent (e.g. **Sudan JJA, z ≈ −3.6, ~93%
+dry**), extending the robust East-Africa / Sahel cluster. That tells us a strict
+gate causes **misses**, not just guards against false alarms — and for early
+warning, a miss is the costlier error. The next chapter turns this into a decision.

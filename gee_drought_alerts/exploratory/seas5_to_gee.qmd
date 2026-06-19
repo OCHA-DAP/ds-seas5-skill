@@ -1,0 +1,123 @@
+---
+title: "SEAS5 COGs → Google Earth Engine"
+format: html
+engine: knitr
+jupyter: python3
+---
+
+## Setup
+
+```{python}
+from ocha_stratus import list_container_blobs, open_blob_cog
+import ee
+import geemap
+import rioxarray  # registers .rio accessor
+import tempfile
+import os
+from pathlib import Path
+```
+
+## Authenticate GEE
+
+```{python}
+# Run once interactively, then comment out
+# ee.Authenticate()
+
+ee.Initialize(project="YOUR_GEE_PROJECT_ID")
+```
+
+## List SEAS5 blobs
+
+```{python}
+blobs = list_container_blobs(
+    name_starts_with="seas5/monthly/processed/",
+    stage="prod",
+    container_name="raster",
+)
+print(f"{len(blobs)} blobs found")
+blobs[:5]
+```
+
+## Inspect a single COG
+
+```{python}
+sample = open_blob_cog(
+    blob_name=blobs[0],
+    stage="prod",
+    container_name="raster",
+)
+print(sample)
+print(sample.rio.crs)
+print(sample.dims)
+```
+
+## Create GEE ImageCollection
+
+```{python}
+GEE_ASSET_COLLECTION = "projects/YOUR_GEE_PROJECT_ID/assets/seas5_monthly"
+
+try:
+    ee.data.createAsset({"type": "ImageCollection"}, opt_path=GEE_ASSET_COLLECTION)
+    print(f"Created: {GEE_ASSET_COLLECTION}")
+except Exception as e:
+    print(f"Already exists (or error): {e}")
+```
+
+## Ingest COGs as assets
+
+GEE ingestion requires local files — each COG is loaded from blob, written to a
+temp GeoTIFF, then submitted as an ingestion task. Tasks run async server-side.
+
+```{python}
+def blob_to_asset_id(blob_name: str, collection: str) -> str:
+    return f"{collection}/{Path(blob_name).stem}"
+
+
+def ingest_cog(blob_name: str, collection: str) -> None:
+    asset_id = blob_to_asset_id(blob_name, collection)
+
+    try:
+        ee.data.getAsset(asset_id)
+        print(f"skip (exists): {asset_id}")
+        return
+    except Exception:
+        pass
+
+    da = open_blob_cog(blob_name=blob_name, stage="prod", container_name="raster")
+
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        da.rio.to_raster(tmp_path, driver="GTiff")
+        task_id = ee.data.uploadToEarthEngine(
+            open(tmp_path, "rb"),
+            {"name": asset_id},
+        )
+        print(f"started: {asset_id} (task: {task_id})")
+    finally:
+        os.unlink(tmp_path)
+
+
+for blob in blobs:
+    print(blob)
+    ingest_cog(blob, GEE_ASSET_COLLECTION)
+```
+
+## Check task status
+
+```{python}
+for t in ee.data.getTaskList()[:10]:
+    print(t["state"], t.get("description", ""))
+```
+
+## Preview collection (once ingested)
+
+```{python}
+col = ee.ImageCollection(GEE_ASSET_COLLECTION)
+print("Image count:", col.size().getInfo())
+
+m = geemap.Map()
+m.add_layer(col.first(), {}, "SEAS5 first image")
+m
+```

@@ -1,0 +1,114 @@
+# Alert configuration
+
+The MVP configuration, locked from the backtest. The guiding principle: **fire
+broadly for recall (misses are costly), escalate by magnitude/extent, and never let
+a magnitude criterion *suppress* a flag.**
+
+```{python}
+#| label: setup
+import pandas as pd
+df = pd.read_parquet("../data/seas5_admin_drought_alerts_2026-06.parquet")   # adm0, issued June 2026
+ev = df[df.state == "evaluable"]
+```
+
+## Evaluability (where we'll judge at all)
+
+A unit × season is assessed only with enough *trusted* ground — by **fraction OR
+absolute area**, so large countries aren't withheld for a modest percentage:
+
+- in-season (PSP) coverage ≥ 10%, **and**
+- in-season ∧ skilled coverage ≥ 25% **OR** ≥ 25,000 km² absolute.
+
+## Drought alert
+
+- **WATCH** — fires on the dry event alone: forecast **dry RP ≥ 3** (below-normal).
+  Recall-optimized.
+- **ALERT** — escalates a watch when severe/widespread; **any** of these triggers
+  it (OR — escalation never suppresses a watch):
+  `z ≤ −1.5` **OR** `dry_frac_footprint ≥ 0.5` **OR** `dry_area_km2 ≥ 100,000`.
+
+```{python}
+#| label: tbl-counts
+pd.DataFrame({
+    "evaluable": [len(ev)],
+    "drought_watch": [(df.drought_tier == "watch").sum()],
+    "drought_alert": [(df.drought_tier == "alert").sum()],
+    "flood_watch": [(df.flood_tier == "watch").sum()],
+})
+```
+
+```{python}
+#| label: tbl-top-alerts
+#| fig-cap: "Largest drought alerts by forecast dry area (issued June 2026)."
+(df[df.drought_tier == "alert"]
+   .sort_values("dry_area_km2", ascending=False)
+   [["admin", "season", "dry_rp", "z", "dry_frac_footprint", "dry_area_km2"]]
+   .head(20).reset_index(drop=True))
+```
+
+::: {.callout-warning}
+## Escalation thresholds are uncalibrated
+The watch/alert split is currently *inverted* (more alerts than watches) because the
+escalation bars — especially `dry_area_km2 ≥ 100,000`, which most large countries
+clear — are too easy. They are **provisional**; calibrating them is the job of the
+per-year dry-area backtest (the immediate next step). The WATCH rule (recall) is the
+backtested part; the ALERT escalation is structure-first, tuning-later.
+:::
+
+## A continuous product: return period per unit (no threshold)
+
+The pipeline computes the **exact dry return period, percentile, and z for every
+evaluable unit** — the tiers are just a threshold on top. So a no-threshold
+*return-period map* is a first-class product from the same table, useful on its own.
+Admin geometries come from the ASAP FC exported once (`export_admin_boundaries.py`),
+joined to the alert table on `asap0_id`; Natural Earth 110m provides the neutral
+basemap (grey = not evaluable / not in season).
+
+```{python}
+#| label: fig-rp-map
+#| fig-cap: "Forecast dry return period per country, by forecastable season (issued June 2026). Grey = not evaluable / not in season. The continuous, no-threshold product."
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import geopandas as gpd
+ne = gpd.read_file("../data/boundaries/naturalearth_admin0.geojson")
+adm0 = gpd.read_file("../data/boundaries/asap_adm0.geojson")
+SEASONS = ["JJA", "JAS", "ASO", "SON", "OND"]
+fig, axes = plt.subplots(3, 2, figsize=(13, 9))
+axes = axes.ravel()
+for ax, s in zip(axes, SEASONS):
+    ne.plot(ax=ax, color="#eeeeee", ec="white", lw=0.15)
+    sub = df[(df.season == s) & (df.state == "evaluable")][["asap0_id", "dry_rp"]]
+    g = adm0.merge(sub, on="asap0_id").dropna(subset=["dry_rp"])
+    if len(g):
+        g.plot(ax=ax, column="dry_rp", cmap="YlOrRd", vmin=1, vmax=10, ec="#999999", lw=0.1)
+    ax.set_xlim(-180, 180); ax.set_ylim(-60, 84); ax.set_axis_off(); ax.set_title(s, fontsize=10)
+sm = mpl.cm.ScalarMappable(cmap="YlOrRd", norm=mpl.colors.Normalize(1, 10))
+axes[-1].set_axis_off()
+fig.colorbar(sm, ax=axes[-1], fraction=0.5, label="dry RP (years)")
+fig.suptitle("Forecast dry return period by season — issued June 2026", y=1.0)
+fig.tight_layout(); plt.show()
+```
+
+The same map at adm1 (finer units) uses `asap_adm1.geojson`, joined on `asap1_id`.
+Its distribution across evaluable units:
+
+```{python}
+#| label: fig-rp-dist
+#| fig-cap: "Forecast dry return period across evaluable adm0 units (issued June 2026)."
+fig, ax = plt.subplots(figsize=(6, 3.0))
+ax.hist(ev.dry_rp.dropna(), bins=range(1, 36, 2), edgecolor="white")
+ax.set_xlabel("forecast dry return period (years)"); ax.set_ylabel("adm0 × season units")
+fig.tight_layout(); plt.show()
+```
+
+## Flood alert (caveated)
+
+A wet-tail analogue — **FLOOD WATCH** fires on wet **RP ≥ 3**.
+
+::: {.callout-important}
+## Flood here is unvalidated and weak
+Seasonal cumulative precipitation is a poor flood proxy — floods are driven by
+sub-seasonal intensity and antecedent conditions a 3-month mean cannot see. Unlike
+the drought rule, the flood flag is **not backtested**. It is provided as a
+structural placeholder, to be treated as a coarse wetness indicator, not a trigger.
+:::

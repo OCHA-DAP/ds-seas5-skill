@@ -1,0 +1,70 @@
+# Method
+
+We aggregate the SEAS5 seasonal precipitation forecast to admin units and classify
+the result. The whole pipeline is in `seas5_admin_drought_alerts.py`.
+
+## Rows: admin unit × forecastable trimester
+
+For a fixed issuance (the latest; here **June 2026**), each forecastable trimester
+reachable within leadtimes 0–6 (JJA, JAS, ASO, SON, OND from a June issuance) is
+evaluated for every admin unit. The in-season mask doesn't *pick* the season — it
+gates which (unit × season) rows are "live." A bimodal unit yields two live rows.
+
+## Frozen footprint: skill ∧ in-season
+
+Two **time-invariant** masks are computed once and applied identically to every
+year:
+
+- **Skill** — pixel-wise Spearman correlation of the SEAS5 seasonal mean against
+  ERA5-Land over 1993–2025, kept where `r ≥ R_THRESH`.
+- **In-season (PSP)** — the ASAP precipitation-sensitive period for that trimester
+  (admin-1 resolution).
+
+Freezing the masks is what makes the climatology comparable: every year is
+aggregated over the **same** pixels. Letting the mask vary by year — or letting the
+forecast year leak into it — would invalidate the percentile / return period.
+
+## Aggregate, then classify ("Path B")
+
+Area-weight the masked seasonal precip to the unit (adm0 is rolled up from adm1 via
+masked-area weights), then compute the **Weibull** percentile and dry/wet **return
+period** of the forecast year against the leave-one-out climatology. This is
+cleaner than averaging per-pixel ranks and reads as "a 1-in-N dry season."
+
+::: {.callout-note}
+Skill (Spearman) and the trigger (Weibull rank) are both **rank-based**, so SEAS5's
+units (a ~mm/day rate, unlike ERA5's accumulated metres) don't affect them. The
+aggregate is a relative index, not absolute rainfall.
+:::
+
+## Severity and extent
+
+- **Severity (`z`)** — a standardized anomaly (forecast − climatology mean ÷ sd).
+  The empirical return period saturates at *N*+1 once the forecast leaves the
+  historical envelope; `z` does not, so it grades extremes the rank cannot.
+- **Extent** — per pixel, the standardized anomaly vs *its own* climatology; pixels
+  ≤ −1σ are "in drought," rolled up to `dry_frac_footprint` and `dry_area_km2`.
+  *How widespread*, distinct from *how severe on average*.
+
+## Gating and tiers
+
+Three states keep "we don't trust it here" separate from "no alert":
+
+- `not_in_season` — PSP coverage < 10%.
+- `not_evaluable_low_skill` — in-season ∧ skilled coverage < 25% **and** absolute
+  in-season ∧ skilled area < 25,000 km². The OR on absolute area matters: a fraction
+  alone is unit-size-blind (25% of Sudan ≫ 25% of El Salvador).
+- `evaluable` — otherwise.
+
+The tiers follow a principle the backtest forces (see *Threshold selection*): **fire
+broadly for recall, escalate by magnitude — never let magnitude *suppress* a flag.**
+
+- **WATCH** — `dry_rp ≥ 3` (below-normal). Recall-optimized.
+- **ALERT** — a watch that is severe/widespread: `z ≤ −1.5` **OR**
+  `dry_frac_footprint ≥ 0.5` **OR** `dry_area_km2 ≥ 100,000` (OR, so escalation can't
+  remove a watch).
+
+`z` is a severity *label*, not a firing *gate* — the backtest shows gating on it
+lowers detection. The skill cutoff and the escalation bars are policy knobs; the
+next chapters show the sensitivity and how the cutoff is chosen by **backtesting
+against observations**.

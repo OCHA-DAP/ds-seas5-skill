@@ -1,0 +1,94 @@
+# Threshold selection (backtest)
+
+The skill cutoff is chosen by **drought-detection skill against ERA5-Land**, not by
+a significance rule. We score the forecast over the hindcast record (1993–2025):
+
+- **Observed truth** — ERA5-Land seasonal aggregate over the same frozen footprint.
+- **Event** — a dry season by Weibull return period; tried at **RP ≥ 3, 5, 7**.
+- For each candidate **skill cutoff** (0.20–0.35), a leave-one-out contingency of
+  forecast vs observed → **POD** (hit rate), **FAR** (false-alarm ratio), and skill
+  scores (Heidke, Peirce). `backtest_datagen.py` builds the data; `backtest_verify.py`
+  scores it.
+
+Both forecast and observed use the *same* rank rule, so the comparison is unaffected
+by SEAS5's units. Three views, read together:
+
+```{python}
+#| label: setup
+import pandas as pd
+import matplotlib.pyplot as plt
+cond = pd.read_parquet("../data/backtest/verification_conditional.parquet")
+syst = pd.read_parquet("../data/backtest/verification_system.parquet")
+alrt = pd.read_parquet("../data/backtest/verification_alert.parquet")
+```
+
+## (A) Conditional skill — favours a *strict* gate
+
+Among the units we *choose* to evaluate at each gate, per-alert quality improves as
+the gate tightens (more reliable alerts, fewer false alarms):
+
+```{python}
+#| label: tbl-conditional
+cond[cond.event_rp == 3][["r", "n_units", "POD", "FAR", "PSS"]].round(3)
+```
+
+## (B) System skill — favours a *loose* gate (the cost-of-miss view)
+
+Over a fixed universe of addressable units, a unit excluded at a stricter gate never
+fires, so its observed droughts become **misses**. Tightening the gate then *sheds
+detection*: it catches fewer of all droughts for only a small false-alarm gain —
+a bad trade when a miss is the costly error.
+
+```{python}
+#| label: tbl-system
+syst[syst.event_rp == 3][["r", "active_units", "hits", "misses", "POD", "FAR", "PSS"]].round(3)
+```
+
+```{python}
+#| label: fig-tradeoff
+#| fig-cap: "Opposite pulls (event RP=3): conditional per-alert skill rises with a stricter gate; system detection (POD) falls. Misses are the costly error, so we lean loose."
+c3 = cond[cond.event_rp == 3].sort_values("r")
+s3 = syst[syst.event_rp == 3].sort_values("r")
+fig, ax = plt.subplots(figsize=(6, 3.6))
+ax.plot(s3.r, s3.POD, "o-", label="system POD (recall)")
+ax.plot(s3.r, s3.FAR, "s--", label="system FAR")
+ax.plot(c3.r, c3.PSS, "^:", label="conditional PSS (per-alert)")
+ax.set_xlabel("skill cutoff (Spearman r)"); ax.set_ylabel("score")
+ax.invert_xaxis(); ax.legend(frameon=False, fontsize=8); fig.tight_layout()
+plt.show()
+```
+
+## (C) Does the z-gate help? — no
+
+The actual alert was originally `dry_rp ≥ 5 AND z ≤ −1.5`. Gating on the
+standardized anomaly turns out to **reduce** detection: it trades away far more hits
+than the false alarms it removes, so overall skill (PSS) falls vs the raw dry event.
+
+```{python}
+#| label: tbl-alert
+ab = (syst[syst.event_rp == 3][["r", "POD", "FAR", "PSS"]]
+      .merge(alrt[alrt.event_rp == 3][["r", "POD", "FAR", "PSS"]],
+             on="r", suffixes=("_raw", "_zgated")))
+ab.round(3)
+```
+
+The mechanism: the SEAS5 **ensemble mean has damped variance**, so its z-scores are
+compressed toward zero — many genuine dry forecasts sit at z > −1 and the gate
+discards them as misses. **z is a useful severity *label*, but a poor firing *gate*.**
+
+## Decision
+
+| knob | choice | why |
+|---|---|---|
+| **skill gate** | **r ≥ 0.20** | system POD/PSS best at the loosest cutoff; misses are costly |
+| **drought event** | **dry RP ≥ 3** | highest detection; RP 5/7 catch far fewer |
+| **z** | **label, not gate** | gating on z lowers detection (B vs C) |
+| **magnitude / extent** | **OR-escalation** | escalates severe/widespread alerts without suppressing recall |
+
+::: {.callout-warning}
+## Skill is modest everywhere
+PSS ≈ 0.2–0.4 and FAR ≈ 0.4–0.65 at all cutoffs. SEAS5 admin-level seasonal drought
+detection is a **useful input, not a standalone trigger**. Next steps: test cutoffs
+below 0.20, a regional (not global) gate, backtest the absolute-area criterion
+(needs per-year dry areas), and continuous skill-weighting.
+:::

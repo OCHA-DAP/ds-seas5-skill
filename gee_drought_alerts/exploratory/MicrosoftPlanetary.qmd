@@ -1,0 +1,42 @@
+---
+title: "Cloud Providers"
+format: html
+editor: visual
+---
+
+## Microsoft Planetary Computer & ECMWF & STAC
+
+[Python - Accessing ECMWF Open Data – Real Time](https://planetarycomputer.microsoft.com/dataset/ecmwf-forecast#Example-Notebook)
+
+[R - Reading from the STAC API with R](https://planetarycomputer.microsoft.com/docs/quickstarts/reading-stac-r/)
+
+[Datasets -ECMWF Open Data (real-time)](https://planetarycomputer.microsoft.com/dataset/ecmwf-forecast)
+
+ECMWF - making some headway below in exploring ECMWF real time Open Data w/ Microsoft planetary data - using above links as guidance.
+
+```{r}
+library(rstac)
+library(magrittr)
+library(terra)
+
+s_obj <- stac("https://planetarycomputer.microsoft.com/api/stac/v1/")
+rstac::items_properties(items_ob)
+
+s_obj
+items_ob <- rstac::stac_search(
+  q=s_obj,
+  collections = "ecmwf-forecast"
+  ) %>% 
+  rstac::get_request() %>% 
+  items_sign(sign_fn = sign_planetary_computer())
+
+items_ob$features 
+oper_forecast_items <- items_ob %>% 
+  items_filter(
+  properties$`ecmwf:type`=="fc",
+  properties$`ecmwf:stream`=="oper"
+  )
+oper_forecast_items
+
+
+```

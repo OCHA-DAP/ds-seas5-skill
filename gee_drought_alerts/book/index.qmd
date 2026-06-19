@@ -1,0 +1,41 @@
+# Preface {.unnumbered}
+
+This book documents an MVP system that turns the **SEAS5 seasonal precipitation
+forecast** into **admin-level drought (and, tentatively, flood) early-warning
+alerts**.
+
+The core idea is to alert only where a forecast is *meaningful*:
+
+- **where the model has skill** — SEAS5 must track reality (ERA5-Land) at that
+  location and season; and
+- **when precipitation matters** — the location's growing/rainy season (the ASAP
+  precipitation-sensitive period) must overlap the forecast window.
+
+Within that footprint we aggregate the forecast to admin units, place it in the
+unit's own climatological distribution, and flag the dry tail (drought) or wet
+tail (flood). The threshold that decides "enough skill to trust" is chosen by
+**backtesting against observations**, not by a significance rule of thumb.
+
+## How the book is organised
+
+- **Method** — how the aggregation, masks, severity, extent, and tiers are built.
+- **Skill sensitivity** — how sensitive the alert set is to the skill cutoff.
+- **Threshold selection** — choosing the cutoff by hindcast detection skill
+  (POD/FAR) against ERA5, across several drought-event definitions.
+- **Alert configuration** — the resulting drought and flood alert definitions.
+
+## Status
+
+MVP. Known next steps, deferred deliberately:
+
+- **Continuous skill-weighting** (weight pixels by skill rather than a hard gate).
+- **Flood** alerts (seasonal precip is a weak flood proxy — included but caveated).
+- Joint calibration of *all* thresholds (skill, return period, magnitude, extent)
+  via backtesting.
+
+## Reproduce
+
+The pipeline is `exploratory/seas5_admin_drought_alerts.py`; the sweep and
+backtest drivers are `exploratory/skill_sweep.py` and
+`exploratory/backtest_datagen.py`. Chapters read persisted outputs under
+`../data/` so the book renders without Earth Engine.

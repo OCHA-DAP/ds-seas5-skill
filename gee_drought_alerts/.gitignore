@@ -1,0 +1,24 @@
+# Data is kept locally for working but is NEVER tracked here — only code is versioned.
+# Regenerate any of it from the scripts in exploratory/ (needs GEE auth).
+data/
+*.parquet
+*.geojson
+*.gpkg
+*.tif
+*.tiff
+*.zip
+
+# Quarto render output + cache
+book/_book/
+book/.quarto/
+.quarto/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# scratch / throwaway
+artefacts/
+temp/
+.DS_Store

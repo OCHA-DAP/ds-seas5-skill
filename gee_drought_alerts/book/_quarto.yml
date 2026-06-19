@@ -1,0 +1,27 @@
+project:
+  type: book
+  output-dir: _book
+
+book:
+  title: "SEAS5 Seasonal Drought Alerts"
+  subtitle: "Aggregating seasonal forecasts to admin units for drought (and flood) early warning"
+  date: today
+  chapters:
+    - index.qmd
+    - method.qmd
+    - skill-sensitivity.qmd
+    - threshold-selection.qmd
+    - alert-configuration.qmd
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    df-print: paged
+
+jupyter: python3
+
+# Code cells execute from each chapter's directory (book/), so data at the repo
+# root is referenced as ../data/...
