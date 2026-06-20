@@ -14,6 +14,13 @@ dependencies = [
     "geodatasets>=2023.3.0",
     "plotly>=5.0.0",
     "anywidget>=0.11.0",
+    # vendored GEE drought-alert pipeline (gee_drought_alerts/) — see its VENDORED.md
+    "earthengine-api>=1.0.0",       # ee — all GEE scripts
+    "rasterio>=1.3.0",              # PSP raster build
+    "requests>=2.31.0",            # ASAP scrape + Natural Earth basemap download
+    "google-cloud-storage>=2.0.0",  # GCS staging for asset ingest
+    "pyarrow>=15.0.0",             # parquet read/write (alert tables, backtest, sweep)
+    "jupyter>=1.0.0",              # Quarto book execution (nbclient/nbformat/ipykernel)
 ]
 
 [build-system]
