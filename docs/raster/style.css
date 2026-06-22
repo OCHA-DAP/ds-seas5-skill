@@ -1,0 +1,34 @@
+:root { --ink: #222; --muted: #666; --line: #ddd; }
+* { box-sizing: border-box; }
+body {
+  margin: 0 auto; padding: 0 16px 24px; max-width: 1200px; color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+header { padding: 16px 0 4px; }
+h1 { font-size: 1.3rem; margin: 0 0 2px; }
+#subtitle { margin: 0; color: var(--muted); font-size: 0.95rem; }
+
+#controls {
+  display: flex; flex-wrap: wrap; gap: 24px; align-items: center;
+  padding: 12px 0; border-bottom: 1px solid var(--line); margin-bottom: 10px;
+}
+#controls label { font-size: 0.9rem; }
+.slider-control { display: flex; flex-direction: column; gap: 4px; }
+.slider-control input[type="range"] { width: 240px; accent-color: #2a6db0; cursor: pointer; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+
+/* match the world's 2:1 shape so the map fills to extents with no letterboxing */
+#map { width: 100%; aspect-ratio: 2 / 1; min-height: 320px; background: #fff; border: 1px solid var(--line); }
+/* crisp pixels (no smoothing) for the forecast overlay */
+.leaflet-image-layer { image-rendering: pixelated; image-rendering: crisp-edges; }
+.leaflet-container { background: #fff; }
+.hatch-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
+
+#legend { display: flex; flex-wrap: wrap; gap: 12px 22px; padding: 12px 0; font-size: 0.8rem; align-items: center; }
+.legend-group { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.swatch { width: 16px; height: 12px; border: 1px solid #999; display: inline-block; }
+
+footer { color: var(--muted); font-size: 0.78rem; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 8px; }
+footer p { margin: 4px 0; }
+footer a, #legend a { color: #2a6db0; }

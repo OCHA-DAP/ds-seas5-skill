@@ -14,6 +14,7 @@ dependencies = [
     "geodatasets>=2023.3.0",
     "plotly>=5.0.0",
     "anywidget>=0.11.0",
+    "netcdf4>=1.7.4",
 ]
 
 [build-system]

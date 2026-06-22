@@ -14,6 +14,7 @@
 
   <nav id="tabs">
     <button class="tab active" data-tab="map">Map</button>
+    <button class="tab" data-tab="pixel">Pixel level</button>
     <button class="tab" data-tab="methods">Methodology</button>
   </nav>
 
@@ -139,6 +140,10 @@
         are computed over the full hindcast and do not change with the selected year.
       </p>
     </div>
+  </section>
+
+  <section id="tab-pixel" class="tab-panel" hidden>
+    <iframe class="pixel-frame" data-src="raster/" title="Pixel-level SEAS5 precipitation alerts"></iframe>
   </section>
 
   <footer>

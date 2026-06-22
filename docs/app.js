@@ -178,7 +178,7 @@ Promise.all([
   buildLegend();
 });
 
-// Tabs (Map / Methodology) with #hash deep-linking.
+// Tabs (Map / Pixel level / Methodology) with #hash deep-linking.
 (function setupTabs() {
   const buttons = document.querySelectorAll(".tab");
   function show(name) {
@@ -186,13 +186,17 @@ Promise.all([
     document.querySelectorAll(".tab-panel").forEach((p) => {
       p.hidden = p.id !== "tab-" + name;
     });
+    // Lazy-load an embedded iframe the first time its tab is opened (so it sizes correctly).
+    const panel = document.getElementById("tab-" + name);
+    const frame = panel && panel.querySelector("iframe[data-src]");
+    if (frame && !frame.src) frame.src = frame.dataset.src;
   }
   buttons.forEach((b) => b.addEventListener("click", () => {
     show(b.dataset.tab);
     history.replaceState(null, "", "#" + b.dataset.tab);
   }));
   const initial = location.hash.replace("#", "");
-  if (initial === "methods" || initial === "map") show(initial);
+  if (["map", "pixel", "methods"].includes(initial)) show(initial);
 })();
 
 // CSS hatch fill for legend swatches — crosshatch for "cross", single stripe otherwise.
