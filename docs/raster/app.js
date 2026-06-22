@@ -1,5 +1,8 @@
 "use strict";
 
+// When embedded (as the "Pixel level" tab's iframe), hide the redundant header/footer.
+if (window.self !== window.top) document.documentElement.classList.add("embedded");
+
 // ── adm0 legend (verbatim from docs/app.js) ──────────────────────────────────
 const STYLE = {
   off_season:        ["#D0D0D0", "#BBBBBB", null],

@@ -1,5 +1,7 @@
 :root { --ink: #222; --muted: #666; --line: #ddd; }
 * { box-sizing: border-box; }
+/* always reserve the scrollbar gutter so the page width doesn't shift between tabs */
+html { scrollbar-gutter: stable; }
 body {
   margin: 0; padding: 0 16px 32px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -20,7 +22,7 @@ h1 { font-size: 1.35rem; margin: 0 0 2px; }
 
 .note { color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
 
-.pixel-frame { width: 100%; height: 80vh; min-height: 460px; border: 0; display: block; }
+.pixel-frame { width: 100%; height: calc(100vh - 180px); min-height: 420px; border: 0; display: block; }
 
 .prose { max-width: 760px; line-height: 1.5; }
 .prose h2 { font-size: 1.2rem; margin: 14px 0 6px; }

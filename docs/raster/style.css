@@ -1,5 +1,6 @@
 :root { --ink: #222; --muted: #666; --line: #ddd; }
 * { box-sizing: border-box; }
+html { scrollbar-gutter: stable; }
 body {
   margin: 0 auto; padding: 0 16px 24px; max-width: 1200px; color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -19,6 +20,11 @@ h1 { font-size: 1.3rem; margin: 0 0 2px; }
 
 /* match the world's 2:1 shape so the map fills to extents with no letterboxing */
 #map { width: 100%; aspect-ratio: 2 / 1; min-height: 320px; background: #fff; border: 1px solid var(--line); }
+
+/* embedded in the main app's "Pixel level" tab: drop the duplicate header/footer + tighten */
+.embedded header, .embedded footer { display: none; }
+.embedded body { padding-top: 8px; }
+.embedded #controls { padding-top: 0; }
 /* crisp pixels (no smoothing) for the forecast overlay */
 .leaflet-image-layer { image-rendering: pixelated; image-rendering: crisp-edges; }
 .leaflet-container { background: #fff; }
