@@ -22,7 +22,15 @@ h1 { font-size: 1.35rem; margin: 0 0 2px; }
 
 .note { color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
 
-.pixel-frame { width: 100%; height: calc(100vh - 180px); min-height: 420px; border: 0; display: block; }
+/* Country / Pixel segmented toggle */
+.seg { display: inline-flex; border: 1px solid #bbb; border-radius: 6px; overflow: hidden; }
+.seg-btn {
+  appearance: none; border: none; background: #fff; cursor: pointer; font: inherit;
+  font-size: 0.85rem; color: var(--muted); padding: 6px 14px;
+}
+.seg-btn + .seg-btn { border-left: 1px solid #bbb; }
+.seg-btn:hover { background: #f2f2f2; }
+.seg-btn.active { background: #2a6db0; color: #fff; }
 
 .prose { max-width: 760px; line-height: 1.5; }
 .prose h2 { font-size: 1.2rem; margin: 14px 0 6px; }
@@ -46,21 +54,22 @@ h1 { font-size: 1.35rem; margin: 0 0 2px; }
 .slider-control label { white-space: nowrap; }
 .slider-control input[type="range"] { width: 240px; accent-color: #2a6db0; cursor: pointer; }
 
-#map-wrap { position: relative; }
-#map { width: 100%; height: auto; display: block; background: #fff; }
-.country { stroke-linejoin: round; cursor: pointer; }
-.country:hover { stroke: #000; stroke-width: 1px; }
-.dot { cursor: pointer; }
-.dot:hover { stroke: #000; stroke-width: 1.2px; }
+/* match the world's 2:1 shape so the map fills to extents with no letterboxing */
+#map { width: 100%; aspect-ratio: 2 / 1; min-height: 320px; background: #fff; border: 1px solid var(--line); }
+.leaflet-container { background: #fff; }
+/* crisp pixels (no smoothing) for the forecast overlay canvas */
+.hatch-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
+.leaflet-interactive { cursor: pointer; }
 
-#tooltip {
-  position: absolute; pointer-events: none; background: rgba(255,255,255,0.97);
-  border: 1px solid #bbb; border-radius: 4px; padding: 6px 9px; font-size: 0.8rem;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.15); max-width: 240px; line-height: 1.35;
+/* Leaflet tooltip styled like the old custom hover box */
+.leaflet-tooltip {
+  background: rgba(255,255,255,0.97); border: 1px solid #bbb; border-radius: 4px;
+  padding: 6px 9px; font-size: 0.8rem; box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  max-width: 240px; line-height: 1.35; white-space: normal;
 }
-#tooltip.hidden { display: none; }
-#tooltip .name { font-weight: 600; margin-bottom: 2px; }
-#tooltip .cat { font-weight: 600; }
+.leaflet-tooltip:before { display: none; }
+.leaflet-tooltip .name { font-weight: 600; margin-bottom: 2px; }
+.leaflet-tooltip .cat { font-weight: 600; }
 
 #legend { display: flex; flex-wrap: wrap; gap: 14px 20px; padding: 14px 0; font-size: 0.8rem; }
 .legend-group { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }

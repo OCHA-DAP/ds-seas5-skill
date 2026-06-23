@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SEAS5 precipitation alerts — latest forecast</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -14,12 +15,15 @@
 
   <nav id="tabs">
     <button class="tab active" data-tab="map">Map</button>
-    <button class="tab" data-tab="pixel">Pixel level</button>
     <button class="tab" data-tab="methods">Methodology</button>
   </nav>
 
   <section id="tab-map" class="tab-panel">
     <div id="controls">
+      <div class="seg" id="view-toggle" role="group" aria-label="Resolution">
+        <button class="seg-btn active" data-view="country">Country</button>
+        <button class="seg-btn" data-view="pixel">Pixel</button>
+      </div>
       <div class="slider-control">
         <label for="trimester">Valid trimester: <strong id="trimester-label">—</strong></label>
         <input type="range" id="trimester" min="0" max="0" step="1" value="0" />
@@ -30,18 +34,17 @@
       </label>
     </div>
 
-    <div id="map-wrap">
-      <svg id="map"></svg>
-      <div id="tooltip" class="hidden"></div>
-    </div>
+    <div id="map"></div>
 
     <div id="legend"></div>
 
     <p class="note">
-      Forecast issued <span id="issued-label">—</span>. Colours show the SEAS5 forecast's
-      position within its historical distribution for countries where the seasonal forecast has
-      skill; hatched fills indicate moderate (vs. high) skill. Grey = outside the rainy season or
-      no skill. By default, alerts are shown only for each country's rainy season.
+      Forecast issued <span id="issued-label">—</span>. Colours show where the latest SEAS5
+      forecast sits within its historical distribution, where the seasonal forecast has skill;
+      hatched fills indicate moderate (vs. high) skill. Grey = outside the rainy season; cross-hatch
+      = low skill. The <strong>Country</strong>/<strong>Pixel</strong> toggle switches between
+      country averages and the native SEAS5 0.4° grid. By default, alerts are shown only for the
+      rainy season.
     </p>
   </section>
 
@@ -49,20 +52,22 @@
     <div class="prose">
       <h2>How the forecast alerts are calculated</h2>
       <p>
-        Each country is shaded by where the latest <strong>ECMWF SEAS5</strong> seasonal
+        Each area is shaded by where the latest <strong>ECMWF SEAS5</strong> seasonal
         precipitation forecast sits within its own forecast history, but only where the forecast
-        has demonstrated <em>skill</em> against observations. The values below are the
-        <strong>defaults</strong> used by this map; the
+        has demonstrated <em>skill</em> against observations. The same method runs at two
+        resolutions — country averages and the native SEAS5 0.4° grid (with ERA5 aggregated to
+        that grid) — switchable with the <strong>Country</strong>/<strong>Pixel</strong> toggle.
+        The values below are the <strong>defaults</strong> used by this map; the
         <a href="https://chd-ds-seas5-viz-skill-ewcwhteggec2gege.eastus2-01.azurewebsites.net/" target="_blank" rel="noopener">full
         interactive app</a> lets you change every one of them.
       </p>
 
       <h3>1. Data</h3>
       <ul>
-        <li><strong>Forecast:</strong> ECMWF SEAS5 ensemble-mean precipitation, area-averaged per
-          country, hindcasts from 1981 to present.</li>
+        <li><strong>Forecast:</strong> ECMWF SEAS5 ensemble-mean precipitation, hindcasts from
+          1981 to present.</li>
         <li><strong>Observations / climatology:</strong> ERA5 reanalysis precipitation, same
-          country areas and period.</li>
+          areas and period.</li>
       </ul>
 
       <h3>2. From a forecast to an anomaly category</h3>
@@ -88,12 +93,12 @@
       <p>
         Skill is the temporal <strong>Pearson correlation (r)</strong> between the normalised,
         detrended hindcast forecast and ERA5 observations across the full record (1981–present).
-        Countries are only alerted where the forecast is skilful:
+        Areas are only alerted where the forecast is skilful:
       </p>
       <ul>
         <li><strong>High skill:</strong> r ≥ 0.50 — solid fill.</li>
         <li><strong>Moderate skill:</strong> 0.30 ≤ r &lt; 0.50 — hatched fill.</li>
-        <li><strong>Low skill:</strong> r &lt; 0.30 — no alert (shown neutral).</li>
+        <li><strong>Low skill:</strong> r &lt; 0.30 — no alert (cross-hatch / neutral).</li>
       </ul>
       <p class="small">
         There is no single official correlation cut-off: WMO's
@@ -108,7 +113,7 @@
 
       <h3>4. Rainy-season (in-season) selection</h3>
       <p>
-        A country–trimester is treated as <strong>in season</strong> when that trimester carries a
+        An area–trimester is treated as <strong>in season</strong> when that trimester carries a
         meaningful share of the annual rainfall — by default, the trimester mean is ≥ 25% of the
         annual total (with no additional per-month minimum). By default the map only shows alerts
         for in-season trimesters; the <em>“Show alerts outside rainy season”</em> toggle reveals
@@ -142,15 +147,11 @@
     </div>
   </section>
 
-  <section id="tab-pixel" class="tab-panel" hidden>
-    <iframe class="pixel-frame" data-src="raster/" title="Pixel-level SEAS5 precipitation alerts"></iframe>
-  </section>
-
   <footer>
     <p>Data: ECMWF SEAS5 (forecast) &amp; ERA5 (climatology). OCHA Centre for Humanitarian Data.</p>
   </footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -30,7 +30,7 @@ const CAT_LABEL = {
 // Strip the skill suffix so a category maps to its CAT_LABEL key.
 const catBase = (cat) => cat.replace(/_(high|mod)$/, "");
 
-let T = { sev_rp: 3, vsev_rp: 10, r_mod: 0.25, r_high: 0.5 };
+let T = { sev_rp: 3, vsev_rp: 10, r_mod: 0.3, r_high: 0.5 };
 
 // Faithful port of the map categorisation (analysis/prob_alerts.py:379-397).
 function classify(rec, rainyOn) {
@@ -49,136 +49,284 @@ function classify(rec, rainyOn) {
   return r >= T.r_high ? "high_none" : "mid_none";
 }
 
-// SVG diagonal/cross stripe patterns for hatched categories; returns fill ref per category.
-function buildPatterns(svg) {
-  const defs = svg.append("defs");
+// ── adm0 SVG hatch patterns (constant screen density on Leaflet; layer points ≈ px) ──
+// Defined in a hidden <svg> in the document; Leaflet paths reference them by url(#id).
+function buildPatterns() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("width", "0"); svg.setAttribute("height", "0");
+  svg.style.position = "absolute";
+  const defs = document.createElementNS(NS, "defs");
+  svg.appendChild(defs);
   const fillFor = {};
   for (const [cat, [fill, , hatch]] of Object.entries(STYLE)) {
     if (!hatch) { fillFor[cat] = fill; continue; }
     const id = "pat-" + cat;
     const stroke = hatch === "white" ? "rgba(255,255,255,0.7)"
                  : hatch === "grey" ? "#CCCCCC" : "#BBBBBB";
-    const p = defs.append("pattern")
-      .attr("id", id).attr("patternUnits", "userSpaceOnUse")
-      .attr("width", 5).attr("height", 5);
-    p.append("rect").attr("width", 5).attr("height", 5).attr("fill", fill);
-    // Full-length lines + rotate(45) give continuous straight "/" stripes (no tapering);
-    // the crosshatch adds the perpendicular set.
-    p.attr("patternTransform", "rotate(45)");
+    const p = document.createElementNS(NS, "pattern");
+    p.setAttribute("id", id);
+    p.setAttribute("patternUnits", "userSpaceOnUse");
+    p.setAttribute("width", "5"); p.setAttribute("height", "5");
+    p.setAttribute("patternTransform", "rotate(45)");
+    const bg = document.createElementNS(NS, "rect");
+    bg.setAttribute("width", "5"); bg.setAttribute("height", "5"); bg.setAttribute("fill", fill);
+    p.appendChild(bg);
     const sw = hatch === "cross" ? 1.1 : 1.4;
-    p.append("line").attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", 5)
-      .attr("stroke", stroke).attr("stroke-width", sw);
-    if (hatch === "cross") {
-      p.append("line").attr("x1", 0).attr("y1", 0).attr("x2", 5).attr("y2", 0)
-        .attr("stroke", stroke).attr("stroke-width", sw);
-    }
+    const line = (x1, y1, x2, y2) => {
+      const l = document.createElementNS(NS, "line");
+      l.setAttribute("x1", x1); l.setAttribute("y1", y1);
+      l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+      l.setAttribute("stroke", stroke); l.setAttribute("stroke-width", sw);
+      p.appendChild(l);
+    };
+    line(0, 0, 0, 5);
+    if (hatch === "cross") line(0, 0, 5, 0);
+    defs.appendChild(p);
     fillFor[cat] = `url(#${id})`;
   }
+  document.body.appendChild(svg);
   return fillFor;
 }
+
+// ── Pixel layer: screen-fixed hatch tiles (constant coarseness at every zoom) ────────
+const TILE = 9, LW = 0.85;
+function makeTile(draw) {
+  const c = document.createElement("canvas"); c.width = c.height = TILE;
+  const x = c.getContext("2d"); x.lineWidth = LW; draw(x); return c;
+}
+const TILES = {
+  1: makeTile((x) => { x.strokeStyle = "rgba(255,255,255,0.85)"; x.beginPath(); x.moveTo(0, TILE); x.lineTo(TILE, 0); x.stroke(); }),
+  2: makeTile((x) => { x.strokeStyle = "#B4B4B4"; x.beginPath(); x.moveTo(0, TILE); x.lineTo(TILE, 0); x.stroke(); }),
+  3: makeTile((x) => { x.strokeStyle = "#B4B4B4"; x.beginPath(); x.moveTo(0, TILE); x.lineTo(TILE, 0); x.moveTo(0, 0); x.lineTo(TILE, TILE); x.stroke(); }),
+};
+
+// Per category code: fill colour (null = transparent → white basemap) and hatch kind.
+const FILL = [null, "#D0D0D0", null, null, null, "#7B3A1A", "#7B3A1A",
+              "#C8844A", "#C8844A", "#71B3E5", "#71B3E5", "#0D40B0", "#0D40B0"];
+const KIND = [0, 0, 3, 0, 2, 0, 1, 0, 1, 0, 1, 0, 1];
+
+// Canvas layer: draws colour fills AND skill hatch from ONE category grid (shared pixel grid,
+// no drift). Animates with the map on zoom; the hatch is a screen-space pattern (constant coarseness).
+const RasterLayer = L.Layer.extend({
+  initialize(bounds) { this._b = bounds; this._grid = null; this._pad = 0.1; },
+  onAdd(map) {
+    this._map = map;
+    this._cv = L.DomUtil.create("canvas", "hatch-canvas leaflet-zoom-animated");
+    this._ctx = this._cv.getContext("2d");
+    map.getPanes().overlayPane.appendChild(this._cv);
+    map.on("moveend zoomend resize viewreset", this._update, this);
+    if (map.options.zoomAnimation) map.on("zoomanim", this._animateZoom, this);
+    this._update();
+  },
+  onRemove(map) {
+    L.DomUtil.remove(this._cv);
+    map.off("moveend zoomend resize viewreset", this._update, this);
+    map.off("zoomanim", this._animateZoom, this);
+  },
+  setGrid(grid, nx, ny) { this._grid = grid; this._nx = nx; this._ny = ny; this._draw(); },
+  _update() {
+    const m = this._map, p = this._pad, size = m.getSize();
+    this._origin = m.containerPointToLayerPoint(size.multiplyBy(-p)).round();
+    this._size = size.multiplyBy(1 + 2 * p).round();
+    this._zoom = m.getZoom();
+    L.DomUtil.setTransform(this._cv, this._origin, 1);
+    this._cv.width = this._size.x; this._cv.height = this._size.y;
+    this._draw();
+  },
+  _animateZoom(e) {
+    const scale = this._map.getZoomScale(e.zoom, this._zoom);
+    const offset = this._map._latLngToNewLayerPoint(
+      this._map.layerPointToLatLng(this._origin), e.zoom, e.center);
+    L.DomUtil.setTransform(this._cv, offset, scale);
+  },
+  _draw() {
+    const ctx = this._ctx;
+    ctx.clearRect(0, 0, this._size.x, this._size.y);
+    if (!this._grid) return;
+    const m = this._map, b = this._b, W = this._size.x, H = this._size.y;
+    const n = b[1][0], s = b[0][0], w0 = b[0][1], e0 = b[1][1];
+    const ox = this._origin.x, oy = this._origin.y, nx = this._nx, ny = this._ny;
+    const xW = m.latLngToLayerPoint([n, w0]).x - ox, xE = m.latLngToLayerPoint([n, e0]).x - ox;
+    const dx = (xE - xW) / nx;
+    const ex = new Int32Array(nx + 1);
+    for (let j = 0; j <= nx; j++) ex[j] = Math.round(xW + j * dx);
+    const ey = new Int32Array(ny + 1);
+    for (let i = 0; i <= ny; i++) ey[i] = Math.round(m.latLngToLayerPoint([n - i * (n - s) / ny, w0]).y - oy);
+    let j0 = 0; while (j0 < nx && ex[j0 + 1] < 0) j0++;
+    let j1 = nx; while (j1 > 0 && ex[j1 - 1] > W) j1--;
+    const colorPaths = {}, hatchPaths = { 1: new Path2D(), 2: new Path2D(), 3: new Path2D() };
+    const g = this._grid;
+    for (let i = 0; i < ny; i++) {
+      const y = ey[i], hh = ey[i + 1] - y;
+      if (hh <= 0 || ey[i + 1] < 0 || y > H) continue;
+      const off = i * nx;
+      for (let j = j0; j < j1; j++) {
+        const code = g[off + j];
+        if (!code) continue;
+        const x = ex[j], cw = ex[j + 1] - x;
+        if (FILL[code]) (colorPaths[code] || (colorPaths[code] = new Path2D())).rect(x, y, cw, hh);
+        const k = KIND[code];
+        if (k) hatchPaths[k].rect(x, y, cw, hh);
+      }
+    }
+    ctx.globalAlpha = 0.9;
+    for (const code in colorPaths) { ctx.fillStyle = FILL[code]; ctx.fill(colorPaths[code]); }
+    ctx.globalAlpha = 1;
+    for (const v of [1, 2, 3]) { ctx.fillStyle = ctx.createPattern(TILES[v], "repeat"); ctx.fill(hatchPaths[v]); }
+  },
+});
 
 const fmtR = (v) => v == null ? "—" : v.toFixed(2);
 const fmtRp = (v) => v == null ? "—" : v.toFixed(1);
 
 Promise.all([
-  d3.json("data/forecast.json"),
-  d3.json("data/countries.geojson"),
-]).then(([fc, geo]) => {
+  fetch("data/forecast.json").then((r) => r.json()),
+  fetch("data/countries.geojson").then((r) => r.json()),
+  fetch("raster/data/meta.json").then((r) => r.json()).catch(() => null),
+]).then(([fc, geo, rmeta]) => {
   T = fc.thresholds;
   document.getElementById("subtitle").textContent =
     `Most recent forecast — issued ${fc.issued_label}`;
   document.getElementById("issued-label").textContent = fc.issued_label;
 
+  const fillFor = buildPatterns();
+  const OUTLINE_W = 1.1;   // shared border thickness for both Country and Pixel views
+
+  // ── Controls ───────────────────────────────────────────────────────────────
   const triSlider = document.getElementById("trimester");
   const triLabel = document.getElementById("trimester-label");
+  const seasonality = document.getElementById("seasonality");
   triSlider.max = fc.trimesters.length - 1;
   triSlider.value = Math.max(0, fc.trimesters.findIndex((t) => t.key === fc.default_trimester));
+  const currentTri = () => fc.trimesters[+triSlider.value].key;
+  const seasonalityOn = () => seasonality.checked;
   const updateTriLabel = () => {
     const t = fc.trimesters[+triSlider.value];
     triLabel.textContent = `${t.key} (${t.label})`;
   };
-  updateTriLabel();
 
-  const svg = d3.select("#map");
-  const width = 1100, height = 560;
-  svg.attr("viewBox", `0 0 ${width} ${height}`);
-  const fillFor = buildPatterns(svg);
+  // ── Map ──────────────────────────────────────────────────────────────────────
+  const map = L.map("map", {
+    crs: L.CRS.EPSG4326, minZoom: 1, maxZoom: 8,
+    attributionControl: false, zoomControl: false,
+    // Leaflet defaults for scroll (whole-level snap, default wheel speed) — feels responsive.
+    // The flush initial fit uses a temporary zoomSnap: 0 below, then restores to 1.
+  });
 
-  const monitored = { type: "FeatureCollection",
-    features: geo.features.filter((f) => fc.data[f.properties.iso3]) };
-  // Fit to the full (clipped) world for stable framing, not the monitored subset.
-  const projection = d3.geoEquirectangular().fitExtent([[6, 6], [width - 6, height - 6]], geo);
-  const path = d3.geoPath(projection);
+  // Grey country outlines: the basemap under the pixel grid (and reference everywhere).
+  const outlineLayer = L.geoJSON(geo, {
+    interactive: false,
+    style: { color: "#5a5a5a", weight: OUTLINE_W, fillOpacity: 0, opacity: 0.95 },
+  });
+  const worldBounds = outlineLayer.getBounds();
+  // Add a little N/S breathing room, keep full E/W. Match the map box to these padded bounds'
+  // aspect (plate carrée: 1° lon = 1° lat in px) so the fit fills the box flush left/right with a
+  // small top/bottom margin.
+  const LAT_PAD = 8;
+  const viewBounds = L.latLngBounds(
+    [worldBounds.getSouth() - LAT_PAD, worldBounds.getWest()],
+    [worldBounds.getNorth() + LAT_PAD, worldBounds.getEast()]);
+  const aspect = (viewBounds.getEast() - viewBounds.getWest()) /
+                 (viewBounds.getNorth() - viewBounds.getSouth());
+  document.getElementById("map").style.aspectRatio = String(aspect);
+  map.invalidateSize();
+  // Fit at an exact (unsnapped) zoom so the view fills the box, then restore the 0.25 scroll snap.
+  map.options.zoomSnap = 0;
+  map.fitBounds(viewBounds, { padding: [0, 0] });
+  map.options.zoomSnap = 1;
+  map.setMaxBounds(viewBounds.pad(0.15));
 
-  const gCountries = svg.append("g");
-  const gDots = svg.append("g");
-  const tooltip = d3.select("#tooltip");
-
-  // small-country centroid dots so islands stay visible
-  const smallFeatures = monitored.features.filter((f) => path.area(f) < 60);
-
-  const mapWrap = document.getElementById("map-wrap");
-  const currentTri = () => fc.trimesters[+triSlider.value].key;
-  const seasonalityOn = () => d3.select("#seasonality").property("checked");
+  // ── Country (adm0) choropleth layer ──────────────────────────────────────────
   const catOf = (f, tri, rainyOn) => {
     const iso3 = f.properties.iso3;
     if (!fc.data[iso3]) return "unmonitored";
     return classify(fc.data[iso3][tri], rainyOn);
   };
-
-  // Shared hover tooltip for both country fills and small-country dots.
-  function showTooltip(event, f) {
+  const tooltipHtml = (f) => {
     const iso3 = f.properties.iso3;
     const rec = (fc.data[iso3] || {})[currentTri()];
     const cat = catOf(f, currentTri(), seasonalityOn());
-    const [mx, my] = d3.pointer(event, mapWrap);
     let rpLine = "";
     if (rec && rec.rp != null) {
       rpLine = `<div>Return period: ${fmtRp(rec.rp)} yr</div><div>Correlation: ${fmtR(rec.r)}</div>`;
     } else if (rec) {
       rpLine = `<div>Correlation: ${fmtR(rec.r)}</div>`;
     }
-    tooltip.classed("hidden", false)
-      .style("left", (mx + 14) + "px")
-      .style("top", (my + 12) + "px")
-      .html(
-        `<div class="name">${f.properties.name}</div>` +
-        `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>` +
-        rpLine
-      );
-  }
-  const hideTooltip = () => tooltip.classed("hidden", true);
-
-  gCountries.selectAll("path").data(geo.features).join("path")
-    .attr("class", "country")
-    .attr("d", path)
-    .attr("stroke-width", 0.4)
-    .on("mousemove", showTooltip)
-    .on("mouseleave", hideTooltip);
-
-  function render() {
+    return `<div class="name">${f.properties.name}</div>` +
+      `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>` + rpLine;
+  };
+  const admLayer = L.geoJSON(geo, {
+    style: () => ({ weight: OUTLINE_W, fillOpacity: 1, opacity: 1 }),
+    onEachFeature: (f, layer) => {
+      layer.bindTooltip(() => tooltipHtml(f), { sticky: true });
+    },
+  });
+  function renderAdm() {
     const tri = currentTri(), rainyOn = seasonalityOn();
-    gCountries.selectAll("path")
-      .attr("fill", (f) => fillFor[catOf(f, tri, rainyOn)])
-      .attr("stroke", (f) => STYLE[catOf(f, tri, rainyOn)][1]);
-    gDots.selectAll("circle").data(smallFeatures).join("circle")
-      .attr("class", "dot")
-      .attr("transform", (f) => `translate(${path.centroid(f)})`)
-      .attr("r", 3.2)
-      .attr("stroke", (f) => STYLE[catOf(f, tri, rainyOn)][1])
-      .attr("stroke-width", 0.6)
-      .attr("fill", (f) => fillFor[catOf(f, tri, rainyOn)])
-      .on("mousemove", showTooltip)
-      .on("mouseleave", hideTooltip);
+    admLayer.eachLayer((layer) => {
+      const cat = catOf(layer.feature, tri, rainyOn);
+      const el = layer._path;
+      if (!el) return;
+      el.setAttribute("fill", fillFor[cat]);
+      el.setAttribute("fill-opacity", "1");
+      el.setAttribute("stroke", STYLE[cat][1]);
+    });
   }
 
-  triSlider.addEventListener("input", () => { updateTriLabel(); render(); });
-  d3.select("#seasonality").on("change", render);
-  render();
-  buildLegend();
+  // ── Pixel (raster) layer ─────────────────────────────────────────────────────
+  const rbounds = rmeta ? rmeta.bounds : [[worldBounds.getSouth(), worldBounds.getWest()],
+                                          [worldBounds.getNorth(), worldBounds.getEast()]];
+  const rasterLayer = new RasterLayer(rbounds);
+  const variant = () => (seasonalityOn() ? "all" : "masked");
+  function loadPixelGrid() {
+    if (!rmeta) return;
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+      const cx = c.getContext("2d"); cx.drawImage(img, 0, 0);
+      const d = cx.getImageData(0, 0, img.width, img.height).data;
+      const grid = new Uint8Array(img.width * img.height);
+      for (let i = 0; i < grid.length; i++) grid[i] = d[i * 4];
+      rasterLayer.setGrid(grid, img.width, img.height);
+    };
+    img.src = `raster/data/${currentTri()}_${variant()}.png`;
+  }
+
+  // ── Mode toggle (Country / Pixel) ─────────────────────────────────────────────
+  let mode = "country";
+  function applyMode() {
+    if (mode === "country") {
+      map.removeLayer(rasterLayer); map.removeLayer(outlineLayer);
+      admLayer.addTo(map);
+      renderAdm();
+    } else {
+      map.removeLayer(admLayer);
+      outlineLayer.addTo(map); rasterLayer.addTo(map);
+      loadPixelGrid();
+    }
+    buildLegend(mode);
+  }
+  function refresh() {
+    updateTriLabel();
+    if (mode === "country") renderAdm(); else loadPixelGrid();
+  }
+
+  const viewBtns = document.querySelectorAll("#view-toggle .seg-btn");
+  viewBtns.forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.view === mode) return;
+    mode = b.dataset.view;
+    viewBtns.forEach((x) => x.classList.toggle("active", x.dataset.view === mode));
+    applyMode();
+  }));
+  triSlider.addEventListener("input", refresh);
+  seasonality.addEventListener("change", refresh);
+
+  updateTriLabel();
+  applyMode();
 });
 
-// Tabs (Map / Pixel level / Methodology) with #hash deep-linking.
+// Tabs (Map / Methodology) with #hash deep-linking.
 (function setupTabs() {
   const buttons = document.querySelectorAll(".tab");
   function show(name) {
@@ -186,43 +334,52 @@ Promise.all([
     document.querySelectorAll(".tab-panel").forEach((p) => {
       p.hidden = p.id !== "tab-" + name;
     });
-    // Lazy-load an embedded iframe the first time its tab is opened (so it sizes correctly).
-    const panel = document.getElementById("tab-" + name);
-    const frame = panel && panel.querySelector("iframe[data-src]");
-    if (frame && !frame.src) frame.src = frame.dataset.src;
   }
   buttons.forEach((b) => b.addEventListener("click", () => {
     show(b.dataset.tab);
     history.replaceState(null, "", "#" + b.dataset.tab);
   }));
   const initial = location.hash.replace("#", "");
-  if (["map", "pixel", "methods"].includes(initial)) show(initial);
+  if (["map", "methods"].includes(initial)) show(initial);
 })();
 
 // CSS hatch fill for legend swatches — crosshatch for "cross", single stripe otherwise.
 function hatchBg(hatch) {
   const color = hatch === "white" ? "rgba(255,255,255,0.7)" : hatch === "grey" ? "#CCC" : "#BBB";
-  // 135deg → "/" stripes, matching the map's SVG hatch direction.
   const stripe = (deg) => `repeating-linear-gradient(${deg}deg, ${color} 0 1.5px, transparent 1.5px 5px)`;
   return hatch === "cross" ? `${stripe(45)}, ${stripe(135)}` : stripe(135);
 }
 
-function buildLegend() {
+function buildLegend(mode) {
+  // Pixel grid is land-only with data everywhere → drop the country-only "no data"/"not monitored".
+  const other = mode === "pixel"
+    ? ["mid_none", "low_skill", "off_season"]
+    : ["mid_none", "low_skill", "off_season", "unmonitored"];
   const groups = [
     ["Forecast (high skill)", ["drought_vsev_high", "drought_sev_high", "high_none", "flood_sev_high", "flood_vsev_high"]],
-    ["Other", ["mid_none", "low_skill", "off_season", "no_data"]],
+    ["Other", other],
   ];
-  const root = d3.select("#legend");
+  const root = document.getElementById("legend");
+  root.innerHTML = "";
   for (const [title, cats] of groups) {
-    const g = root.append("div").attr("class", "legend-group");
-    g.append("span").style("font-weight", "600").text(title + ":");
+    const g = document.createElement("div");
+    g.className = "legend-group";
+    const t = document.createElement("span");
+    t.style.fontWeight = "600"; t.textContent = title + ":";
+    g.appendChild(t);
     for (const cat of cats) {
       const [fill, edge, hatch] = STYLE[cat];
-      const item = g.append("span").attr("class", "legend-item");
-      const sw = item.append("span").attr("class", "swatch")
-        .style("background", fill).style("border-color", edge);
-      if (hatch) sw.style("background-image", hatchBg(hatch));
-      item.append("span").text(CAT_LABEL[catBase(cat)] || cat);
+      const item = document.createElement("span");
+      item.className = "legend-item";
+      const sw = document.createElement("span");
+      sw.className = "swatch";
+      sw.style.background = fill; sw.style.borderColor = edge;
+      if (hatch) sw.style.backgroundImage = hatchBg(hatch);
+      const lbl = document.createElement("span");
+      lbl.textContent = CAT_LABEL[catBase(cat)] || cat;
+      item.append(sw, lbl);
+      g.appendChild(item);
     }
+    root.appendChild(g);
   }
 }
