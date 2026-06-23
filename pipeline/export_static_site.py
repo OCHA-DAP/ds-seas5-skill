@@ -81,6 +81,79 @@ def compute_rainy_set(monthly_clim: pd.DataFrame) -> set[tuple[str, str]]:
     return rainy
 
 
+# Leadtime rows for the skill heatmap = months from issue to the trimester's first month.
+# SEAS5's 7-month horizon populates leads 0–6 (the trimester's tail can run past month 6);
+# leads 7–9 are empty and leads 10–11 are the season already in the past — excluded.
+SKILL_LEADS = [0, 1, 2, 3, 4, 5, 6]
+
+
+def build_skill_matrix(
+    df: pd.DataFrame,
+    monthly_clim: pd.DataFrame,
+    rainy_set: set[tuple[str, str]],
+    pcode_to_iso3: dict[str, str],
+) -> dict:
+    """Per-country correlation matrix (leadtime × trimester) + trimester climatology.
+
+    Consumed by the static site's "Skill" tab: a climatology bar chart over the 12
+    trimesters with an aligned Pearson-r heatmap (x = valid trimester, y = leadtime).
+    """
+    tri_names = list(TRIMESTERS)  # calendar order
+    # (pcode, issued_month, trimester) -> pearson_r, for fast lookup.
+    r_lookup = (
+        df.set_index(["pcode", "issued_month", "trimester"])["pearson_r"].to_dict()
+    )
+    # Trimester mean rainfall (mm/day) per pcode = mean of the 3 monthly climatology means.
+    clim_by_pcode = monthly_clim.set_index(["pcode", "month"])["mean_mm_day"]
+
+    countries: dict[str, dict] = {}
+    for pcode, iso3 in pcode_to_iso3.items():
+        # r matrix: rows = leadtime (SKILL_LEADS), cols = trimester (calendar order).
+        matrix: list[list[float | None]] = []
+        any_r = False
+        for lead in SKILL_LEADS:
+            row: list[float | None] = []
+            for tri in tri_names:
+                start = TRIMESTERS[tri][0]
+                im = ((start - lead - 1) % 12) + 1
+                r = r_lookup.get((pcode, im, tri))
+                if r is not None and pd.notna(r):
+                    row.append(round(float(r), 3))
+                    any_r = True
+                else:
+                    row.append(None)
+            matrix.append(row)
+        if not any_r:
+            continue  # countries with no skill anywhere (e.g. islands missing ERA5) — skip
+
+        clim: list[float | None] = []
+        for tri in tri_names:
+            vals = [clim_by_pcode.get((pcode, m)) for m in TRIMESTERS[tri]]
+            vals = [v for v in vals if v is not None and pd.notna(v)]
+            clim.append(round(float(sum(vals) / len(vals)), 3) if vals else None)
+
+        clim_monthly: list[float | None] = []
+        for m in range(1, 13):
+            v = clim_by_pcode.get((pcode, m))
+            clim_monthly.append(round(float(v), 3) if v is not None and pd.notna(v) else None)
+
+        name = df.loc[df["pcode"] == pcode, "country_name"].iloc[0]
+        countries[iso3] = {
+            "name": str(name),
+            "clim": clim,
+            "clim_monthly": clim_monthly,
+            "rainy": [(pcode, tri) in rainy_set for tri in tri_names],
+            "r": matrix,
+        }
+
+    return {
+        "leads": SKILL_LEADS,
+        "thresholds": {"r_mod": THRESHOLDS["r_mod"], "r_high": THRESHOLDS["r_high"]},
+        "trimesters": [{"key": t, "label": _tri_label(TRIMESTERS[t])} for t in tri_names],
+        "countries": dict(sorted(countries.items(), key=lambda kv: kv[1]["name"])),
+    }
+
+
 def main() -> None:
     DOCS_DATA.mkdir(parents=True, exist_ok=True)
 
@@ -162,6 +235,15 @@ def main() -> None:
     fc_path = DOCS_DATA / "forecast.json"
     fc_path.write_text(json.dumps(forecast, separators=(",", ":")))
     print(f"Wrote {fc_path}  ({fc_path.stat().st_size/1024:.1f} KB, {len(data)} countries)")
+
+    # Per-country skill matrix (all issued months × trimesters) + trimester climatology.
+    skill_matrix = build_skill_matrix(df, monthly_clim, rainy_set, pcode_to_iso3)
+    sm_path = DOCS_DATA / "skill_matrix.json"
+    sm_path.write_text(json.dumps(skill_matrix, separators=(",", ":")))
+    print(
+        f"Wrote {sm_path}  ({sm_path.stat().st_size/1024:.1f} KB, "
+        f"{len(skill_matrix['countries'])} countries)"
+    )
 
     # Simplified country geometry, clipped to a sane lon/lat window. The clip removes
     # antimeridian overflow (e.g. Kiribati stored with longitudes > 180°, which otherwise

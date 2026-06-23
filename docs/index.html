@@ -15,6 +15,7 @@
 
   <nav id="tabs">
     <button class="tab active" data-tab="map">Map</button>
+    <button class="tab" data-tab="skill">Skill</button>
     <button class="tab" data-tab="methods">Methodology</button>
   </nav>
 
@@ -45,6 +46,27 @@
       = low skill. The <strong>Country</strong>/<strong>Pixel</strong> toggle switches between
       country averages and the native SEAS5 0.4° grid. By default, alerts are shown only for the
       rainy season.
+    </p>
+  </section>
+
+  <section id="tab-skill" class="tab-panel" hidden>
+    <div id="skill-controls">
+      <label for="skill-country">Country:
+        <select id="skill-country"></select>
+      </label>
+    </div>
+
+    <div id="skill-chart"></div>
+
+    <p class="note">
+      <strong>Top two charts:</strong> ERA5 mean rainfall by month, then by trimester (blue = rainy
+      season, ≥&nbsp;25% of the annual total). <strong>Heatmap:</strong> SEAS5 hindcast skill — the
+      temporal Pearson correlation (r) against ERA5 over 1981–present — for every valid trimester (x)
+      at each <strong>leadtime</strong> (y, months from the issue month to the trimester's first
+      month). Each cell is labelled with its <strong>issue month</strong>. Colours are categorical at
+      the skill cutoffs: high (r&nbsp;≥&nbsp;0.5), moderate (0.3–0.5), low (0–0.3), negative. Skill
+      generally decays with leadtime and is highest in each area's rainy season. Detrended forecasts,
+      matching the map's defaults.
     </p>
   </section>
 
@@ -155,5 +177,6 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
+  <script src="skill.js"></script>
 </body>
 </html>

@@ -71,6 +71,22 @@ h1 { font-size: 1.35rem; margin: 0 0 2px; }
 .leaflet-tooltip .name { font-weight: 600; margin-bottom: 2px; }
 .leaflet-tooltip .cat { font-weight: 600; }
 
+/* Skill tab */
+#skill-controls { padding: 14px 0 4px; }
+#skill-controls label { font-size: 0.9rem; }
+#skill-country {
+  font: inherit; font-size: 0.9rem; padding: 5px 8px; margin-left: 6px;
+  border: 1px solid #bbb; border-radius: 5px; background: #fff; cursor: pointer; min-width: 200px;
+}
+#skill-chart { width: 100%; max-width: 900px; margin: 8px 0 4px; }
+.skill-svg { display: block; width: 100%; height: auto; font-family: inherit; }
+/* leave fill to each element (inline attr / per-class) so cell-value text colour sticks */
+.skill-trilbl { font-size: 12px; }
+.skill-tick { font-size: 11px; fill: #555; }
+.skill-cellv { font-size: 11px; font-weight: 600; }
+.skill-cellmo { font-size: 8.5px; }
+.skill-axttl { font-size: 11px; fill: #555; }
+
 #legend { display: flex; flex-wrap: wrap; gap: 14px 20px; padding: 14px 0; font-size: 0.8rem; }
 .legend-group { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
 .legend-item { display: inline-flex; align-items: center; gap: 5px; }

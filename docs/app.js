@@ -340,7 +340,7 @@ Promise.all([
     history.replaceState(null, "", "#" + b.dataset.tab);
   }));
   const initial = location.hash.replace("#", "");
-  if (["map", "methods"].includes(initial)) show(initial);
+  if (["map", "skill", "methods"].includes(initial)) show(initial);
 })();
 
 // CSS hatch fill for legend swatches — crosshatch for "cross", single stripe otherwise.
