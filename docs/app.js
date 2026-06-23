@@ -180,6 +180,10 @@ const RasterLayer = L.Layer.extend({
 const fmtR = (v) => v == null ? "—" : v.toFixed(2);
 const fmtRp = (v) => v == null ? "—" : v.toFixed(1);
 
+// Re-fits the map; assigned once the map exists. Called when the Map tab is shown,
+// because Leaflet can't measure its container while that tab is hidden.
+let onMapShown = null;
+
 Promise.all([
   fetch("data/forecast.json").then((r) => r.json()),
   fetch("data/countries.geojson").then((r) => r.json()),
@@ -230,12 +234,18 @@ Promise.all([
   const aspect = (viewBounds.getEast() - viewBounds.getWest()) /
                  (viewBounds.getNorth() - viewBounds.getSouth());
   document.getElementById("map").style.aspectRatio = String(aspect);
-  map.invalidateSize();
-  // Fit at an exact (unsnapped) zoom so the view fills the box, then restore the 0.25 scroll snap.
-  map.options.zoomSnap = 0;
-  map.fitBounds(viewBounds, { padding: [0, 0] });
-  map.options.zoomSnap = 1;
+  function fitMap() {
+    map.invalidateSize();
+    // Fit at an exact (unsnapped) zoom so the view fills the box, then restore the scroll snap.
+    map.options.zoomSnap = 0;
+    map.fitBounds(viewBounds, { padding: [0, 0] });
+    map.options.zoomSnap = 1;
+  }
+  fitMap();
   map.setMaxBounds(viewBounds.pad(0.15));
+  // If the page loaded on another tab, the initial fit ran against a 0-size container;
+  // re-fit each time the Map tab becomes visible.
+  onMapShown = fitMap;
 
   // ── Country (adm0) choropleth layer ──────────────────────────────────────────
   const catOf = (f, tri, rainyOn) => {
@@ -334,6 +344,8 @@ Promise.all([
     document.querySelectorAll(".tab-panel").forEach((p) => {
       p.hidden = p.id !== "tab-" + name;
     });
+    // Map needs a re-fit once its container is actually visible (rAF = after layout).
+    if (name === "map" && typeof onMapShown === "function") requestAnimationFrame(onMapShown);
   }
   buttons.forEach((b) => b.addEventListener("click", () => {
     show(b.dataset.tab);
