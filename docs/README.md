@@ -1,17 +1,20 @@
 # SEAS5 precipitation alerts — static site
 
 A self-contained static page (no backend) showing the **most recent SEAS5 seasonal precipitation
-forecast** as a world map, with a valid-trimester selector and a rainy-season toggle. Deployable
-to GitHub Pages.
+forecast** as a zoomable world map, with a **Country/Pixel** resolution toggle, a valid-trimester
+selector, and a rainy-season toggle. Deployable to GitHub Pages.
 
 ## Files
-- `index.html`, `app.js`, `style.css` — the page (loads D3 from a CDN; queries nothing else).
+- `index.html`, `app.js`, `style.css` — the page (loads Leaflet from a CDN; queries nothing else).
 - `data/forecast.json` — latest forecast per country per valid trimester (`pct` percentile,
   `r` correlation, `rp` directional return period, `rainy` flag) plus the threshold defaults.
-- `data/countries.geojson` — simplified country boundaries.
+- `data/countries.geojson` — simplified country boundaries (choropleth + basemap outlines).
+- `raster/data/` — the pixel-level layer: category-code PNGs per trimester (masked / all) plus
+  `meta.json`, rendered by `pipeline/export_raster_site.py`.
 
-The page reads only the two files in `data/`. The categorisation and colours are a faithful port
-of the marimo app's map logic (`analysis/prob_alerts.py`).
+The Country layer reads the two files in `data/`; the Pixel layer reads `raster/data/`. The
+categorisation and colours are a faithful port of the marimo app's map logic
+(`analysis/prob_alerts.py`).
 
 ## Rebuild the data
 The data is generated from the processed skill stats (blob) + ERA5 climatology (DB). Re-run when a
