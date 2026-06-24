@@ -180,9 +180,9 @@ const RasterLayer = L.Layer.extend({
 const fmtR = (v) => v == null ? "—" : v.toFixed(2);
 const fmtRp = (v) => v == null ? "—" : v.toFixed(1);
 
-// Re-fits the map; assigned once the map exists. Called when the Map tab is shown,
-// because Leaflet can't measure its container while that tab is hidden.
-let onMapShown = null;
+// Registry of "this tab became visible" callbacks, keyed by tab name. Leaflet can't
+// measure a map while its tab is hidden, so each map registers a re-fit here.
+window.tabShown = window.tabShown || {};
 
 Promise.all([
   fetch("data/forecast.json").then((r) => r.json()),
@@ -245,7 +245,7 @@ Promise.all([
   map.setMaxBounds(viewBounds.pad(0.15));
   // If the page loaded on another tab, the initial fit ran against a 0-size container;
   // re-fit each time the Map tab becomes visible.
-  onMapShown = fitMap;
+  window.tabShown.map = fitMap;
 
   // ── Country (adm0) choropleth layer ──────────────────────────────────────────
   const catOf = (f, tri, rainyOn) => {
@@ -344,15 +344,16 @@ Promise.all([
     document.querySelectorAll(".tab-panel").forEach((p) => {
       p.hidden = p.id !== "tab-" + name;
     });
-    // Map needs a re-fit once its container is actually visible (rAF = after layout).
-    if (name === "map" && typeof onMapShown === "function") requestAnimationFrame(onMapShown);
+    // Maps need a re-fit once their container is actually visible (rAF = after layout).
+    const cb = window.tabShown[name];
+    if (typeof cb === "function") requestAnimationFrame(cb);
   }
   buttons.forEach((b) => b.addEventListener("click", () => {
     show(b.dataset.tab);
     history.replaceState(null, "", "#" + b.dataset.tab);
   }));
   const initial = location.hash.replace("#", "");
-  if (["map", "skill", "methods"].includes(initial)) show(initial);
+  if (["map", "skillmap", "skill", "methods"].includes(initial)) show(initial);
 })();
 
 // CSS hatch fill for legend swatches — crosshatch for "cross", single stripe otherwise.

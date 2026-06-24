@@ -15,7 +15,8 @@
 
   <nav id="tabs">
     <button class="tab active" data-tab="map">Map</button>
-    <button class="tab" data-tab="skill">Skill</button>
+    <button class="tab" data-tab="skillmap">Skill map</button>
+    <button class="tab" data-tab="skill">Skill by country</button>
     <button class="tab" data-tab="methods">Methodology</button>
   </nav>
 
@@ -46,6 +47,42 @@
       = low skill. The <strong>Country</strong>/<strong>Pixel</strong> toggle switches between
       country averages and the native SEAS5 0.4° grid. By default, alerts are shown only for the
       rainy season.
+    </p>
+  </section>
+
+  <section id="tab-skillmap" class="tab-panel" hidden>
+    <div id="controls">
+      <div class="seg" id="skillmap-toggle" role="group" aria-label="Resolution">
+        <button class="seg-btn active" data-view="country">Country</button>
+        <button class="seg-btn" data-view="pixel">Pixel</button>
+      </div>
+      <div class="slider-control">
+        <label for="skillmap-tri">Valid trimester: <strong id="skillmap-tri-label">—</strong></label>
+        <input type="range" id="skillmap-tri" min="0" max="11" step="1" value="0" />
+      </div>
+      <div class="slider-control">
+        <label for="skillmap-lead">Issued month: <strong id="skillmap-lead-label">—</strong></label>
+        <input type="range" id="skillmap-lead" min="0" max="6" step="1" value="5" />
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="skillmap-seasonality" />
+        Show skill outside rainy season
+      </label>
+    </div>
+
+    <div id="skill-map"></div>
+
+    <div id="skill-map-legend" class="legend-group"></div>
+
+    <p class="note">
+      SEAS5 hindcast skill — the temporal Pearson correlation (r) against ERA5 over 1981–present —
+      for the selected valid trimester and <strong>leadtime</strong> (months from the issue month to
+      the trimester's first month). Colours are categorical at the skill cutoffs: high (r&nbsp;≥&nbsp;0.5),
+      moderate (0.3–0.5), low (0–0.3), negative. The <strong>Country</strong>/<strong>Pixel</strong>
+      toggle switches between country averages and the native SEAS5 0.4° grid. By default skill is
+      shown only where the trimester is in the rainy season (≥&nbsp;25% of annual rainfall, the rest
+      greyed); the checkbox reveals skill everywhere. Detrended, matching the forecast map's defaults.
+      This shows skill only — not the current forecast.
     </p>
   </section>
 
@@ -132,6 +169,14 @@
         ECMWF's familiar <a href="https://confluence.ecmwf.int/display/FUG/Section+6.2.2+Anomaly+Correlation+Coefficient" target="_blank" rel="noopener">ACC ≥ 0.6</a>
         "useful" mark refers to spatial medium-range skill, a different metric.
       </p>
+      <p>
+        Skill also depends on <strong>leadtime</strong> — how far ahead the forecast is issued. For a
+        trimester, leadtime is the number of months from the issue month to the trimester's first
+        month (a June issue → Jul–Aug–Sep is leadtime&nbsp;1), and skill generally decays as leadtime
+        grows. The <strong>Skill map</strong> and <strong>Skill by country</strong> tabs show r for
+        every trimester and leadtime, coloured at these same cutoffs (with negative r shown as its own
+        category).
+      </p>
 
       <h3>4. Rainy-season (in-season) selection</h3>
       <p>
@@ -177,6 +222,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
+  <script src="skillmap.js"></script>
   <script src="skill.js"></script>
 </body>
 </html>

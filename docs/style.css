@@ -55,10 +55,12 @@ h1 { font-size: 1.35rem; margin: 0 0 2px; }
 .slider-control input[type="range"] { width: 240px; accent-color: #2a6db0; cursor: pointer; }
 
 /* match the world's 2:1 shape so the map fills to extents with no letterboxing */
-#map { width: 100%; aspect-ratio: 2 / 1; min-height: 320px; background: #fff; border: 1px solid var(--line); }
+#map, #skill-map { width: 100%; aspect-ratio: 2 / 1; min-height: 320px; background: #fff; border: 1px solid var(--line); }
 .leaflet-container { background: #fff; }
 /* crisp pixels (no smoothing) for the forecast overlay canvas */
 .hatch-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
+/* crisp pixels for the baked skill overlay image */
+.skill-overlay { image-rendering: pixelated; image-rendering: crisp-edges; }
 .leaflet-interactive { cursor: pointer; }
 
 /* Leaflet tooltip styled like the old custom hover box */
@@ -87,7 +89,7 @@ h1 { font-size: 1.35rem; margin: 0 0 2px; }
 .skill-cellmo { font-size: 8.5px; }
 .skill-axttl { font-size: 11px; fill: #555; }
 
-#legend { display: flex; flex-wrap: wrap; gap: 14px 20px; padding: 14px 0; font-size: 0.8rem; }
+#legend, #skill-map-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 14px 0; font-size: 0.8rem; }
 .legend-group { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
 .legend-item { display: inline-flex; align-items: center; gap: 5px; }
 .swatch { width: 16px; height: 12px; border: 1px solid #999; display: inline-block; }
