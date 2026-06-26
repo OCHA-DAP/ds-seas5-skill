@@ -271,21 +271,26 @@ Promise.all([
   // Ordered membership "dimensions" for a country — each shown as one coloured outline.
   // Pooled fund is one slot (award red, else CBPF orange); the two CERF sets are the others.
   // A country in several sets gets all its colours as interleaved dashes.
+  // Toggles may be absent (the /cbpf page has no CERF sets); missing toggle ⇒ that set off.
   function dimsFor(iso3) {
     const d = [];
-    if (awardToggle.checked && CBPF_AWARD.has(iso3)) d.push({ key: "pool", color: AWARD_EDGE, w: AWARD_W });
-    else if (cbpfToggle.checked && CBPF_ALL.has(iso3)) d.push({ key: "pool", color: CBPF_EDGE, w: CBPF_W });
-    if (fwToggle.checked && CERF_FW.has(iso3)) d.push({ key: "fw", color: FW_EDGE, w: FW_W });
-    if (nfToggle.checked && CERF_NF.has(iso3)) d.push({ key: "nf", color: NF_EDGE, w: NF_W });
+    if (awardToggle?.checked && CBPF_AWARD.has(iso3)) d.push({ key: "pool", color: AWARD_EDGE, w: AWARD_W });
+    else if (cbpfToggle?.checked && CBPF_ALL.has(iso3)) d.push({ key: "pool", color: CBPF_EDGE, w: CBPF_W });
+    if (fwToggle?.checked && CERF_FW.has(iso3)) d.push({ key: "fw", color: FW_EDGE, w: FW_W });
+    if (nfToggle?.checked && CERF_NF.has(iso3)) d.push({ key: "nf", color: NF_EDGE, w: NF_W });
     return d;
   }
   const fillOpacityFor = (iso3) => (dimsFor(iso3).length ? 1 : PALE);
+  // Whether a country belongs to any set this page offers (a toggle for it exists).
+  const onPage = (iso3) =>
+    CBPF_AWARD.has(iso3) || CBPF_ALL.has(iso3) ||
+    (fwToggle && CERF_FW.has(iso3)) || (nfToggle && CERF_NF.has(iso3));
   function membershipTag(iso3) {
     const t = [];
     if (CBPF_AWARD.has(iso3)) t.push("US award");
     else if (CBPF_ALL.has(iso3)) t.push("CBPF/RhPF");
-    if (CERF_FW.has(iso3)) t.push("CERF framework");
-    if (CERF_NF.has(iso3)) t.push("CERF non-framework");
+    if (fwToggle && CERF_FW.has(iso3)) t.push("CERF framework");
+    if (nfToggle && CERF_NF.has(iso3)) t.push("CERF non-framework");
     return t.length ? ` · ${t.join(", ")}` : "";
   }
   const tooltipHtml = (f) => {
@@ -328,7 +333,7 @@ Promise.all([
   const dots = {};
   for (const iso in DOT_POINTS) {
     const f = featByIso[iso];
-    if (!f) continue;
+    if (!f || !onPage(iso)) continue;  // only dot countries relevant to this page
     const pt = DOT_POINTS[iso];
     const fill = L.circleMarker(pt, {
       radius: DOT_R, stroke: false, fillColor: "#fff", fillOpacity: 1,
@@ -493,7 +498,7 @@ Promise.all([
 
   triSlider.addEventListener("input", () => { updateTriLabel(); renderAdm(); });
   seasonality.addEventListener("change", renderAdm);
-  [awardToggle, cbpfToggle, fwToggle, nfToggle].forEach((t) =>
+  [awardToggle, cbpfToggle, fwToggle, nfToggle].filter(Boolean).forEach((t) =>
     t.addEventListener("change", applyOutlines));
   yearSel.addEventListener("change", () => {
     const m = +monthSel.value;

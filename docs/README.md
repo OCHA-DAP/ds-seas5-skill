@@ -13,10 +13,15 @@ selector, and a rainy-season toggle. Deployable to GitHub Pages.
 - **Skill by country** — per-country leadtime×trimester skill heatmap + climatology (`skill.js`).
 - **Methodology** — static prose.
 
-There is also an **unlisted** standalone page `cbpf.html` (`cbpf.js`) — the country forecast map
-(all countries shown) that outlines the 18 US "Humanitarian Reset" award countries (Dec 2025) in
-red and the 29 OCHA pooled-fund countries (country-based + regional RHPF envelopes) in orange, with
-non-pooled-fund countries paler and per-set show/hide toggles (shading follows the outline). Not linked from the nav; reached directly at `/cbpf.html`. Reuses
+There are also **unlisted** standalone pages sharing `cbpf.js` — the country forecast map (all
+countries shown) that outlines membership sets, with non-member countries paler, per-set show/hide
+toggles, and dashed/interleaved outlines where a country is in several sets:
+- `cbpf.html` — US "Humanitarian Reset" award (red) + OCHA pooled-fund/RHPF (orange).
+- `cerf.html` — the same plus the two CERF anticipatory-action El Niño sets, framework (blue) and
+  non-framework (green), on by default.
+
+`cbpf.js` adapts to whichever `show-*` toggles exist on the page; the set lists are the `CBPF_AWARD`,
+`CBPF_ALL`, `CERF_FW`, `CERF_NF` constants at the top of the file. Not linked from the nav; reached directly at `/cbpf.html`. Reuses
 `data/forecasts/` (no extra export); the country lists are the `CBPF_AWARD` and `CBPF_ALL` sets at
 the top of `cbpf.js`.
 
