@@ -68,6 +68,14 @@ h1 { font-size: 1.35rem; margin: 0 0 2px; }
 .map-select:disabled { background: #f0f0f0; color: #999; cursor: not-allowed; }
 .ctl { font-size: 0.9rem; display: inline-flex; align-items: center; }
 .lock-note { font-size: 0.78rem; color: #888; font-style: italic; margin: 8px 0 0; }
+
+/* Map title overlay (CBPF standalone page) */
+.map-title {
+  background: rgba(255,255,255,0.92); padding: 7px 12px; border-radius: 5px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2); max-width: 60vw;
+}
+.map-title .mt-title { font-weight: 700; font-size: 1rem; color: var(--ink); }
+.map-title .mt-sub { font-size: 0.82rem; color: #555; margin-top: 2px; }
 .leaflet-interactive { cursor: pointer; }
 
 /* Leaflet tooltip styled like the old custom hover box */

@@ -6,10 +6,10 @@
 // Not linked from the main nav — reached directly at /cbpf.html.
 
 // US "Humanitarian Reset" award countries (Dec 2025) = the 21-country two-tranche set
-// minus CAR, Lebanon, Venezuela, and Ethiopia.
+// minus Ethiopia.
 const CBPF_AWARD = new Set([
-  "BGD", "MMR", "TCD", "COL", "COD", "SLV", "GTM", "HTI", "HND",
-  "KEN", "MOZ", "NGA", "SSD", "SDN", "SYR", "UGA", "UKR",
+  "BGD", "MMR", "TCD", "COL", "COD", "SLV", "GTM", "HTI", "HND", "KEN",
+  "MOZ", "NGA", "SSD", "SDN", "SYR", "UGA", "UKR", "VEN", "LBN", "CAF",
 ]);
 // All 29 countries with an OCHA pooled-fund envelope — country-based pooled funds plus
 // Regional Humanitarian Pooled Fund (RHPF) envelopes (AP / LAC / WCA / ESAHF).
@@ -29,7 +29,7 @@ const DOT_R = 4;
 const AWARD_EDGE = "#e31a1c", AWARD_W = 2.2;   // US-award outline (red, bold)
 const CBPF_EDGE = "#ff7f00", CBPF_W = 1.7;     // any-CBPF outline (orange)
 const OTHER_EDGE = "#cfcfcf", OTHER_W = 0.5;   // everyone else (thin grey)
-const BASE_EDGE = "#b8b8b8", BASE_W = 1.2;     // hairline on every country to bridge seams
+const BASE_EDGE = "#b8b8b8", BASE_W = 1.6;     // hairline on every country to bridge seams
 const PALE = 0.5;                              // fill-opacity when a country isn't highlighted
 const groupOf = (iso3) =>
   CBPF_AWARD.has(iso3) ? "award" : (CBPF_ALL.has(iso3) ? "cbpf" : "other");
@@ -226,6 +226,23 @@ Promise.all([
   fitMap();
   map.setMaxBounds(viewBounds.pad(0.15));
 
+  // Title overlay (top-left of the map).
+  const titleCtl = L.control({ position: "topleft" });
+  titleCtl.onAdd = () => {
+    const div = L.DomUtil.create("div", "map-title");
+    div.innerHTML =
+      '<div class="mt-title">SEAS5 precipitation seasonal forecast</div>' +
+      '<div class="mt-sub" id="map-subtitle">—</div>';
+    return div;
+  };
+  titleCtl.addTo(map);
+  function updateMapTitle() {
+    const el = document.getElementById("map-subtitle");
+    if (!el || !fc) return;
+    const t = fc.trimesters[+triSlider.value];
+    el.textContent = `Issued ${fc.issued_label} · Valid ${t.key} (${t.label})`;
+  }
+
   // ── adm0 layer: all forecasts shown; award + CBPF countries outlined ──────────────
   const catOf = (f, tri, rainyOn) => classify((fc.data[f.properties.iso3] || {})[tri], rainyOn);
   const tooltipHtml = (f) => {
@@ -289,6 +306,7 @@ Promise.all([
   }
 
   function renderAdm() {
+    updateMapTitle();
     const tri = currentTri(), rainyOn = seasonalityOn();
     admLayer.eachLayer((layer) => {
       const el = layer._path;
