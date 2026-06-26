@@ -15,8 +15,8 @@ selector, and a rainy-season toggle. Deployable to GitHub Pages.
 
 There is also an **unlisted** standalone page `cbpf.html` (`cbpf.js`) — the country forecast map
 (all countries shown) that outlines the 18 US "Humanitarian Reset" award countries (Dec 2025) in
-black and the 29 OCHA pooled-fund countries (country-based + regional RHPF envelopes) in purple,
-with non-award countries paler. Not linked from the nav; reached directly at `/cbpf.html`. Reuses
+red and the 29 OCHA pooled-fund countries (country-based + regional RHPF envelopes) in orange, with
+non-pooled-fund countries paler and per-set show/hide toggles (shading follows the outline). Not linked from the nav; reached directly at `/cbpf.html`. Reuses
 `data/forecasts/` (no extra export); the country lists are the `CBPF_AWARD` and `CBPF_ALL` sets at
 the top of `cbpf.js`.
 

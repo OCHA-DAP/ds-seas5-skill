@@ -5,10 +5,10 @@
 // the rest. Self-contained (no dependency on app.js) so it can't disturb the main site.
 // Not linked from the main nav — reached directly at /cbpf.html.
 
-// The 18 US "Humanitarian Reset" award countries (Dec 2025) = the 21-country two-tranche
-// set minus CAR, Lebanon, Venezuela.
+// US "Humanitarian Reset" award countries (Dec 2025) = the 21-country two-tranche set
+// minus CAR, Lebanon, Venezuela, and Ethiopia.
 const CBPF_AWARD = new Set([
-  "BGD", "MMR", "TCD", "COL", "COD", "SLV", "ETH", "GTM", "HTI", "HND",
+  "BGD", "MMR", "TCD", "COL", "COD", "SLV", "GTM", "HTI", "HND",
   "KEN", "MOZ", "NGA", "SSD", "SDN", "SYR", "UGA", "UKR",
 ]);
 // All 29 countries with an OCHA pooled-fund envelope — country-based pooled funds plus
@@ -18,10 +18,19 @@ const CBPF_ALL = new Set([
   "HTI", "KEN", "LBN", "MLI", "MMR", "MOZ", "NGA", "PAK", "PSE", "SLB",
   "SLV", "SDN", "SOM", "SSD", "SYR", "TCD", "UGA", "UKR", "VEN",
 ]);
-const AWARD_EDGE = "#111111", AWARD_W = 2.2;   // US-award outline (black, bold)
-const CBPF_EDGE = "#6a3d9a", CBPF_W = 1.7;     // any-CBPF outline (purple)
+// Tiny countries that are invisible at world scale — drawn as a fixed-size dot showing
+// their forecast value. [lat, lon] of a representative point.
+const DOT_POINTS = {
+  HTI: [19.0, -72.5], SLV: [13.8, -88.9], PSE: [31.95, 35.25],
+  FJI: [-17.8, 178.0], SLB: [-9.6, 160.2], LBN: [33.85, 35.88],
+};
+const DOT_R = 4;
+
+const AWARD_EDGE = "#e31a1c", AWARD_W = 2.2;   // US-award outline (red, bold)
+const CBPF_EDGE = "#ff7f00", CBPF_W = 1.7;     // any-CBPF outline (orange)
 const OTHER_EDGE = "#cfcfcf", OTHER_W = 0.5;   // everyone else (thin grey)
-const PALE = 0.5;                              // fill-opacity for non-award countries
+const BASE_EDGE = "#b8b8b8", BASE_W = 1.2;     // hairline on every country to bridge seams
+const PALE = 0.5;                              // fill-opacity when a country isn't highlighted
 const groupOf = (iso3) =>
   CBPF_AWARD.has(iso3) ? "award" : (CBPF_ALL.has(iso3) ? "cbpf" : "other");
 
@@ -149,7 +158,7 @@ function buildLegend() {
   og.appendChild(ot);
   for (const [edge, w, label] of [
     [AWARD_EDGE, 2.5, "US-award country"],
-    [CBPF_EDGE, 2, "Other CBPF country"],
+    [CBPF_EDGE, 2, "Other CBPF/RhPF country"],
   ]) {
     const item = document.createElement("span");
     item.className = "legend-item";
@@ -233,23 +242,51 @@ Promise.all([
     return `<div class="name">${f.properties.name}${tag}</div>` +
       `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>` + extra;
   };
-  // Fill opacity: pooled-fund countries (award or CBPF) full; everyone else paler.
-  const fillOpacityFor = (iso3) => (groupOf(iso3) === "other" ? PALE : 1);
-  // Outline depends on the two toggles. Award countries are also CBPFs, so when the award
-  // outline is hidden they fall back to the CBPF outline (if that's shown).
+  // A country is highlighted (full opacity) when an outline is currently shown for it.
+  // Award countries are also CBPFs, so either toggle highlights them.
+  const isHighlighted = (iso3) => {
+    const g = groupOf(iso3);
+    if (g === "award") return awardToggle.checked || cbpfToggle.checked;
+    if (g === "cbpf") return cbpfToggle.checked;
+    return false;
+  };
+  const fillOpacityFor = (iso3) => (isHighlighted(iso3) ? 1 : PALE);
+  // Outline depends on the two toggles. When the award outline is hidden, award countries
+  // fall back to the CBPF outline (if that's shown).
   const outlineFor = (iso3) => {
     const g = groupOf(iso3);
     if (g === "award" && awardToggle.checked) return [AWARD_EDGE, AWARD_W];
     if (g !== "other" && cbpfToggle.checked) return [CBPF_EDGE, CBPF_W];
     return [OTHER_EDGE, OTHER_W];
   };
+  // Base fills with a grey hairline that bridges seams, so no white gaps appear between
+  // the simplified country polygons when zoomed out.
   const admLayer = L.geoJSON(geo, {
     style: (f) => ({
-      weight: OTHER_W, color: OTHER_EDGE, opacity: 1,
+      weight: BASE_W, color: BASE_EDGE, opacity: 1,
       fillColor: "#ffffff", fillOpacity: fillOpacityFor(f.properties.iso3),
     }),
     onEachFeature: (f, layer) => layer.bindTooltip(() => tooltipHtml(f), { sticky: true }),
   }).addTo(map);
+  // Separate top layer for the red/orange inset outlines (no fill, clipped to each shape).
+  const borderLayer = L.geoJSON(geo, {
+    interactive: false,
+    style: { weight: 0, fill: false, opacity: 1 },
+  }).addTo(map);
+
+  // Dots for tiny pooled-fund countries so their forecast value is visible at world scale.
+  const featByIso = {};
+  geo.features.forEach((f) => { featByIso[f.properties.iso3] = f; });
+  const dots = {};
+  for (const iso in DOT_POINTS) {
+    const f = featByIso[iso];
+    if (!f) continue;
+    const m = L.circleMarker(DOT_POINTS[iso], {
+      radius: DOT_R, weight: 1.8, color: OTHER_EDGE, fillColor: "#fff", fillOpacity: 1,
+    }).addTo(map);
+    m.bindTooltip(() => tooltipHtml(f), { sticky: true });
+    dots[iso] = { marker: m, feature: f };
+  }
 
   function renderAdm() {
     const tri = currentTri(), rainyOn = seasonalityOn();
@@ -260,22 +297,75 @@ Promise.all([
       el.setAttribute("fill", fillFor[catOf(layer.feature, tri, rainyOn)]);
       el.setAttribute("fill-opacity", fillOpacityFor(iso3));
     });
+    for (const iso in dots) {
+      const el = dots[iso].marker._path;
+      if (!el) continue;
+      el.setAttribute("fill", fillFor[catOf(dots[iso].feature, tri, rainyOn)]);
+      el.setAttribute("fill-opacity", "1");  // dots stay fully visible
+    }
   }
+  // Inset outlines via self-clipping: clip each highlighted country to its own shape and
+  // double the stroke, so only the inner half shows. Neighbouring outlines then never
+  // overlap — an orange country ringed by red still shows its full orange border.
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const clipPaths = {};   // iso3 -> <path> inside its <clipPath>
+  function setInset(layer, iso3, stroke, w) {
+    const el = layer._path;
+    const svg = el && el.ownerSVGElement;
+    if (!svg) return;
+    let cp = clipPaths[iso3];
+    if (!cp) {
+      let defs = svg.querySelector("defs.cbpf-clips");
+      if (!defs) {
+        defs = document.createElementNS(SVGNS, "defs");
+        defs.setAttribute("class", "cbpf-clips");
+        svg.appendChild(defs);
+      }
+      const clip = document.createElementNS(SVGNS, "clipPath");
+      clip.setAttribute("id", "cbpf-clip-" + iso3);
+      cp = document.createElementNS(SVGNS, "path");
+      clip.appendChild(cp);
+      defs.appendChild(clip);
+      clipPaths[iso3] = cp;
+    }
+    cp.setAttribute("d", el.getAttribute("d") || "");
+    el.setAttribute("clip-path", `url(#cbpf-clip-${iso3})`);
+    el.setAttribute("stroke", stroke);
+    el.setAttribute("stroke-width", String(w * 2));  // inner (visible) half == w
+  }
+  // Re-sync clip geometry to the projected outline paths after the map moves/zooms.
+  function syncClips() {
+    borderLayer.eachLayer((layer) => {
+      const cp = clipPaths[layer.feature.properties.iso3];
+      if (cp && layer._path) cp.setAttribute("d", layer._path.getAttribute("d") || "");
+    });
+  }
+  map.on("zoomend moveend viewreset", () => requestAnimationFrame(syncClips));
+
   function applyOutlines() {
+    // Fill opacity (on the base layer) follows whether a country is highlighted.
     admLayer.eachLayer((layer) => {
       const el = layer._path;
+      if (el) el.setAttribute("fill-opacity", fillOpacityFor(layer.feature.properties.iso3));
+    });
+    // Colored inset outline on the separate top layer; none when not highlighted.
+    borderLayer.eachLayer((layer) => {
+      const el = layer._path;
       if (!el) return;
-      const [stroke, w] = outlineFor(layer.feature.properties.iso3);
+      const iso3 = layer.feature.properties.iso3;
+      const [stroke, w] = outlineFor(iso3);
+      if (w > OTHER_W) setInset(layer, iso3, stroke, w);
+      else { el.removeAttribute("clip-path"); el.setAttribute("stroke", "none"); }
+    });
+    // Dots on top of everything, bordered in their group colour.
+    for (const iso in dots) {
+      const el = dots[iso].marker._path;
+      if (!el) continue;
+      const [stroke, w] = outlineFor(iso);
       el.setAttribute("stroke", stroke);
-      el.setAttribute("stroke-width", w);
-    });
-    // Raise CBPF, then award, so their borders sit above neighbouring countries.
-    admLayer.eachLayer((l) => {
-      if (cbpfToggle.checked && groupOf(l.feature.properties.iso3) !== "other") l.bringToFront();
-    });
-    admLayer.eachLayer((l) => {
-      if (awardToggle.checked && groupOf(l.feature.properties.iso3) === "award") l.bringToFront();
-    });
+      el.setAttribute("stroke-width", String(Math.max(w, 1.6)));
+      dots[iso].marker.bringToFront();
+    }
   }
 
   // ── Issuance browsing (year / month) ──────────────────────────────────────────────
