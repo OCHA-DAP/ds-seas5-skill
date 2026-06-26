@@ -62,7 +62,7 @@
       </div>
       <div class="slider-control">
         <label for="skillmap-lead">Issued month: <strong id="skillmap-lead-label">—</strong></label>
-        <input type="range" id="skillmap-lead" min="0" max="6" step="1" value="5" />
+        <input type="range" id="skillmap-lead" min="0" max="4" step="1" value="3" />
       </div>
       <label class="toggle">
         <input type="checkbox" id="skillmap-seasonality" />
@@ -101,9 +101,10 @@
       temporal Pearson correlation (r) against ERA5 over 1981–present — for every valid trimester (x)
       at each <strong>leadtime</strong> (y, months from the issue month to the trimester's first
       month). Each cell is labelled with its <strong>issue month</strong>. Colours are categorical at
-      the skill cutoffs: high (r&nbsp;≥&nbsp;0.5), moderate (0.3–0.5), low (0–0.3), negative. Skill
-      generally decays with leadtime and is highest in each area's rainy season. Detrended forecasts,
-      matching the map's defaults.
+      the skill cutoffs: high (r&nbsp;≥&nbsp;0.5), moderate (0.3–0.5), low (0–0.3), negative. Leadtime
+      stops at 4 because SEAS5 only reaches 6 months ahead, so a longer lead would cover only part of
+      the 3-month trimester. Skill generally decays with leadtime and is highest in each area's rainy
+      season. Detrended forecasts, matching the map's defaults.
     </p>
   </section>
 
@@ -173,9 +174,10 @@
         Skill also depends on <strong>leadtime</strong> — how far ahead the forecast is issued. For a
         trimester, leadtime is the number of months from the issue month to the trimester's first
         month (a June issue → Jul–Aug–Sep is leadtime&nbsp;1), and skill generally decays as leadtime
-        grows. The <strong>Skill map</strong> and <strong>Skill by country</strong> tabs show r for
-        every trimester and leadtime, coloured at these same cutoffs (with negative r shown as its own
-        category).
+        grows. SEAS5 runs 6 months ahead, so leadtimes go up to 4 — beyond that a 3-month trimester
+        would extend past the forecast horizon. The <strong>Skill map</strong> and <strong>Skill by
+        country</strong> tabs show r for every trimester and leadtime, coloured at these same cutoffs
+        (with negative r shown as its own category).
       </p>
 
       <h3>4. Rainy-season (in-season) selection</h3>

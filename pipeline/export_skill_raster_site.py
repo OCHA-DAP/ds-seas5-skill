@@ -6,7 +6,9 @@ The browser just swaps a plain L.imageOverlay — no client-side canvas needed.
 
 Skill is leadtime-based, not tied to one issuance: for each trimester and leadtime
 (months from the issue month to the trimester's first month) we select the matching
-issued month from the cube. Leads 0–6 span SEAS5's 7-month horizon.
+issued month from the cube. Only complete trimesters are kept — with SEAS5's 7-month
+horizon (leads 0–6), a trimester starting at lead L spans leads L..L+2 and fits only
+when L ≤ 4, so leads are 0–4.
 
 Reads the local detrended skill cube written by compute_skill_raster.py (matches the
 adm0 map's default), falling back to the DEV blob.
@@ -34,7 +36,7 @@ GEO = Path(__file__).resolve().parent.parent / "analysis" / "_world_countries.gp
 CUBE = Path("/tmp/skill_stats_grid_detrended.nc")  # falls back to dev blob if missing
 
 THRESH = {"r_mod": 0.30, "r_high": 0.50}
-LEADS = [0, 1, 2, 3, 4, 5, 6]
+LEADS = [0, 1, 2, 3, 4]  # complete trimesters only (L+2 ≤ 6 horizon); see module docstring
 
 # Category code per pixel and its RGBA colour (matches the Skill-tab heatmap palette).
 #   0 transparent (no data / ocean)  1 negative  2 low  3 moderate  4 high

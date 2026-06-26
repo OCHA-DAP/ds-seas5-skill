@@ -82,9 +82,11 @@ def compute_rainy_set(monthly_clim: pd.DataFrame) -> set[tuple[str, str]]:
 
 
 # Leadtime rows for the skill heatmap = months from issue to the trimester's first month.
-# SEAS5's 7-month horizon populates leads 0–6 (the trimester's tail can run past month 6);
-# leads 7–9 are empty and leads 10–11 are the season already in the past — excluded.
-SKILL_LEADS = [0, 1, 2, 3, 4, 5, 6]
+# Only complete trimesters are kept: SEAS5's horizon is 7 months (leads 0–6), so a trimester
+# whose first month is at lead L spans leads L..L+2 and fits only when L ≤ 4. Leads 5–6 would
+# average just the 1–2 in-horizon months against the full 3-month ERA5 obs (mislabelled skill),
+# so they are excluded.
+SKILL_LEADS = [0, 1, 2, 3, 4]
 
 
 def build_skill_matrix(
