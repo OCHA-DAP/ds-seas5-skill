@@ -76,6 +76,14 @@ h1 { font-size: 1.35rem; margin: 0 0 2px; }
 }
 .map-title .mt-title { font-weight: 700; font-size: 1rem; color: var(--ink); }
 .map-title .mt-sub { font-size: 0.82rem; color: #555; margin-top: 2px; }
+
+/* Country-set toggles (CBPF page) — their own little section under the selectors */
+#country-sets {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
+  padding: 8px 0 10px; border-bottom: 1px solid var(--line); margin-bottom: 8px;
+}
+#country-sets .cs-title { font-weight: 600; font-size: 0.85rem; }
+#country-sets .swatch { width: 14px; height: 11px; }
 .leaflet-interactive { cursor: pointer; }
 
 /* Leaflet tooltip styled like the old custom hover box */

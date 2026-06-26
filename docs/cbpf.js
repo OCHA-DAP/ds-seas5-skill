@@ -18,21 +18,32 @@ const CBPF_ALL = new Set([
   "HTI", "KEN", "LBN", "MLI", "MMR", "MOZ", "NGA", "PAK", "PSE", "SLB",
   "SLV", "SDN", "SOM", "SSD", "SYR", "TCD", "UGA", "UKR", "VEN",
 ]);
+// CERF anticipatory-action El Niño country sets.
+const CERF_FW = new Set([  // CERF AA framework
+  "BFA", "TCD", "SLV", "ETH", "FJI", "GTM", "HND", "MRT", "NER", "PHL", "SOM", "VUT",
+]);
+const CERF_NF = new Set([  // CERF non-framework AA
+  "AGO", "ETH", "LSO", "MDG", "MWI", "MNG", "MOZ", "PER", "SOM", "TLS", "ZWE",
+]);
 // Tiny countries that are invisible at world scale — drawn as a fixed-size dot showing
 // their forecast value. [lat, lon] of a representative point.
 const DOT_POINTS = {
   HTI: [19.0, -72.5], SLV: [13.8, -88.9], PSE: [31.95, 35.25],
   FJI: [-17.8, 178.0], SLB: [-9.6, 160.2], LBN: [33.85, 35.88],
+  VUT: [-16.5, 168.3], TLS: [-8.8, 125.8], LSO: [-29.6, 28.2],
+  BGD: [23.7, 90.4], PHL: [12.0, 122.0], GTM: [15.5, -90.3], HND: [14.8, -86.5],
+  MWI: [-13.2, 34.3],
 };
 const DOT_R = 4;
 
 const AWARD_EDGE = "#e31a1c", AWARD_W = 2.2;   // US-award outline (red, bold)
 const CBPF_EDGE = "#ff7f00", CBPF_W = 1.7;     // any-CBPF outline (orange)
+const FW_EDGE = "#1f78b4", FW_W = 1.7;         // CERF AA framework (blue)
+const NF_EDGE = "#33a02c", NF_W = 1.7;         // CERF non-framework AA (green)
 const OTHER_EDGE = "#cfcfcf", OTHER_W = 0.5;   // everyone else (thin grey)
 const BASE_EDGE = "#b8b8b8", BASE_W = 1.6;     // hairline on every country to bridge seams
 const PALE = 0.5;                              // fill-opacity when a country isn't highlighted
-const groupOf = (iso3) =>
-  CBPF_AWARD.has(iso3) ? "award" : (CBPF_ALL.has(iso3) ? "cbpf" : "other");
+const DASH = 7;                                // dash length when a country is in several sets
 
 // ── Category styling (ported from the main map) ──────────────────────────────────
 const STYLE = {
@@ -85,6 +96,7 @@ function buildPatterns() {
   svg.style.position = "absolute";
   const defs = document.createElementNS(NS, "defs");
   svg.appendChild(defs);
+  const PITCH = 3.5;  // hatch tile size (smaller = tighter lines; reads better on small dots)
   const fillFor = {};
   for (const [cat, [fill, , hatch]] of Object.entries(STYLE)) {
     if (!hatch) { fillFor[cat] = fill; continue; }
@@ -94,12 +106,12 @@ function buildPatterns() {
     const p = document.createElementNS(NS, "pattern");
     p.setAttribute("id", id);
     p.setAttribute("patternUnits", "userSpaceOnUse");
-    p.setAttribute("width", "5"); p.setAttribute("height", "5");
+    p.setAttribute("width", PITCH); p.setAttribute("height", PITCH);
     p.setAttribute("patternTransform", "rotate(45)");
     const bg = document.createElementNS(NS, "rect");
-    bg.setAttribute("width", "5"); bg.setAttribute("height", "5"); bg.setAttribute("fill", fill);
+    bg.setAttribute("width", PITCH); bg.setAttribute("height", PITCH); bg.setAttribute("fill", fill);
     p.appendChild(bg);
-    const sw = hatch === "cross" ? 1.1 : 1.4;
+    const sw = hatch === "cross" ? 1.0 : 1.2;
     const line = (x1, y1, x2, y2) => {
       const l = document.createElementNS(NS, "line");
       l.setAttribute("x1", x1); l.setAttribute("y1", y1);
@@ -107,8 +119,8 @@ function buildPatterns() {
       l.setAttribute("stroke", stroke); l.setAttribute("stroke-width", sw);
       p.appendChild(l);
     };
-    line(0, 0, 0, 5);
-    if (hatch === "cross") line(0, 0, 5, 0);
+    line(0, 0, 0, PITCH);
+    if (hatch === "cross") line(0, 0, PITCH, 0);
     defs.appendChild(p);
     fillFor[cat] = `url(#${id})`;
   }
@@ -150,28 +162,36 @@ function buildLegend() {
     }
     root.appendChild(g);
   }
-  // Outline legend (the two highlight colours).
-  const og = document.createElement("div");
-  og.className = "legend-group";
-  const ot = document.createElement("span");
-  ot.style.fontWeight = "600"; ot.textContent = "Outline:";
-  og.appendChild(ot);
-  for (const [edge, w, label] of [
-    [AWARD_EDGE, 2.5, "US-award country"],
-    [CBPF_EDGE, 2, "Other CBPF/RhPF country"],
-  ]) {
-    const item = document.createElement("span");
-    item.className = "legend-item";
-    const sw = document.createElement("span");
-    sw.className = "swatch";
-    sw.style.background = "#fff";
-    sw.style.border = `${w}px solid ${edge}`;
-    const lbl = document.createElement("span");
-    lbl.textContent = label;
-    item.append(sw, lbl);
-    og.appendChild(item);
+  // Outline legend — only the country sets whose toggle is currently on.
+  const entries = [
+    ["show-award", AWARD_EDGE, 2.5, "US-award country"],
+    ["show-cbpf", CBPF_EDGE, 2, "Other CBPF/RhPF country"],
+    ["show-fw", FW_EDGE, 2, "CERF AA framework (El Niño)"],
+    ["show-nf", NF_EDGE, 2, "CERF non-framework AA (El Niño)"],
+  ].filter(([id]) => {
+    const cb = document.getElementById(id);
+    return cb && cb.checked;
+  });
+  if (entries.length) {
+    const og = document.createElement("div");
+    og.className = "legend-group";
+    const ot = document.createElement("span");
+    ot.style.fontWeight = "600"; ot.textContent = "Outline:";
+    og.appendChild(ot);
+    for (const [, edge, w, label] of entries) {
+      const item = document.createElement("span");
+      item.className = "legend-item";
+      const sw = document.createElement("span");
+      sw.className = "swatch";
+      sw.style.background = "#fff";
+      sw.style.border = `${w}px solid ${edge}`;
+      const lbl = document.createElement("span");
+      lbl.textContent = label;
+      item.append(sw, lbl);
+      og.appendChild(item);
+    }
+    root.appendChild(og);
   }
-  root.appendChild(og);
 }
 
 const fmtR = (v) => v == null ? "—" : v.toFixed(2);
@@ -195,6 +215,8 @@ Promise.all([
   const monthSel = document.getElementById("issued-month");
   const awardToggle = document.getElementById("show-award");
   const cbpfToggle = document.getElementById("show-cbpf");
+  const fwToggle = document.getElementById("show-fw");
+  const nfToggle = document.getElementById("show-nf");
   const seasonalityOn = () => seasonality.checked;
   const currentTri = () => fc.trimesters[+triSlider.value].key;
   const updateTriLabel = () => {
@@ -243,13 +265,33 @@ Promise.all([
     el.textContent = `Issued ${fc.issued_label} · Valid ${t.key} (${t.label})`;
   }
 
-  // ── adm0 layer: all forecasts shown; award + CBPF countries outlined ──────────────
+  // ── adm0 layer: all forecasts shown; pooled-fund + CERF sets outlined ─────────────
   const catOf = (f, tri, rainyOn) => classify((fc.data[f.properties.iso3] || {})[tri], rainyOn);
+
+  // Ordered membership "dimensions" for a country — each shown as one coloured outline.
+  // Pooled fund is one slot (award red, else CBPF orange); the two CERF sets are the others.
+  // A country in several sets gets all its colours as interleaved dashes.
+  function dimsFor(iso3) {
+    const d = [];
+    if (awardToggle.checked && CBPF_AWARD.has(iso3)) d.push({ key: "pool", color: AWARD_EDGE, w: AWARD_W });
+    else if (cbpfToggle.checked && CBPF_ALL.has(iso3)) d.push({ key: "pool", color: CBPF_EDGE, w: CBPF_W });
+    if (fwToggle.checked && CERF_FW.has(iso3)) d.push({ key: "fw", color: FW_EDGE, w: FW_W });
+    if (nfToggle.checked && CERF_NF.has(iso3)) d.push({ key: "nf", color: NF_EDGE, w: NF_W });
+    return d;
+  }
+  const fillOpacityFor = (iso3) => (dimsFor(iso3).length ? 1 : PALE);
+  function membershipTag(iso3) {
+    const t = [];
+    if (CBPF_AWARD.has(iso3)) t.push("US award");
+    else if (CBPF_ALL.has(iso3)) t.push("CBPF/RhPF");
+    if (CERF_FW.has(iso3)) t.push("CERF framework");
+    if (CERF_NF.has(iso3)) t.push("CERF non-framework");
+    return t.length ? ` · ${t.join(", ")}` : "";
+  }
   const tooltipHtml = (f) => {
     const rec = (fc.data[f.properties.iso3] || {})[currentTri()];
     const cat = catOf(f, currentTri(), seasonalityOn());
-    const g = groupOf(f.properties.iso3);
-    const tag = g === "award" ? " · US award" : g === "cbpf" ? " · CBPF" : "";
+    const tag = membershipTag(f.properties.iso3);
     let extra = "";
     if (rec && rec.rp != null) {
       extra = `<div>Return period: ${fmtRp(rec.rp)} yr</div><div>Correlation: ${fmtR(rec.r)}</div>`;
@@ -259,25 +301,7 @@ Promise.all([
     return `<div class="name">${f.properties.name}${tag}</div>` +
       `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>` + extra;
   };
-  // A country is highlighted (full opacity) when an outline is currently shown for it.
-  // Award countries are also CBPFs, so either toggle highlights them.
-  const isHighlighted = (iso3) => {
-    const g = groupOf(iso3);
-    if (g === "award") return awardToggle.checked || cbpfToggle.checked;
-    if (g === "cbpf") return cbpfToggle.checked;
-    return false;
-  };
-  const fillOpacityFor = (iso3) => (isHighlighted(iso3) ? 1 : PALE);
-  // Outline depends on the two toggles. When the award outline is hidden, award countries
-  // fall back to the CBPF outline (if that's shown).
-  const outlineFor = (iso3) => {
-    const g = groupOf(iso3);
-    if (g === "award" && awardToggle.checked) return [AWARD_EDGE, AWARD_W];
-    if (g !== "other" && cbpfToggle.checked) return [CBPF_EDGE, CBPF_W];
-    return [OTHER_EDGE, OTHER_W];
-  };
-  // Base fills with a grey hairline that bridges seams, so no white gaps appear between
-  // the simplified country polygons when zoomed out.
+  // Base fills with a grey hairline that bridges narrow seams between countries.
   const admLayer = L.geoJSON(geo, {
     style: (f) => ({
       weight: BASE_W, color: BASE_EDGE, opacity: 1,
@@ -285,24 +309,35 @@ Promise.all([
     }),
     onEachFeature: (f, layer) => layer.bindTooltip(() => tooltipHtml(f), { sticky: true }),
   }).addTo(map);
-  // Separate top layer for the red/orange inset outlines (no fill, clipped to each shape).
-  const borderLayer = L.geoJSON(geo, {
-    interactive: false,
-    style: { weight: 0, fill: false, opacity: 1 },
+  // One top outline layer per dimension (no fill, clipped to each shape). Stacked so a
+  // country can carry several coloured outlines at once.
+  const mkOutlineLayer = () => L.geoJSON(geo, {
+    interactive: false, style: { weight: 0, fill: false, opacity: 1 },
   }).addTo(map);
+  const poolLayer = mkOutlineLayer();
+  const fwLayer = mkOutlineLayer();
+  const nfLayer = mkOutlineLayer();
+  const OUTLINE_LAYERS = [{ key: "pool", layer: poolLayer }, { key: "fw", layer: fwLayer },
+    { key: "nf", layer: nfLayer }];
 
-  // Dots for tiny pooled-fund countries so their forecast value is visible at world scale.
+  // Dots for hard-to-see countries: a forecast-coloured fill plus up to 3 overlaid rings
+  // (one per set) that are dashed/offset so several colours alternate around the dot.
+  const RW = 2.2;  // ring stroke width
   const featByIso = {};
   geo.features.forEach((f) => { featByIso[f.properties.iso3] = f; });
   const dots = {};
   for (const iso in DOT_POINTS) {
     const f = featByIso[iso];
     if (!f) continue;
-    const m = L.circleMarker(DOT_POINTS[iso], {
-      radius: DOT_R, weight: 1.8, color: OTHER_EDGE, fillColor: "#fff", fillOpacity: 1,
+    const pt = DOT_POINTS[iso];
+    const fill = L.circleMarker(pt, {
+      radius: DOT_R, stroke: false, fillColor: "#fff", fillOpacity: 1,
     }).addTo(map);
-    m.bindTooltip(() => tooltipHtml(f), { sticky: true });
-    dots[iso] = { marker: m, feature: f };
+    fill.bindTooltip(() => tooltipHtml(f), { sticky: true });
+    const rings = [0, 1, 2].map(() => L.circleMarker(pt, {
+      radius: DOT_R, fill: false, weight: RW, color: OTHER_EDGE, opacity: 0, interactive: false,
+    }).addTo(map));
+    dots[iso] = { fill, rings, feature: f };
   }
 
   function renderAdm() {
@@ -316,7 +351,7 @@ Promise.all([
       el.setAttribute("fill-opacity", fillOpacityFor(iso3));
     });
     for (const iso in dots) {
-      const el = dots[iso].marker._path;
+      const el = dots[iso].fill._path;
       if (!el) continue;
       el.setAttribute("fill", fillFor[catOf(dots[iso].feature, tri, rainyOn)]);
       el.setAttribute("fill-opacity", "1");  // dots stay fully visible
@@ -352,8 +387,9 @@ Promise.all([
     el.setAttribute("stroke-width", String(w * 2));  // inner (visible) half == w
   }
   // Re-sync clip geometry to the projected outline paths after the map moves/zooms.
+  // poolLayer carries every country, so it's enough to refresh the shared clip paths.
   function syncClips() {
-    borderLayer.eachLayer((layer) => {
+    poolLayer.eachLayer((layer) => {
       const cp = clipPaths[layer.feature.properties.iso3];
       if (cp && layer._path) cp.setAttribute("d", layer._path.getAttribute("d") || "");
     });
@@ -361,29 +397,63 @@ Promise.all([
   map.on("zoomend moveend viewreset", () => requestAnimationFrame(syncClips));
 
   function applyOutlines() {
-    // Fill opacity (on the base layer) follows whether a country is highlighted.
+    // Fill opacity (on the base layer) follows whether a country is highlighted at all.
     admLayer.eachLayer((layer) => {
       const el = layer._path;
       if (el) el.setAttribute("fill-opacity", fillOpacityFor(layer.feature.properties.iso3));
     });
-    // Colored inset outline on the separate top layer; none when not highlighted.
-    borderLayer.eachLayer((layer) => {
-      const el = layer._path;
-      if (!el) return;
-      const iso3 = layer.feature.properties.iso3;
-      const [stroke, w] = outlineFor(iso3);
-      if (w > OTHER_W) setInset(layer, iso3, stroke, w);
-      else { el.removeAttribute("clip-path"); el.setAttribute("stroke", "none"); }
-    });
-    // Dots on top of everything, bordered in their group colour.
-    for (const iso in dots) {
-      const el = dots[iso].marker._path;
-      if (!el) continue;
-      const [stroke, w] = outlineFor(iso);
-      el.setAttribute("stroke", stroke);
-      el.setAttribute("stroke-width", String(Math.max(w, 1.6)));
-      dots[iso].marker.bringToFront();
+    // Each outline layer draws its dimension's colour where active. When a country is in
+    // several sets, every line is dashed and offset so the colours interleave (all visible).
+    for (const { key, layer } of OUTLINE_LAYERS) {
+      layer.eachLayer((sub) => {
+        const el = sub._path;
+        if (!el) return;
+        const iso3 = sub.feature.properties.iso3;
+        const dims = dimsFor(iso3);
+        const idx = dims.findIndex((d) => d.key === key);
+        if (idx < 0) {
+          el.removeAttribute("clip-path");
+          el.setAttribute("stroke", "none");
+          el.removeAttribute("stroke-dasharray");
+          el.removeAttribute("stroke-dashoffset");
+          return;
+        }
+        setInset(sub, iso3, dims[idx].color, dims[idx].w);
+        if (dims.length > 1) {
+          el.setAttribute("stroke-dasharray", `${DASH} ${DASH * (dims.length - 1)}`);
+          el.setAttribute("stroke-dashoffset", String(idx * DASH));
+        } else {
+          el.removeAttribute("stroke-dasharray");
+          el.removeAttribute("stroke-dashoffset");
+        }
+      });
     }
+    // Dots on top of everything: one ring per active set, all at the same radius, dashed
+    // and offset so several colours alternate around the dot (like the big countries).
+    for (const iso in dots) {
+      const { fill, rings } = dots[iso];
+      const dims = dimsFor(iso);
+      const N = dims.length;
+      rings.forEach((ring, i) => {
+        if (i < N) {
+          ring.setRadius(DOT_R + RW / 2);
+          ring.setStyle({
+            color: dims[i].color, weight: RW, opacity: 1,
+            dashArray: N > 1 ? `${DASH} ${DASH * (N - 1)}` : null,
+            dashOffset: N > 1 ? String(i * DASH) : null,
+          });
+        } else {
+          ring.setStyle({ opacity: 0 });
+        }
+      });
+      if (!N) {  // not in any set — keep a thin grey ring so the dot still reads
+        rings[0].setRadius(DOT_R + RW / 2);
+        rings[0].setStyle({ color: OTHER_EDGE, weight: 1, opacity: 1, dashArray: null, dashOffset: null });
+      }
+      fill.bringToFront();
+      rings.forEach((r) => r.bringToFront());
+    }
+    buildLegend();  // reflect which country sets are currently shown
   }
 
   // ── Issuance browsing (year / month) ──────────────────────────────────────────────
@@ -423,8 +493,8 @@ Promise.all([
 
   triSlider.addEventListener("input", () => { updateTriLabel(); renderAdm(); });
   seasonality.addEventListener("change", renderAdm);
-  awardToggle.addEventListener("change", applyOutlines);
-  cbpfToggle.addEventListener("change", applyOutlines);
+  [awardToggle, cbpfToggle, fwToggle, nfToggle].forEach((t) =>
+    t.addEventListener("change", applyOutlines));
   yearSel.addEventListener("change", () => {
     const m = +monthSel.value;
     rebuildMonths(+yearSel.value);
