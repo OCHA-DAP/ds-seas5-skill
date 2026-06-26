@@ -26,6 +26,10 @@
         <button class="seg-btn active" data-view="country">Country</button>
         <button class="seg-btn" data-view="pixel">Pixel</button>
       </div>
+      <label class="ctl">Issued
+        <select id="issued-year" class="map-select"></select>
+        <select id="issued-month" class="map-select"></select>
+      </label>
       <div class="slider-control">
         <label for="trimester">Valid trimester: <strong id="trimester-label">—</strong></label>
         <input type="range" id="trimester" min="0" max="0" step="1" value="0" />
@@ -38,15 +42,18 @@
 
     <div id="map"></div>
 
+    <p id="issued-lock-note" class="lock-note" hidden>Pixel level is only available for the most recent issuance.</p>
+
     <div id="legend"></div>
 
     <p class="note">
-      Forecast issued <span id="issued-label">—</span>. Colours show where the latest SEAS5
+      Forecast issued <span id="issued-label">—</span>. Colours show where this SEAS5
       forecast sits within its historical distribution, where the seasonal forecast has skill;
       hatched fills indicate moderate (vs. high) skill. Grey = outside the rainy season; cross-hatch
-      = low skill. The <strong>Country</strong>/<strong>Pixel</strong> toggle switches between
-      country averages and the native SEAS5 0.4° grid. By default, alerts are shown only for the
-      rainy season.
+      = low skill. Use the <strong>Issued</strong> year/month menus to browse past forecasts (in-sample
+      reconstructions). The <strong>Country</strong>/<strong>Pixel</strong> toggle switches between
+      country averages and the native SEAS5 0.4° grid — pixel level is only available for the most
+      recent issuance. By default, alerts are shown only for the rainy season.
     </p>
   </section>
 
@@ -80,7 +87,7 @@
       the trimester's first month). Colours are categorical at the skill cutoffs: high (r&nbsp;≥&nbsp;0.5),
       moderate (0.3–0.5), low (0–0.3), negative. The <strong>Country</strong>/<strong>Pixel</strong>
       toggle switches between country averages and the native SEAS5 0.4° grid. By default skill is
-      shown only where the trimester is in the rainy season (≥&nbsp;25% of annual rainfall, the rest
+      shown only where the trimester is in the rainy season (≥&nbsp;15% of annual rainfall, the rest
       greyed); the checkbox reveals skill everywhere. Detrended, matching the forecast map's defaults.
       This shows skill only — not the current forecast.
     </p>
@@ -97,7 +104,7 @@
 
     <p class="note">
       <strong>Top two charts:</strong> ERA5 mean rainfall by month, then by trimester (blue = rainy
-      season, ≥&nbsp;25% of the annual total). <strong>Heatmap:</strong> SEAS5 hindcast skill — the
+      season, ≥&nbsp;15% of the annual total). <strong>Heatmap:</strong> SEAS5 hindcast skill — the
       temporal Pearson correlation (r) against ERA5 over 1981–present — for every valid trimester (x)
       at each <strong>leadtime</strong> (y, months from the issue month to the trimester's first
       month). Each cell is labelled with its <strong>issue month</strong>. Colours are categorical at
@@ -183,7 +190,7 @@
       <h3>4. Rainy-season (in-season) selection</h3>
       <p>
         An area–trimester is treated as <strong>in season</strong> when that trimester carries a
-        meaningful share of the annual rainfall — by default, the trimester mean is ≥ 25% of the
+        meaningful share of the annual rainfall — by default, the trimester mean is ≥ 15% of the
         annual total (with no additional per-month minimum). By default the map only shows alerts
         for in-season trimesters; the <em>“Show alerts outside rainy season”</em> toggle reveals
         the rest.
@@ -196,7 +203,7 @@
         <tr><td>Strongly below / above normal</td><td>10-yr return period (lowest/highest decile)</td></tr>
         <tr><td>Moderate skill</td><td>r ≥ 0.30</td></tr>
         <tr><td>High skill</td><td>r ≥ 0.50</td></tr>
-        <tr><td>Rainy season: trimester share</td><td>≥ 25% of annual rainfall</td></tr>
+        <tr><td>Rainy season: trimester share</td><td>≥ 15% of annual rainfall</td></tr>
       </table>
 
       <h3>Where this runs</h3>

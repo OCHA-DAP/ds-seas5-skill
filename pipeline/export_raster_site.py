@@ -24,6 +24,9 @@ from rasterio.transform import from_bounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.constants import TRIMESTERS  # noqa: E402
+from src.skill_raster import rainy_from_cube  # noqa: E402
+
+RAINY_TRIMESTER_PCT = 0.15  # matches the country export's trimester_pct default
 
 OUT = Path(__file__).resolve().parent.parent / "docs" / "raster" / "data"
 GEO = Path(__file__).resolve().parent.parent / "analysis" / "_world_countries.gpkg"
@@ -149,11 +152,12 @@ def main():
             "trimesters": [{"key": t, "label": "–".join(calendar.month_abbr[m] for m in TRIMESTERS[t])}
                            for t in tris]}
 
+    rainy_da = rainy_from_cube(ds, RAINY_TRIMESTER_PCT)  # re-derive at current threshold
     for t in tris:
         s = sl.sel(trimester=t)
         P = s["forecast_percentile"].values
         R = s["pearson_r"].values
-        RA = s["rainy"].values
+        RA = rainy_da.sel(trimester=t).values
         for masked, tag in [(True, "masked"), (False, "all")]:
             code = _classify(P, R, RA, masked)
             code[~land] = 0   # ocean / non-land -> transparent (show basemap)

@@ -30,7 +30,9 @@ from rasterio.transform import from_bounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.constants import TRIMESTERS  # noqa: E402
+from src.skill_raster import rainy_from_cube  # noqa: E402
 
+RAINY_TRIMESTER_PCT = 0.15  # matches the country export's trimester_pct default
 OUT = Path(__file__).resolve().parent.parent / "docs" / "raster" / "skill"
 GEO = Path(__file__).resolve().parent.parent / "analysis" / "_world_countries.gpkg"
 CUBE = Path("/tmp/skill_stats_grid_detrended.nc")  # falls back to dev blob if missing
@@ -96,7 +98,9 @@ def main():
 
     # Off-season grey cover (#D0D0D0) per trimester — the rainy mask is leadtime-independent,
     # so one cover overlays all leads. Drawn over the skill image when the rainy mask is on.
+    # Re-derive rainy at the current threshold from the cube (avoids reloading ERA5).
     off_grey = (208, 208, 208, 255)
+    rainy_da = rainy_from_cube(ds, RAINY_TRIMESTER_PCT)
 
     n = 0
     for t in TRIMESTERS:
@@ -109,7 +113,7 @@ def main():
             _rgba_png(code, OUT / f"{t}_L{lead}.png")
             n += 1
 
-        rainy = (ds["rainy"].sel(trimester=t) == 1).any("issued_month").values
+        rainy = rainy_da.sel(trimester=t).values
         cover = np.zeros((len(y), len(x), 4), dtype=np.uint8)
         cover[land & ~rainy] = off_grey
         Image.fromarray(cover, "RGBA").save(OUT / f"mask_{t}.png", optimize=True)

@@ -167,7 +167,7 @@
     const H = yHeat + nR * CELL_H + MB;
     svg.appendChild(el("text", {
       x: ML + plotW / 2, y: H - 10, class: "skill-axttl", "text-anchor": "middle",
-    }, "Valid trimester  (blue = rainy season, ≥ 25% of annual rainfall)"));
+    }, "Valid trimester  (blue = rainy season, ≥ 15% of annual rainfall)"));
     svg.appendChild(el("text", {
       x: 14, y: yHeat + (nR * CELL_H) / 2, class: "skill-axttl", "text-anchor": "middle",
       transform: `rotate(-90 14 ${yHeat + (nR * CELL_H) / 2})`,

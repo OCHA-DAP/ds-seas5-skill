@@ -185,14 +185,14 @@ const fmtRp = (v) => v == null ? "—" : v.toFixed(1);
 window.tabShown = window.tabShown || {};
 
 Promise.all([
-  fetch("data/forecast.json").then((r) => r.json()),
+  fetch("data/forecasts/index.json").then((r) => r.json()),
   fetch("data/countries.geojson").then((r) => r.json()),
   fetch("raster/data/meta.json").then((r) => r.json()).catch(() => null),
-]).then(([fc, geo, rmeta]) => {
-  T = fc.thresholds;
-  document.getElementById("subtitle").textContent =
-    `Most recent forecast — issued ${fc.issued_label}`;
-  document.getElementById("issued-label").textContent = fc.issued_label;
+]).then(([index, geo, rmeta]) => {
+  T = index.thresholds;
+  const latest = index.latest;
+  let fc = null;          // the currently loaded issuance (fetched on demand)
+  let curTriKey = null;   // preserve the trimester selection across issuance changes
 
   const fillFor = buildPatterns();
   const OUTLINE_W = 1.1;   // shared border thickness for both Country and Pixel views
@@ -201,12 +201,13 @@ Promise.all([
   const triSlider = document.getElementById("trimester");
   const triLabel = document.getElementById("trimester-label");
   const seasonality = document.getElementById("seasonality");
-  triSlider.max = fc.trimesters.length - 1;
-  triSlider.value = Math.max(0, fc.trimesters.findIndex((t) => t.key === fc.default_trimester));
-  const currentTri = () => fc.trimesters[+triSlider.value].key;
+  const yearSel = document.getElementById("issued-year");
+  const monthSel = document.getElementById("issued-month");
   const seasonalityOn = () => seasonality.checked;
+  const currentTri = () => fc.trimesters[+triSlider.value].key;
   const updateTriLabel = () => {
     const t = fc.trimesters[+triSlider.value];
+    curTriKey = t.key;
     triLabel.textContent = `${t.key} (${t.label})`;
   };
 
@@ -303,14 +304,56 @@ Promise.all([
     img.src = `raster/data/${currentTri()}_${variant()}.png`;
   }
 
+  // ── Issuance browsing (year / month) ──────────────────────────────────────────
+  function rebuildMonths(year) {
+    const months = index.months_by_year[String(year)] || [];
+    monthSel.innerHTML = "";
+    for (const m of months) {
+      const o = document.createElement("option");
+      o.value = String(m); o.textContent = index.month_names[String(m)];
+      monthSel.appendChild(o);
+    }
+  }
+  function setDropdowns(year, month) {
+    yearSel.value = String(year);
+    rebuildMonths(year);
+    monthSel.value = String(month);
+  }
+  function loadIssuance(year, month) {
+    return fetch(`data/forecasts/${year}-${String(month).padStart(2, "0")}.json`)
+      .then((r) => r.json())
+      .then((f) => {
+        fc = f;
+        document.getElementById("subtitle").textContent = `Forecast — issued ${fc.issued_label}`;
+        document.getElementById("issued-label").textContent = fc.issued_label;
+        triSlider.max = fc.trimesters.length - 1;
+        let idx = curTriKey ? fc.trimesters.findIndex((t) => t.key === curTriKey) : -1;
+        if (idx < 0) idx = Math.max(0, fc.trimesters.findIndex((t) => t.key === fc.default_trimester));
+        triSlider.value = idx;
+        updateTriLabel();
+      });
+  }
+  for (const y of index.years) {
+    const o = document.createElement("option");
+    o.value = String(y); o.textContent = String(y);
+    yearSel.appendChild(o);
+  }
+
   // ── Mode toggle (Country / Pixel) ─────────────────────────────────────────────
   let mode = "country";
+  const isLatest = () => fc && fc.issued_year === latest.year && fc.issued_month === latest.month;
+  function setControlsEnabled(on) {
+    yearSel.disabled = !on; monthSel.disabled = !on;
+    document.getElementById("issued-lock-note").hidden = on;
+  }
   function applyMode() {
     if (mode === "country") {
+      setControlsEnabled(true);
       map.removeLayer(rasterLayer); map.removeLayer(outlineLayer);
       admLayer.addTo(map);
       renderAdm();
     } else {
+      setControlsEnabled(false);   // pixel layer exists only for the latest issuance
       map.removeLayer(admLayer);
       outlineLayer.addTo(map); rasterLayer.addTo(map);
       loadPixelGrid();
@@ -323,17 +366,31 @@ Promise.all([
   }
 
   const viewBtns = document.querySelectorAll("#view-toggle .seg-btn");
-  viewBtns.forEach((b) => b.addEventListener("click", () => {
+  viewBtns.forEach((b) => b.addEventListener("click", async () => {
     if (b.dataset.view === mode) return;
     mode = b.dataset.view;
     viewBtns.forEach((x) => x.classList.toggle("active", x.dataset.view === mode));
+    // Pixel rasters only exist for the most recent issuance — snap to it.
+    if (mode === "pixel" && !isLatest()) {
+      setDropdowns(latest.year, latest.month);
+      await loadIssuance(latest.year, latest.month);
+    }
     applyMode();
   }));
   triSlider.addEventListener("input", refresh);
   seasonality.addEventListener("change", refresh);
+  yearSel.addEventListener("change", () => {
+    const m = +monthSel.value;
+    rebuildMonths(+yearSel.value);
+    const months = index.months_by_year[yearSel.value] || [];
+    monthSel.value = String(months.includes(m) ? m : months[months.length - 1]);
+    loadIssuance(+yearSel.value, +monthSel.value).then(refresh);
+  });
+  monthSel.addEventListener("change", () => loadIssuance(+yearSel.value, +monthSel.value).then(refresh));
 
-  updateTriLabel();
-  applyMode();
+  // Initial load: latest issuance, country mode.
+  setDropdowns(latest.year, latest.month);
+  loadIssuance(latest.year, latest.month).then(applyMode);
 });
 
 // Tabs (Map / Methodology) with #hash deep-linking.

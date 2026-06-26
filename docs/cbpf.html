@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SEAS5 precipitation alerts — CBPF (US award) countries</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>SEAS5 precipitation alerts — CBPF countries</h1>
+    <p id="subtitle">Loading…</p>
+  </header>
+
+  <section class="tab-panel">
+    <div id="controls">
+      <label class="ctl">Issued
+        <select id="issued-year" class="map-select"></select>
+        <select id="issued-month" class="map-select"></select>
+      </label>
+      <div class="slider-control">
+        <label for="trimester">Valid trimester: <strong id="trimester-label">—</strong></label>
+        <input type="range" id="trimester" min="0" max="0" step="1" value="0" />
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="seasonality" />
+        Show alerts outside rainy season
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="show-award" checked />
+        US-award outline
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="show-cbpf" checked />
+        CBPF outline
+      </label>
+    </div>
+
+    <div id="map"></div>
+
+    <div id="legend"></div>
+
+    <p class="note">
+      Country-level SEAS5 seasonal precipitation alerts for every country. The
+      <strong>18 countries in the US “Humanitarian Reset” award</strong> (December 2025) are outlined
+      in <strong>black</strong>; the <strong>29 countries with an OCHA pooled-fund envelope</strong>
+      (country-based or regional RHPF) are outlined in <strong style="color:#6a3d9a">purple</strong>;
+      countries with no pooled fund are shown a little paler. Use the outline toggles to show or hide
+      each set. Forecast issued <span id="issued-label">—</span>. Colours show where this SEAS5
+      forecast sits within its historical distribution, where the seasonal forecast has skill; hatched
+      fills indicate moderate (vs. high) skill. Grey = outside the rainy season; cross-hatch = low
+      skill. Use the <strong>Issued</strong> year/month menus to browse past forecasts (in-sample
+      reconstructions). By default, alerts are shown only for the rainy season.
+    </p>
+  </section>
+
+  <footer>
+    <p>Data: ECMWF SEAS5 (forecast) &amp; ERA5 (climatology). OCHA Centre for Humanitarian Data.</p>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="cbpf.js"></script>
+</body>
+</html>

@@ -187,3 +187,16 @@ def rainy_grid(clim: xr.DataArray, valid_months: list[int],
     tri_ok = (3 * tri.mean("month") / annual) >= trimester_pct
     month_ok = (tri / annual).min("month") >= month_pct
     return tri_ok & month_ok
+
+
+def rainy_from_cube(ds: xr.Dataset, trimester_pct: float = 0.15) -> xr.DataArray:
+    """Re-derive the per-(trimester, y, x) rainy mask from a skill cube at any threshold.
+
+    Avoids reloading/regridding ERA5: each month sits in exactly 3 of the 12 overlapping
+    trimesters, so the annual mean equals the sum of the 12 trimester means. Uses the cube's
+    `era5_mean` (mean log1p obs; identical across issued months). Matches the baked 0.25 mask
+    to ~99% of land pixels — the small difference is log-mean vs arithmetic-mean climatology.
+    """
+    tri_mm = np.expm1(ds["era5_mean"].mean("issued_month"))   # (trimester, y, x), mm/day
+    annual = tri_mm.sum("trimester").where(lambda a: a > 1e-9)
+    return (3 * tri_mm / annual) >= trimester_pct

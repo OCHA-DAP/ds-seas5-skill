@@ -5,7 +5,7 @@
 
 (function () {
   const OUTLINE_W = 1.1;
-  const NODATA = "#e0e0e0";
+  const NODATA = "#f5f5f5";  // matches the forecast adm0 "unmonitored" fill
   const OFF_SEASON = "#d0d0d0";
 
   function catsFor(thr) {
@@ -105,7 +105,7 @@
       const off = !seasonalityOn() && !isRainy(iso3);
       let line;
       if (r == null) {
-        line = `<div class="cat">No skill estimate</div>`;
+        line = `<div class="cat">Not monitored</div>`;
       } else if (off) {
         line = `<div class="cat" style="color:#999">Outside rainy season</div>` +
           `<div>r = ${r.toFixed(2)}</div>`;
@@ -210,7 +210,7 @@
       legend.innerHTML = "";
       const items = CATS.concat([
         { color: OFF_SEASON, label: "Outside rainy season" },
-        { color: NODATA, label: "No estimate" },
+        { color: NODATA, label: "Not monitored" },
       ]);
       for (const it of items) {
         const span = document.createElement("span");
