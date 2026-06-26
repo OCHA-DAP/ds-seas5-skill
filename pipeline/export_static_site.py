@@ -17,7 +17,8 @@ from pathlib import Path
 import geopandas as gpd
 import ocha_stratus as stratus
 import pandas as pd
-from shapely.geometry import box
+import topojson as tp
+from shapely.geometry import MultiPolygon, Polygon, box
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -31,7 +32,7 @@ THRESHOLDS = {"sev_rp": 3, "vsev_rp": 10, "r_mod": 0.3, "r_high": 0.5}
 
 DOCS_DATA = Path(__file__).resolve().parent.parent / "docs" / "data"
 GEO_SRC = Path(__file__).resolve().parent.parent / "analysis" / "_world_countries.gpkg"
-SIMPLIFY_TOLERANCE = 0.1
+SIMPLIFY_TOLERANCE = 0.05  # topology-preserving (see geometry block); finer than the old 0.1
 # (min_lon, min_lat, max_lon, max_lat) — trims antimeridian overflow + polar clutter.
 CLIP_BOUNDS = (-180, -60, 180, 84)
 
@@ -156,6 +157,23 @@ def build_skill_matrix(
     }
 
 
+def _polygonal(geom):
+    """Keep only polygon parts (make_valid can emit GeometryCollections / lines)."""
+    if geom is None or geom.is_empty:
+        return None
+    if isinstance(geom, (Polygon, MultiPolygon)):
+        return geom
+    parts: list[Polygon] = []
+    for sub in getattr(geom, "geoms", []):
+        if isinstance(sub, Polygon):
+            parts.append(sub)
+        elif isinstance(sub, MultiPolygon):
+            parts.extend(sub.geoms)
+    if not parts:
+        return None
+    return parts[0] if len(parts) == 1 else MultiPolygon(parts)
+
+
 def main() -> None:
     DOCS_DATA.mkdir(parents=True, exist_ok=True)
 
@@ -247,14 +265,23 @@ def main() -> None:
         f"{len(skill_matrix['countries'])} countries)"
     )
 
-    # Simplified country geometry, clipped to a sane lon/lat window. The clip removes
-    # antimeridian overflow (e.g. Kiribati stored with longitudes > 180°, which otherwise
-    # projects into one giant band across the whole map in D3) and trims polar clutter.
+    # Country geometry, clipped to a sane lon/lat window. The clip removes antimeridian
+    # overflow (e.g. Kiribati stored with longitudes > 180°) and trims polar clutter.
+    # Simplify with TOPOLOGY preserved (shared borders simplified once) so adjacent countries
+    # never develop slivers/gaps between them — independent per-polygon simplify did.
     print(f"Loading + simplifying geometry: {GEO_SRC}")
-    g = gpd.read_file(GEO_SRC)[["iso3", "name", "geometry"]].dropna(subset=["geometry"]).copy()
-    g["geometry"] = g["geometry"].simplify(SIMPLIFY_TOLERANCE)
-    g = gpd.clip(g, box(*CLIP_BOUNDS))
-    g = g[~g.geometry.is_empty & g.geometry.notna()]
+    g0 = gpd.read_file(GEO_SRC)[["iso3", "name", "geometry"]].dropna(subset=["geometry"]).copy()
+    g0 = gpd.clip(g0, box(*CLIP_BOUNDS))
+    g0 = g0[~g0.geometry.is_empty & g0.geometry.notna()]
+    topo = tp.Topology(g0, prequantize=True, shared_coords=True)
+    g = topo.toposimplify(SIMPLIFY_TOLERANCE).to_gdf()
+    g["geometry"] = g["geometry"].make_valid().apply(_polygonal)
+    g = g[g.geometry.notna() & ~g.geometry.is_empty]
+    # Restore any micro-state that simplified away entirely, at full detail.
+    missing = set(g0["iso3"]) - set(g["iso3"])
+    if missing:
+        g = pd.concat([g, g0[g0["iso3"].isin(missing)]], ignore_index=True)
+        print(f"  restored {len(missing)} collapsed geometries at full detail: {sorted(missing)}")
     geo_path = DOCS_DATA / "countries.geojson"
     geo_path.write_text(g.to_json())
     print(f"Wrote {geo_path}  ({geo_path.stat().st_size/1024:.1f} KB, {len(g)} features)")
