@@ -214,7 +214,7 @@ Promise.all([
   // ── Map ──────────────────────────────────────────────────────────────────────
   const map = L.map("map", {
     crs: L.CRS.EPSG4326, minZoom: 1, maxZoom: 8,
-    attributionControl: false, zoomControl: false,
+    attributionControl: false, zoomControl: false, maxBoundsViscosity: 1.0,
     // Leaflet defaults for scroll (whole-level snap, default wheel speed) — feels responsive.
     // The flush initial fit uses a temporary zoomSnap: 0 below, then restores to 1.
   });
@@ -238,12 +238,14 @@ Promise.all([
   function fitMap() {
     map.invalidateSize();
     // Fit at an exact (unsnapped) zoom so the view fills the box, then restore the scroll snap.
+    map.setMinZoom(0);
     map.options.zoomSnap = 0;
     map.fitBounds(viewBounds, { padding: [0, 0] });
     map.options.zoomSnap = 1;
+    map.setMinZoom(map.getZoom());  // can't zoom out past the starting (fitted) view
   }
   fitMap();
-  map.setMaxBounds(viewBounds.pad(0.15));
+  map.setMaxBounds(viewBounds);  // tight bounds → no off-centre drift at the min (fitted) zoom
   // If the page loaded on another tab, the initial fit ran against a 0-size container;
   // re-fit each time the Map tab becomes visible.
   window.tabShown.map = fitMap;

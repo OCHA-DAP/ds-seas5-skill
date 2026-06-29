@@ -68,7 +68,7 @@
     // ── Map ───────────────────────────────────────────────────────────────────
     const map = L.map("skill-map", {
       crs: L.CRS.EPSG4326, minZoom: 1, maxZoom: 8,
-      attributionControl: false, zoomControl: false,
+      attributionControl: false, zoomControl: false, maxBoundsViscosity: 1.0,
     });
     const outlineLayer = L.geoJSON(geo, {
       interactive: false,
@@ -84,12 +84,14 @@
     document.getElementById("skill-map").style.aspectRatio = String(aspect);
     function fitMap() {
       map.invalidateSize();
+      map.setMinZoom(0);
       map.options.zoomSnap = 0;
       map.fitBounds(viewBounds, { padding: [0, 0] });
       map.options.zoomSnap = 1;
+      map.setMinZoom(map.getZoom());  // can't zoom out past the starting (fitted) view
     }
     fitMap();
-    map.setMaxBounds(viewBounds.pad(0.15));
+    map.setMaxBounds(viewBounds);  // tight bounds → no off-centre drift at the min (fitted) zoom
     window.tabShown.skillmap = fitMap;
 
     // ── Country (adm0) layer ────────────────────────────────────────────────────

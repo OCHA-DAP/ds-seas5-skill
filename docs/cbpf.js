@@ -228,7 +228,7 @@ Promise.all([
   // Map (plate carrée; flush fit with a temporary zoomSnap 0).
   const map = L.map("map", {
     crs: L.CRS.EPSG4326, minZoom: 1, maxZoom: 8,
-    attributionControl: false, zoomControl: false,
+    attributionControl: false, zoomControl: false, maxBoundsViscosity: 1.0,
   });
   const outlineLayer = L.geoJSON(geo, { interactive: false, style: { opacity: 0, fillOpacity: 0 } });
   const worldBounds = outlineLayer.getBounds();
@@ -241,12 +241,14 @@ Promise.all([
   document.getElementById("map").style.aspectRatio = String(aspect);
   function fitMap() {
     map.invalidateSize();
+    map.setMinZoom(0);
     map.options.zoomSnap = 0;
     map.fitBounds(viewBounds, { padding: [0, 0] });
     map.options.zoomSnap = 1;
+    map.setMinZoom(map.getZoom());  // can't zoom out past the starting (fitted) view
   }
   fitMap();
-  map.setMaxBounds(viewBounds.pad(0.15));
+  map.setMaxBounds(viewBounds);  // tight bounds → no off-centre drift at the min (fitted) zoom
 
   // Title overlay (top-left of the map).
   const titleCtl = L.control({ position: "topleft" });
