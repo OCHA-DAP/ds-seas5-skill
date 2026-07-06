@@ -51,13 +51,24 @@ Re-run when a new forecast lands (≈monthly):
 
 ```bash
 uv run python pipeline/export_static_site.py        # data/forecast.json, skill_matrix.json, countries.geojson
-uv run python pipeline/export_history_site.py       # data/forecasts/  (all issuances, country level)
+uv run python pipeline/export_history_site.py       # data/forecasts/  (adds only the NEW issuance; see below)
 uv run python pipeline/export_raster_site.py        # raster/data/  (forecast pixels)
 uv run python pipeline/export_skill_raster_site.py  # raster/skill/ (skill pixels)
 ```
 
-Commit the result. (The skill pixel cube is leadtime-based and only changes when the skill stats are
-recomputed, so `export_skill_raster_site.py` rarely needs re-running between forecasts.)
+Commit the result.
+
+Notes:
+- **Compute first.** These exports read the processed stats. When a new SEAS5 issuance lands, first
+  refresh those: `pipeline/compute_skill.py` (country → blob parquets) and
+  `pipeline/compute_skill_raster.py` (per-pixel cube → blob + `/tmp`). The raster compute wants its
+  full ~16 GB — close memory-heavy apps first, or run just the latest issuance with
+  `--issued-months <N> --no-upload` to refresh only the forecast-pixel layer.
+- **History is frozen.** `export_history_site.py` only writes the new issuance's file (past files'
+  in-sample percentiles drift trivially each month; freezing keeps the repo from bloating). Use
+  `--rebuild` to regenerate all of `data/forecasts/`.
+- **Skill pixels are stable.** Skill is a fixed hindcast statistic, so `raster/skill/` only changes
+  when the cube is fully recomputed; it can usually be skipped between forecasts.
 
 ## GitHub Pages
 Live at **https://ocha-dap.github.io/ds-seas5-skill/**.

@@ -7,9 +7,16 @@ as the marimo app does on the fly (in-sample reconstructions). It writes one sma
 (issued_year, issued_month) plus an index; the browser fetches the selected issuance on
 demand, so each load stays tiny.
 
-Run:  uv run python pipeline/export_history_site.py
+Freeze (default): existing issuance files are NOT rewritten — a monthly run only adds the
+new month's file (plus the index). Historical percentiles drift trivially each month as the
+in-sample distribution grows; freezing keeps the repo small and past issuances stable. Pass
+--rebuild to regenerate every file (e.g. after a methodology change or a data correction).
+
+Run:  uv run python pipeline/export_history_site.py            # freeze: add the new issuance
+      uv run python pipeline/export_history_site.py --rebuild  # rewrite all issuances
 """
 
+import argparse
 import calendar
 import json
 import sys
@@ -66,6 +73,14 @@ def compute_metrics(paired: pd.DataFrame) -> pd.DataFrame:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--rebuild", action="store_true",
+                    help="Rewrite ALL issuance files. Default: freeze — only write issuances "
+                         "that don't exist yet, so a monthly run adds one file instead of "
+                         "re-touching every historical file (their in-sample percentiles drift "
+                         "trivially each month; freezing keeps the repo small and history stable).")
+    args = ap.parse_args()
+
     OUT.mkdir(parents=True, exist_ok=True)
 
     print("Loading paired_yearly + skill stats (detrended)...")
@@ -105,8 +120,14 @@ def main() -> None:
 
     years = sorted(met["issued_year"].unique().tolist())
     months_by_year: dict[str, list[int]] = {}
-    n_files = 0
+    n_written = n_frozen = 0
     for (iy, im), grp in met.groupby(["issued_year", "issued_month"]):
+        # Every issuance goes in the index regardless of whether we (re)write its file.
+        months_by_year.setdefault(str(int(iy)), []).append(int(im))
+        path = OUT / f"{int(iy)}-{int(im):02d}.json"
+        if path.exists() and not args.rebuild:
+            n_frozen += 1  # freeze: keep the existing file, don't rewrite
+            continue
         valid_tris = sorted(grp["trimester"].unique(),
                             key=lambda t: _min_signed(TRIMESTERS[t], im))
         default_tri = valid_tris[1] if len(valid_tris) > 1 else valid_tris[0]
@@ -129,9 +150,8 @@ def main() -> None:
             "default_trimester": default_tri,
             "data": data,
         }
-        (OUT / f"{int(iy)}-{int(im):02d}.json").write_text(json.dumps(payload, separators=(",", ":")))
-        months_by_year.setdefault(str(int(iy)), []).append(int(im))
-        n_files += 1
+        path.write_text(json.dumps(payload, separators=(",", ":")))
+        n_written += 1
 
     for y in months_by_year:
         months_by_year[y].sort()
@@ -147,7 +167,8 @@ def main() -> None:
     }
     (OUT / "index.json").write_text(json.dumps(index, separators=(",", ":")))
     size = sum(f.stat().st_size for f in OUT.glob("*.json")) / 1024
-    print(f"Wrote {n_files} issuance files + index.json to {OUT}  ({size:.0f} KB total)")
+    print(f"Wrote {n_written} new/updated issuance file(s), froze {n_frozen} existing, + index.json "
+          f"to {OUT}  ({size:.0f} KB total)")
     print(f"Years {years[0]}–{years[-1]}; latest issuance {latest_year}-{latest_month:02d}")
 
 
