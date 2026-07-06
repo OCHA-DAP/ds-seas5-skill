@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import ocha_stratus as stratus  # noqa: E402
 import pandas as pd  # noqa: E402
-from matplotlib.colors import LogNorm  # noqa: E402
+from matplotlib.colors import Normalize  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -72,7 +72,7 @@ def main():
     data = piv.values
 
     fig, ax = plt.subplots(figsize=(22, 6.2), dpi=150)
-    norm = LogNorm(vmin=max(np.nanmin(data), 1.0), vmax=np.nanmax(data))
+    norm = Normalize(vmin=np.nanmin(data), vmax=np.nanmax(data))
     im_ = ax.imshow(data, aspect="auto", cmap="YlOrRd", norm=norm)
     for i in range(12):
         for j in range(len(years)):
@@ -91,7 +91,7 @@ def main():
     ax.set_ylabel("Issued month")
     ax.set_title("Global SEAS5 forecast extremeness — avg max(drought, flood) RP [yr]\n"
                  "issue year × issued month (avg over valid trimesters & skilled r≥0.3 countries, detrended)")
-    fig.colorbar(im_, ax=ax, pad=0.01).set_label("Avg max RP [yr] (log)")
+    fig.colorbar(im_, ax=ax, pad=0.01).set_label("Avg max RP [yr]")
     plt.tight_layout()
 
     # Name the file after the latest issuance present in the data.
