@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 
 analysis/_ne_*_countries.gpkg
+
+# generated plots / images (kept locally, not committed)
+outputs/
