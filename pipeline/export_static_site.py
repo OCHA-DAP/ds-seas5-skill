@@ -23,7 +23,10 @@ import geopandas as gpd
 import ocha_stratus as stratus
 import pandas as pd
 import topojson as tp
+from dotenv import load_dotenv
 from shapely.geometry import MultiPolygon, Polygon, box
+
+load_dotenv()
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
