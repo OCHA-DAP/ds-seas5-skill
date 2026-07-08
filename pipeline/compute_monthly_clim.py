@@ -14,6 +14,7 @@ from pathlib import Path
 
 import ocha_stratus as stratus
 import pandas as pd
+from azure.core.exceptions import ResourceNotFoundError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -41,10 +42,13 @@ def main() -> None:
 
     if args.pcodes:
         print(f"Targeted run for: {args.pcodes}")
+        # Only a missing blob means "start fresh" — any other failure must abort, or
+        # the upload below would overwrite the blob with just the targeted pcodes.
         try:
             df_base = stratus.load_parquet_from_blob(MONTHLY_CLIM_BLOB)
             df_base = df_base[~df_base["pcode"].isin(args.pcodes)]
-        except Exception:
+        except ResourceNotFoundError:
+            print(f"{MONTHLY_CLIM_BLOB}: not found, starting fresh")
             df_base = pd.DataFrame()
         pcodes_to_run = args.pcodes
     else:

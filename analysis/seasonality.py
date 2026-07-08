@@ -371,7 +371,7 @@ def _(
 
 @app.cell
 def _(mo):
-    trimester_pct_sl = mo.ui.slider(0.10, 0.50, 0.05, 0.25, label="Rainy: trimester ≥ X of annual")
+    trimester_pct_sl = mo.ui.slider(0.10, 0.50, 0.05, 0.15, label="Rainy: trimester ≥ X of annual")
     month_pct_sl     = mo.ui.slider(0.00, 0.20, 0.01, 0.05, label="Rainy: each month ≥ X of annual")
     mo.hstack([trimester_pct_sl, month_pct_sl], justify="start")
     return month_pct_sl, trimester_pct_sl
