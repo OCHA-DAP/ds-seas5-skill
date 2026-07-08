@@ -5,11 +5,24 @@ on:
     - cron: "0 3 1 * *"  # 03:00 UTC on the 1st of every month
   workflow_dispatch:
 
+# NOTE: compute_skill_raster.py (pixel-level forecast layer) is intentionally
+# excluded — it is memory/time-heavy and not suited for a standard 7 GB runner.
+# Refresh the raster layer manually when needed.
+
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    # Runtime: compute_skill.py takes ~30 min for all ~152 countries.
+    # NOTE: The PROD Azure DB firewall must allow GitHub Actions egress IPs.
     permissions:
       contents: write
+
+    env:
+      DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS }}
+      DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
+      DSCI_AZ_DB_PROD_PW: ${{ secrets.DSCI_AZ_DB_PROD_PW }}
+      DSCI_AZ_DB_PROD_HOST: ${{ secrets.DSCI_AZ_DB_PROD_HOST }}
+      DSCI_AZ_DB_PROD_UID: ${{ secrets.DSCI_AZ_DB_PROD_UID }}
 
     steps:
       - uses: actions/checkout@v4
@@ -24,14 +37,14 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Run export script
-        env:
-          DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS }}
-          DSCI_AZ_BLOB_DEV_SAS_WRITE: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS_WRITE }}
-          DSCI_AZ_DB_PROD_PW: ${{ secrets.DSCI_AZ_DB_PROD_PW }}
-          DSCI_AZ_DB_PROD_HOST: ${{ secrets.DSCI_AZ_DB_PROD_HOST }}
-          DSCI_AZ_DB_PROD_UID: ${{ secrets.DSCI_AZ_DB_PROD_UID }}
+      - name: Recompute skill stats from SEAS5 DB → dev blob
+        run: uv run python pipeline/compute_skill.py
+
+      - name: Export static site data (forecast.json, skill_matrix.json, countries.geojson)
         run: uv run python pipeline/export_static_site.py
+
+      - name: Export history browser data (forecasts/YYYY-MM.json + index.json)
+        run: uv run python pipeline/export_history_site.py
 
       - name: Commit updated data
         run: |
