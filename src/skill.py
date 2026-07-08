@@ -15,6 +15,17 @@ def _assign_season_year(s: pd.Series, valid_months: list[int]) -> pd.Series:
     return s.dt.year
 
 
+def trimester_lead(issued_month: int, valid_months: list[int]) -> int:
+    """Signed leadtime: months from the issue month to the trimester's first month.
+
+    0–6 = the whole trimester is forecast; negative = the issuance falls inside the
+    trimester (an in-season / mixed trimester: months before the issue month are already
+    observed, the rest are forecast).
+    """
+    o = (valid_months[0] - issued_month) % 12
+    return o if o <= 6 else o - 12
+
+
 def aggregate_seas5_trimester(
     df: pd.DataFrame,
     issued_month: int,
@@ -73,6 +84,75 @@ def aggregate_era5_trimester(
         .reset_index()
         .rename(columns={"mean": "obs_mean"})
     )
+
+
+def aggregate_mixed_trimester(
+    df_seas5: pd.DataFrame,
+    df_era5: pd.DataFrame,
+    issued_month: int,
+    valid_months: list[int],
+) -> pd.DataFrame:
+    """Trimester means for in-season issuances (negative leads, e.g. JAS issued in Sep).
+
+    Months before the issue month are taken from ERA5 (already observed at issuance:
+    monthly ERA5 lands early the following month); the issue month and later come from
+    this issuance's SEAS5. Each forecast month is bias-corrected against ERA5 for that
+    calendar month — mean/std matched in log space over the overlap years — before the
+    three months are averaged, since SEAS5's bias is month- and lead-specific and the
+    trimester-level normalization can't fix a biased single month blended with obs.
+
+    Returns DataFrame[season_year, forecast_mean] in original units (mm/day), the same
+    contract as aggregate_seas5_trimester, so the downstream log1p / trimester
+    normalization / detrending pipeline is unchanged.
+    """
+    empty = pd.DataFrame(
+        {"season_year": pd.Series(dtype="int64"), "forecast_mean": pd.Series(dtype="float64")}
+    )
+    monthly: list[pd.DataFrame] = []
+    for m in valid_months:
+        o = (m - issued_month) % 12
+        signed = o if o <= 6 else o - 12
+        e_m = df_era5[df_era5["valid_date"].dt.month == m]
+        e_ser = pd.DataFrame({
+            "season_year": _assign_season_year(e_m["valid_date"], valid_months).astype("int64"),
+            "value": e_m["mean"].values,
+        })
+        if signed < 0:  # observed month
+            monthly.append(e_ser)
+            continue
+        # Forecast month: SEAS5 horizon < 12 months, so (issued month, valid month)
+        # uniquely determines the leadtime — no explicit leadtime filter needed.
+        f_m = df_seas5[
+            (df_seas5["issued_date"].dt.month == issued_month)
+            & (df_seas5["valid_date"].dt.month == m)
+        ]
+        if f_m.empty:
+            return empty
+        f_ser = pd.DataFrame({
+            "season_year": _assign_season_year(f_m["valid_date"], valid_months).astype("int64"),
+            "value": f_m["mean"].values,
+        })
+        # Per-month bias correction in log space over the overlap years.
+        f_log = np.log1p(f_ser["value"].clip(lower=0))
+        e_by_year = e_ser.assign(e_log=np.log1p(e_ser["value"].clip(lower=0)))
+        ov = f_ser.assign(f_log=f_log).merge(
+            e_by_year[["season_year", "e_log"]], on="season_year", how="inner"
+        )
+        if len(ov) >= 2:
+            f_mu = ov["f_log"].mean()
+            f_sd = max(ov["f_log"].std(ddof=1), 1e-9)
+            e_mu = ov["e_log"].mean()
+            e_sd = ov["e_log"].std(ddof=1)
+            corrected = (f_log - f_mu) / f_sd * e_sd + e_mu
+            f_ser = f_ser.assign(value=np.expm1(corrected).clip(lower=0))
+        monthly.append(f_ser)
+
+    allm = pd.concat([p.assign(_i=i) for i, p in enumerate(monthly)], ignore_index=True)
+    piv = allm.pivot_table(index="season_year", columns="_i", values="value", aggfunc="mean")
+    piv = piv.reindex(columns=range(len(valid_months))).dropna()  # complete trimesters only
+    if piv.empty:
+        return empty
+    return piv.mean(axis=1).rename("forecast_mean").reset_index()
 
 
 def normalize_seas5(df_s: pd.DataFrame, df_e: pd.DataFrame) -> pd.DataFrame:
@@ -142,11 +222,18 @@ def season_year_for(
 ) -> int:
     """Forward map (issued_month, issued_year, trimester) -> season_year.
 
-    Inverse of the season_year assignment in aggregate_seas5_trimester. Wrapping
-    trimesters (contain both Dec and Jan) anchor on December → season_year = issued_year;
-    non-wrapping trimesters use the year of the last future (<=6 ahead) month.
+    Inverse of the season_year assignment in aggregate_seas5_trimester /
+    aggregate_mixed_trimester. Wrapping trimesters (contain both Dec and Jan) anchor on
+    December; non-wrapping trimesters use the year of the last future (<=6 ahead) month.
+    For in-season issuances (negative lead) the issue month falls inside the trimester:
+    non-wrapping → same calendar year; wrapping → the anchor (Dec) year, which is the
+    issue year only while the issue month is still on the >6 side of the wrap.
     """
     is_wrap = 12 in valid_months and 1 in valid_months
+    if trimester_lead(issued_month, valid_months) < 0:
+        if is_wrap:
+            return issued_year if issued_month > 6 else issued_year - 1
+        return issued_year
     if is_wrap:
         return issued_year
     future_offs = [o for m in valid_months if 1 <= (o := (m - issued_month) % 12) <= 6]
@@ -220,7 +307,14 @@ def run_all_combinations(
 
     for issued_month in range(1, 13):
         for trimester_name, valid_months in TRIMESTERS.items():
-            df_s_raw = aggregate_seas5_trimester(df_seas5, issued_month, valid_months)
+            # In-season (mixed) trimesters — issuance falls inside the trimester, so the
+            # already-observed months come from ERA5 and only the rest is forecast.
+            if trimester_lead(issued_month, valid_months) in (-1, -2):
+                df_s_raw = aggregate_mixed_trimester(
+                    df_seas5, df_era5, issued_month, valid_months
+                )
+            else:
+                df_s_raw = aggregate_seas5_trimester(df_seas5, issued_month, valid_months)
             df_e_raw = aggregate_era5_trimester(df_era5, valid_months)
 
             # log1p-transform (handles near-zero values; makes distribution more Gaussian)

@@ -53,6 +53,9 @@ h1 { font-size: 1.35rem; margin: 0 0 2px; }
 .slider-control { display: flex; flex-direction: column; gap: 4px; }
 .slider-control label { white-space: nowrap; }
 .slider-control input[type="range"] { width: 240px; accent-color: #2a6db0; cursor: pointer; }
+/* Selection is in-season (negative leadtime): pale the slider as a visual cue. */
+.slider-control input[type="range"].in-season { accent-color: #a9bfd8; opacity: 0.75; }
+.slider-control .in-season-tag { color: #7d8fa3; font-weight: 600; }
 
 /* match the world's 2:1 shape so the map fills to extents with no letterboxing */
 #map, #skill-map { width: 100%; aspect-ratio: 2 / 1; min-height: 320px; background: #fff; border: 1px solid var(--line); }

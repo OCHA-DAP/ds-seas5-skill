@@ -43,6 +43,7 @@
     <div id="map"></div>
 
     <p id="issued-lock-note" class="lock-note" hidden>Pixel level is only available for the most recent issuance.</p>
+    <p id="pixel-tri-note" class="lock-note" hidden>Pixel level is not available for in-season trimesters — switch to Country, or pick a fully-forecast trimester.</p>
 
     <div id="legend"></div>
 
@@ -53,7 +54,10 @@
       = low skill. Use the <strong>Issued</strong> year/month menus to browse past forecasts (in-sample
       reconstructions). The <strong>Country</strong>/<strong>Pixel</strong> toggle switches between
       country averages and the native SEAS5 0.4° grid — pixel level is only available for the most
-      recent issuance. By default, alerts are shown only for the rainy season.
+      recent issuance. By default, alerts are shown only for the rainy season. The first two
+      trimesters on the slider are <strong>in-season</strong>: they are already underway at issuance,
+      so their 1–2 elapsed months use ERA5 observations and only the remainder is forecast — a much
+      more confident (and higher-skill) estimate of how the season ends up.
     </p>
   </section>
 
@@ -79,14 +83,20 @@
 
     <div id="skill-map"></div>
 
+    <p id="skillmap-pixel-note" class="lock-note" hidden>Pixel level is not available for in-season issues (issued after the trimester started) — country level only.</p>
+
     <div id="skill-map-legend" class="legend-group"></div>
 
     <p class="note">
       SEAS5 hindcast skill — the temporal Pearson correlation (r) against ERA5 over 1981–present —
       for the selected valid trimester and <strong>leadtime</strong> (months from the issue month to
       the trimester's first month). Colours are categorical at the skill cutoffs: high (r&nbsp;≥&nbsp;0.5),
-      moderate (0.3–0.5), low (0–0.3), negative. The <strong>Country</strong>/<strong>Pixel</strong>
-      toggle switches between country averages and the native SEAS5 0.4° grid. By default skill is
+      moderate (0.3–0.5), low (0–0.3), negative. The two rightmost issue months are
+      <strong>in-season</strong> (the trimester has already started): the elapsed months use ERA5
+      observations and only the rest is forecast, so skill is naturally much higher.
+      The <strong>Country</strong>/<strong>Pixel</strong>
+      toggle switches between country averages and the native SEAS5 0.4° grid (pixel: fully-forecast
+      issues only). By default skill is
       shown only where the trimester is in the rainy season (≥&nbsp;15% of annual rainfall, the rest
       greyed); the checkbox reveals skill everywhere. Detrended, matching the forecast map's defaults.
       This shows skill only — not the current forecast.
@@ -110,7 +120,10 @@
       month). Each cell is labelled with its <strong>issue month</strong>. Colours are categorical at
       the skill cutoffs: high (r&nbsp;≥&nbsp;0.5), moderate (0.3–0.5), low (0–0.3), negative. Leadtime
       stops at 4 because SEAS5 only reaches 6 months ahead, so a longer lead would cover only part of
-      the 3-month trimester. Skill generally decays with leadtime and is highest in each area's rainy
+      the 3-month trimester. <strong>Negative leadtimes</strong> (above the dark line) are
+      <strong>in-season</strong> issues: the trimester had already started, so its elapsed 1–2 months
+      use ERA5 observations (with each remaining forecast month bias-corrected per month) — skill is
+      naturally much higher. Skill generally decays with leadtime and is highest in each area's rainy
       season. Detrended forecasts, matching the map's defaults.
     </p>
   </section>
@@ -142,7 +155,12 @@
         <li><strong>Aggregate to the trimester.</strong> For a given issue month, the monthly
           forecast is averaged over the 3-month target season (e.g. a June issue → Jul–Aug–Sep),
           giving one forecast value per year. ERA5 is aggregated the same way (complete seasons
-          only).</li>
+          only). For <strong>in-season trimesters</strong> (issued after the season started, e.g. an
+          August issue → Jul–Aug–Sep) the already-elapsed months are taken from ERA5 observations
+          and only the remaining month(s) from SEAS5 — each forecast month first bias-corrected
+          against ERA5 for that calendar month (mean and spread matched in log space) so observed
+          and forecast months can be blended without the forecast's month-specific bias leaking
+          into the trimester value.</li>
         <li><strong>Transform, normalise &amp; detrend.</strong> Values are log-transformed, and
           the forecast is rescaled to match the ERA5 mean and spread, so the two are comparable. A
           linear trend is then removed from both the forecast and the observations (in log space,
@@ -182,9 +200,15 @@
         trimester, leadtime is the number of months from the issue month to the trimester's first
         month (a June issue → Jul–Aug–Sep is leadtime&nbsp;1), and skill generally decays as leadtime
         grows. SEAS5 runs 6 months ahead, so leadtimes go up to 4 — beyond that a 3-month trimester
-        would extend past the forecast horizon. The <strong>Skill map</strong> and <strong>Skill by
+        would extend past the forecast horizon. <strong>Negative leadtimes (−1, −2)</strong> are
+        in-season issues: the trimester had already started, so its elapsed months are ERA5
+        observations and only the remainder is forecast. Their skill is computed the same way (blended
+        series vs. the fully-observed trimester) and is naturally much higher, since 1–2 of the 3
+        months are shared with the observations — read it as confidence in the season's final outcome,
+        not forecast skill per se. The <strong>Skill map</strong> and <strong>Skill by
         country</strong> tabs show r for every trimester and leadtime, coloured at these same cutoffs
-        (with negative r shown as its own category).
+        (with negative r shown as its own category). Pixel-level layers cover the fully-forecast
+        leadtimes only (0–4); in-season estimates are country-level.
       </p>
 
       <h3>4. Rainy-season (in-season) selection</h3>

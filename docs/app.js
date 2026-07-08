@@ -205,10 +205,21 @@ Promise.all([
   const monthSel = document.getElementById("issued-month");
   const seasonalityOn = () => seasonality.checked;
   const currentTri = () => fc.trimesters[+triSlider.value].key;
+  // Signed leadtime of a trimester for the loaded issuance; negative = in-season
+  // (the trimester already started — its elapsed months are observed, not forecast).
+  const TRI_START = { JFM: 1, FMA: 2, MAM: 3, AMJ: 4, MJJ: 5, JJA: 6,
+    JAS: 7, ASO: 8, SON: 9, OND: 10, NDJ: 11, DJF: 12 };
+  const triLead = (key) => {
+    const o = (TRI_START[key] - fc.issued_month + 12) % 12;
+    return o <= 6 ? o : o - 12;
+  };
   const updateTriLabel = () => {
     const t = fc.trimesters[+triSlider.value];
     curTriKey = t.key;
-    triLabel.textContent = `${t.key} (${t.label})`;
+    const inSeason = triLead(t.key) < 0;
+    triSlider.classList.toggle("in-season", inSeason);
+    triLabel.innerHTML = `${t.key} (${t.label})` +
+      (inSeason ? ` <span class="in-season-tag">· in season</span>` : "");
   };
 
   // ── Map ──────────────────────────────────────────────────────────────────────
@@ -292,8 +303,18 @@ Promise.all([
                                           [worldBounds.getNorth(), worldBounds.getEast()]];
   const rasterLayer = new RasterLayer(rbounds);
   const variant = () => (seasonalityOn() ? "all" : "masked");
+  // Baked pixel PNGs exist only for the fully-forecast trimesters in rmeta; the two
+  // in-season (mixed obs+forecast) trimesters are country-level only.
+  const pixTriNote = document.getElementById("pixel-tri-note");
+  const pixelHasTri = (key) => !!rmeta && rmeta.trimesters.some((t) => t.key === key);
   function loadPixelGrid() {
     if (!rmeta) return;
+    if (!pixelHasTri(currentTri())) {
+      if (pixTriNote) pixTriNote.hidden = false;
+      rasterLayer.setGrid(null, 0, 0);
+      return;
+    }
+    if (pixTriNote) pixTriNote.hidden = true;
     const img = new Image();
     img.onload = () => {
       const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
@@ -351,6 +372,7 @@ Promise.all([
   function applyMode() {
     if (mode === "country") {
       setControlsEnabled(true);
+      if (pixTriNote) pixTriNote.hidden = true;
       map.removeLayer(rasterLayer); map.removeLayer(outlineLayer);
       admLayer.addTo(map);
       renderAdm();

@@ -23,6 +23,7 @@ from shapely.geometry import MultiPolygon, Polygon, box
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.constants import PROJECT_PREFIX, TRIMESTERS
+from src.skill import trimester_lead
 
 # Defaults mirror the marimo app's out-of-the-box controls.
 USE_DETRENDED = True  # app default "Forecast version: Detrended"
@@ -37,19 +38,38 @@ SIMPLIFY_TOLERANCE = 0.05  # topology-preserving (see geometry block); finer tha
 CLIP_BOUNDS = (-180, -60, 180, 84)
 
 
+def issued_year_for_season(season_year: int, im: int, tri: str) -> int:
+    """Map season_year back to issue year (inverse of src.skill.season_year_for).
+
+    Fully-forecast trimesters: +1 year back for cross-year (issued before a next-year
+    trimester). In-season issuances (negative lead): the issue month falls inside the
+    trimester — same calendar year for non-wrapping trimesters; for wrapping ones the
+    season anchors on December's year, so an issue month on the ≤6 side is year + 1.
+    """
+    months = TRIMESTERS[tri]
+    is_wrap = 12 in months and 1 in months
+    if trimester_lead(im, months) < 0:
+        if is_wrap:
+            return int(season_year) + (0 if im > 6 else 1)
+        return int(season_year)
+    is_cross = not is_wrap and min(months) < im
+    return int(season_year) - (1 if is_cross else 0)
+
+
 def _actual_issued_year(row) -> int:
-    """Map season_year back to issue year (year+1 for cross-year trimesters)."""
-    tri = TRIMESTERS[row["trimester"]]
-    is_wrap = 12 in tri and 1 in tri
-    is_cross = not is_wrap and min(tri) < row["issued_month"]
-    return int(row["current_forecast_year"]) - (1 if is_cross else 0)
+    return issued_year_for_season(
+        row["current_forecast_year"], row["issued_month"], row["trimester"]
+    )
 
 
 def _tri_valid(months: list[int], im: int) -> bool:
-    """Valid = no past month and at least one future month <= 6 ahead (app's rule)."""
-    signed = [o if (o := (m - im) % 12) <= 6 else o - 12 for m in months]
-    future = [s for s in signed if s > 0]
-    return all(s >= 0 for s in signed) and bool(future) and max(future) <= 6
+    """Valid = lead −2 … 4: complete trimesters with ≥1 forecast month in SEAS5's horizon.
+
+    Leads 0–4 are fully-forecast trimesters (lead 5–6 would spill past the 6-month
+    horizon). Leads −1/−2 are in-season (mixed) trimesters: 1–2 months already observed
+    from ERA5, the rest forecast from this issuance.
+    """
+    return -2 <= trimester_lead(im, months) <= 4
 
 
 def _min_signed(months: list[int], im: int) -> int:
@@ -58,6 +78,15 @@ def _min_signed(months: list[int], im: int) -> int:
 
 def _tri_label(months: list[int]) -> str:
     return "–".join(calendar.month_abbr[m] for m in months)
+
+
+def _default_tri(valid_tris: list[str], im: int) -> str:
+    """Default selection = the lead-1 trimester (first fully-forecast one after the
+    current month's), unchanged from before in-season trimesters were added."""
+    for t in valid_tris:
+        if trimester_lead(im, TRIMESTERS[t]) == 1:
+            return t
+    return valid_tris[len(valid_tris) // 2]
 
 
 def compute_rainy_set(monthly_clim: pd.DataFrame) -> set[tuple[str, str]]:
@@ -86,8 +115,9 @@ def compute_rainy_set(monthly_clim: pd.DataFrame) -> set[tuple[str, str]]:
 # Only complete trimesters are kept: SEAS5's horizon is 7 months (leads 0–6), so a trimester
 # whose first month is at lead L spans leads L..L+2 and fits only when L ≤ 4. Leads 5–6 would
 # average just the 1–2 in-horizon months against the full 3-month ERA5 obs (mislabelled skill),
-# so they are excluded.
-SKILL_LEADS = [0, 1, 2, 3, 4]
+# so they are excluded. Negative leads are in-season (mixed) trimesters: the already-observed
+# months come from ERA5, only the remainder is forecast — so skill is naturally much higher.
+SKILL_LEADS = [-2, -1, 0, 1, 2, 3, 4]
 
 
 def build_skill_matrix(
@@ -214,7 +244,7 @@ def main() -> None:
         [name for name, months in TRIMESTERS.items() if _tri_valid(months, issued_month)],
         key=lambda t: _min_signed(TRIMESTERS[t], issued_month),
     )
-    default_trimester = valid_tris[1] if len(valid_tris) > 1 else valid_tris[0]
+    default_trimester = _default_tri(valid_tris, issued_month)
     print(f"Latest issue: {issued_label}  valid trimesters: {valid_tris}  default: {default_trimester}")
 
     pcode_to_iso3 = df.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
