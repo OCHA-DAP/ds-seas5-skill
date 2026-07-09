@@ -48,7 +48,6 @@ const DASH = 7;                                // dash length when a country is 
 // ── Category styling (ported from the main map) ──────────────────────────────────
 const STYLE = {
   off_season:        ["#b1c1c2", "#9db1b3", null],
-  no_data:           ["#ebeff0", "#d8e0e1", null],
   high_none:         ["#e2e8e8", "#c4d0d1", null],
   mid_none:          ["#e2e8e8", "#c4d0d1", "grey"],
   low_skill:         ["#ffffff", "#c4d0d1", "cross"],
@@ -67,7 +66,7 @@ const CAT_LABEL = {
   flood_sev: "Above normal", flood_vsev: "Strongly above normal",
   high_none: "Roughly normal", mid_none: "Roughly normal (mod skill)",
   low_skill: "Low skill", off_season: "Outside rainy season",
-  no_data: "No data", unmonitored: "Not monitored",
+  unmonitored: "Not monitored",
 };
 const catBase = (cat) => cat.replace(/_(high|mod)$/, "");
 let T = { sev_rp: 3, vsev_rp: 10, r_mod: 0.3, r_high: 0.5 };
@@ -75,7 +74,8 @@ let T = { sev_rp: 3, vsev_rp: 10, r_mod: 0.3, r_high: 0.5 };
 function classify(rec, rainyOn) {
   if (!rec) return "unmonitored";
   if (!rainyOn && !rec.rainy) return "off_season";
-  if (rec.r == null || rec.pct == null) return "no_data";
+  // Missing r/pct means the country isn't effectively monitored for this slot.
+  if (rec.r == null || rec.pct == null) return "unmonitored";
   if (rec.r < T.r_mod) return "low_skill";
   const vsev_m = 100 / T.vsev_rp, sev_m = 100 / T.sev_rp;
   const pct = rec.pct, r = rec.r;

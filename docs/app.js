@@ -4,7 +4,6 @@
 // [fill, edge, hatch]  hatch: null | "white" | "grey" | "cross"
 const STYLE = {
   off_season:        ["#b1c1c2", "#9db1b3", null],
-  no_data:           ["#ebeff0", "#d8e0e1", null],
   high_none:         ["#e2e8e8", "#c4d0d1", null],
   mid_none:          ["#e2e8e8", "#c4d0d1", "grey"],
   low_skill:         ["#ffffff", "#c4d0d1", "cross"],
@@ -24,7 +23,7 @@ const CAT_LABEL = {
   flood_sev: "Above normal", flood_vsev: "Strongly above normal",
   high_none: "Roughly normal", mid_none: "Roughly normal (mod skill)",
   low_skill: "Low skill", off_season: "Outside rainy season",
-  no_data: "No data", unmonitored: "Not monitored",
+  unmonitored: "Not monitored",
 };
 
 // Strip the skill suffix so a category maps to its CAT_LABEL key.
@@ -36,7 +35,8 @@ let T = { sev_rp: 3, vsev_rp: 10, r_mod: 0.3, r_high: 0.5 };
 function classify(rec, rainyOn) {
   if (!rec) return "unmonitored";
   if (!rainyOn && !rec.rainy) return "off_season";
-  if (rec.r == null || rec.pct == null) return "no_data";
+  // Missing r/pct means the country isn't effectively monitored for this slot.
+  if (rec.r == null || rec.pct == null) return "unmonitored";
   if (rec.r < T.r_mod) return "low_skill";
   const vsev_m = 100 / T.vsev_rp, sev_m = 100 / T.sev_rp;
   const pct = rec.pct, r = rec.r;
@@ -111,7 +111,7 @@ const KIND = [0, 0, 3, 0, 2, 0, 1, 0, 1, 0, 1, 0, 1];
 const CODE_GROUPS = {
   drought_vsev: [5, 6], drought_sev: [7, 8], none: [3, 4],
   flood_sev: [9, 10], flood_vsev: [11, 12],
-  low_skill: [2], off_season: [1], no_data: [], unmonitored: [],
+  low_skill: [2], off_season: [1], unmonitored: [],
   skill_high: [3, 5, 7, 9, 11], skill_mod: [4, 6, 8, 10, 12],
 };
 
@@ -543,7 +543,7 @@ function buildLegend(mode, onHover) {
   ], 118);
 
   // 3) The rest as plain swatches.
-  const other = mode === "pixel" ? ["off_season"] : ["off_season", "no_data", "unmonitored"];
+  const other = mode === "pixel" ? ["off_season"] : ["off_season", "unmonitored"];
   const g = document.createElement("div");
   g.className = "legend-group";
   g.style.paddingTop = "18px";
