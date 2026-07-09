@@ -11,4 +11,3 @@ azure-core==1.39.0
 azure-storage-blob==12.28.0
 psycopg2-binary==2.9.12
 sqlalchemy==2.0.49
-python-dotenv>=1.0.0
