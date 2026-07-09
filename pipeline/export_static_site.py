@@ -1,10 +1,15 @@
 """Build the static GitHub Pages site data (docs/data/).
 
-Reads the processed skill stats (blob) and ERA5 climatology (DB) ONCE and writes two
-static files that the docs/ page consumes at runtime with no backend:
+Reads the processed skill stats (blob) and ERA5 climatology (DB) ONCE and writes:
 
   docs/data/forecast.json     — latest forecast per iso3 per valid trimester (+ rainy flag)
+  docs/data/skill_matrix.json — per-country Pearson-r matrix (lead x trimester) + climatology
   docs/data/countries.geojson — simplified country boundaries (iso3, name)
+
+Also uploads a flat parquet of the forecast data to blob storage so downstream
+consumers can access it without the static site:
+
+  ds-seas5-skill/processed/forecast_site.parquet
 
 Run:  uv run python pipeline/export_static_site.py
 """
@@ -32,6 +37,7 @@ THRESHOLDS = {"sev_rp": 3, "vsev_rp": 10, "r_mod": 0.3, "r_high": 0.5}
 
 DOCS_DATA = Path(__file__).resolve().parent.parent / "docs" / "data"
 GEO_SRC = Path(__file__).resolve().parent.parent / "analysis" / "_world_countries.gpkg"
+FORECAST_SITE_BLOB = f"{PROJECT_PREFIX}/processed/forecast_site.parquet"
 SIMPLIFY_TOLERANCE = 0.05  # topology-preserving (see geometry block); finer than the old 0.1
 # (min_lon, min_lat, max_lon, max_lat) — trims antimeridian overflow + polar clutter.
 CLIP_BOUNDS = (-180, -60, 180, 84)
@@ -157,6 +163,45 @@ def build_skill_matrix(
     }
 
 
+def build_forecast_df(
+    data: dict[str, dict],
+    issued_month: int,
+    issued_year: int,
+    country_name_by_iso3: dict[str, str],
+) -> pd.DataFrame:
+    """Flatten forecast site data into a tidy DataFrame for blob upload.
+
+    Each row represents one (iso3, trimester) combination from the latest
+    issued forecast, with the same fields used by the static site.
+
+    Args:
+        data: Nested dict ``{iso3: {trimester: {pct, r, rp, rainy}}}``.
+        issued_month: Calendar month of the latest forecast issue (1–12).
+        issued_year: Year of the latest forecast issue.
+        country_name_by_iso3: Mapping from iso3 to country name.
+
+    Returns:
+        DataFrame with columns: issued_month, issued_year, iso3, country_name,
+        trimester, forecast_pct, return_period, pearson_r, is_rainy.
+    """
+    rows = [
+        {
+            "issued_month": issued_month,
+            "issued_year": issued_year,
+            "iso3": iso3,
+            "country_name": country_name_by_iso3.get(iso3),
+            "trimester": tri,
+            "forecast_pct": vals["pct"],
+            "return_period": vals["rp"],
+            "pearson_r": vals["r"],
+            "is_rainy": vals["rainy"],
+        }
+        for iso3, tris in data.items()
+        for tri, vals in tris.items()
+    ]
+    return pd.DataFrame(rows)
+
+
 def _polygonal(geom):
     """Keep only polygon parts (make_valid can emit GeometryCollections / lines)."""
     if geom is None or geom.is_empty:
@@ -255,6 +300,13 @@ def main() -> None:
     fc_path = DOCS_DATA / "forecast.json"
     fc_path.write_text(json.dumps(forecast, separators=(",", ":")))
     print(f"Wrote {fc_path}  ({fc_path.stat().st_size/1024:.1f} KB, {len(data)} countries)")
+
+    country_name_by_iso3 = (
+        df.drop_duplicates("iso3").set_index("iso3")["country_name"].to_dict()
+    )
+    forecast_df = build_forecast_df(data, issued_month, issued_year, country_name_by_iso3)
+    stratus.upload_parquet_to_blob(forecast_df, FORECAST_SITE_BLOB, stage="dev")
+    print(f"Uploaded {FORECAST_SITE_BLOB}  ({len(forecast_df)} rows)")
 
     # Per-country skill matrix (all issued months × trimesters) + trimester climatology.
     skill_matrix = build_skill_matrix(df, monthly_clim, rainy_set, pcode_to_iso3)
