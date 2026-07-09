@@ -47,20 +47,20 @@ const DASH = 7;                                // dash length when a country is 
 
 // ── Category styling (ported from the main map) ──────────────────────────────────
 const STYLE = {
-  off_season:        ["#D0D0D0", "#BBBBBB", null],
-  no_data:           ["#E8E8E8", "#CCCCCC", null],
-  high_none:         ["#FFFFFF", "#AAAAAA", null],
-  mid_none:          ["#FFFFFF", "#AAAAAA", "grey"],
-  low_skill:         ["#FFFFFF", "#AAAAAA", "cross"],
-  drought_vsev_high: ["#7B3A1A", "#5A2A0A", null],
-  drought_vsev_mod:  ["#7B3A1A", "#5A2A0A", "white"],
-  drought_sev_high:  ["#C8844A", "#A06030", null],
-  drought_sev_mod:   ["#C8844A", "#A06030", "white"],
-  flood_vsev_high:   ["#0D40B0", "#092E88", null],
-  flood_vsev_mod:    ["#0D40B0", "#092E88", "white"],
-  flood_sev_high:    ["#71B3E5", "#4A90C8", null],
-  flood_sev_mod:     ["#71B3E5", "#4A90C8", "white"],
-  unmonitored:       ["#F5F5F5", "#E0E0E0", null],
+  off_season:        ["#b1c1c2", "#9db1b3", null],
+  no_data:           ["#ebeff0", "#d8e0e1", null],
+  high_none:         ["#e2e8e8", "#c4d0d1", null],
+  mid_none:          ["#e2e8e8", "#c4d0d1", "grey"],
+  low_skill:         ["#ffffff", "#c4d0d1", "cross"],
+  drought_vsev_high: ["#7f5619", "#5c3e12", null],
+  drought_vsev_mod:  ["#7f5619", "#5c3e12", "white"],
+  drought_sev_high:  ["#dda555", "#b98634", null],
+  drought_sev_mod:   ["#dda555", "#b98634", "white"],
+  flood_vsev_high:   ["#134ead", "#0e3b82", null],
+  flood_vsev_mod:    ["#134ead", "#0e3b82", "white"],
+  flood_sev_high:    ["#74a1e8", "#4681e0", null],
+  flood_sev_mod:     ["#74a1e8", "#4681e0", "white"],
+  unmonitored:       ["#f5f7f7", "#e2e8e8", null],
 };
 const CAT_LABEL = {
   drought_vsev: "Strongly below normal", drought_sev: "Below normal",
@@ -102,7 +102,7 @@ function buildPatterns() {
     if (!hatch) { fillFor[cat] = fill; continue; }
     const id = "cbpf-pat-" + cat;
     const stroke = hatch === "white" ? "rgba(255,255,255,0.7)"
-                 : hatch === "grey" ? "#CCCCCC" : "#BBBBBB";
+                 : hatch === "grey" ? "#9db1b3" : "#b1c1c2";
     const p = document.createElementNS(NS, "pattern");
     p.setAttribute("id", id);
     p.setAttribute("patternUnits", "userSpaceOnUse");
@@ -129,7 +129,7 @@ function buildPatterns() {
 }
 
 function hatchBg(hatch) {
-  const color = hatch === "white" ? "rgba(255,255,255,0.7)" : hatch === "grey" ? "#CCC" : "#BBB";
+  const color = hatch === "white" ? "rgba(255,255,255,0.7)" : hatch === "grey" ? "#9db1b3" : "#b1c1c2";
   const stripe = (deg) => `repeating-linear-gradient(${deg}deg, ${color} 0 1.5px, transparent 1.5px 5px)`;
   return hatch === "cross" ? `${stripe(45)}, ${stripe(135)}` : stripe(135);
 }
@@ -241,6 +241,7 @@ Promise.all([
     crs: L.CRS.EPSG4326, minZoom: 1, maxZoom: 8,
     attributionControl: false, zoomControl: false, maxBoundsViscosity: 1.0,
   });
+  L.control.zoom({ position: "topright" }).addTo(map);
   const outlineLayer = L.geoJSON(geo, { interactive: false, style: { opacity: 0, fillOpacity: 0 } });
   const worldBounds = outlineLayer.getBounds();
   const LAT_PAD = 8;

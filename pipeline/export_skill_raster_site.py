@@ -40,14 +40,15 @@ CUBE = Path("/tmp/skill_stats_grid_detrended.nc")  # falls back to dev blob if m
 THRESH = {"r_mod": 0.30, "r_high": 0.50}
 LEADS = [0, 1, 2, 3, 4]  # complete trimesters only (L+2 ≤ 6 horizon); see module docstring
 
-# Category code per pixel and its RGBA colour (matches the Skill-tab heatmap palette).
+# Category code per pixel and its RGBA colour (HDX brand ramp, matching the adm0
+# skill map's palette: brand greens, error-scale brown for negative).
 #   0 transparent (no data / ocean)  1 negative  2 low  3 moderate  4 high
 PALETTE = {
     0: (0, 0, 0, 0),
-    1: (229, 115, 115, 255),  # negative  r < 0
-    2: (254, 224, 139, 255),  # low       0 ≤ r < r_mod
-    3: (166, 217, 106, 255),  # moderate  r_mod ≤ r < r_high
-    4: (26, 152, 80, 255),    # high      r ≥ r_high
+    1: (243, 218, 215, 255),  # negative  r < 0        (#f3dad7, pale error tint)
+    2: (190, 224, 214, 255),  # low       0 ≤ r < r_mod (#bee0d6)
+    3: (125, 193, 173, 255),  # moderate  r_mod ≤ r < r_high (#7dc1ad)
+    4: (30, 121, 95, 255),    # high      r ≥ r_high    (#1e795f)
 }
 
 
@@ -96,10 +97,10 @@ def main():
                      out_shape=(len(y), len(x)), transform=transform,
                      fill=0, all_touched=True).astype(bool)
 
-    # Off-season grey cover (#D0D0D0) per trimester — the rainy mask is leadtime-independent,
-    # so one cover overlays all leads. Drawn over the skill image when the rainy mask is on.
-    # Re-derive rainy at the current threshold from the cube (avoids reloading ERA5).
-    off_grey = (208, 208, 208, 255)
+    # Off-season grey cover (#b1c1c2, HDX neutral-4) per trimester — the rainy mask is
+    # leadtime-independent, so one cover overlays all leads. Drawn over the skill image
+    # when the rainy mask is on. Re-derived from the cube (avoids reloading ERA5).
+    off_grey = (177, 193, 194, 255)
     rainy_da = rainy_from_cube(ds, RAINY_TRIMESTER_PCT)
 
     n = 0
