@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SEAS5 precipitation alerts — latest forecast</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Merriweather:wght@700&display=swap" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>ECMWF SEAS5 precipitation alerts</h1>
+    <p id="subtitle">Latest forecast — loading…</p>
+  </header>
+
+  <nav id="tabs">
+    <button class="tab active" data-tab="map">Map</button>
+    <button class="tab" data-tab="skillmap">Skill map</button>
+    <button class="tab" data-tab="skill">Skill by country</button>
+    <button class="tab" data-tab="methods">Methodology</button>
+  </nav>
+
+  <section id="tab-map" class="tab-panel">
+    <div id="controls">
+      <div class="seg" id="view-toggle" role="group" aria-label="Resolution">
+        <button class="seg-btn active" data-view="country">Country</button>
+        <button class="seg-btn" data-view="pixel">Pixel</button>
+      </div>
+      <label class="ctl">Issued
+        <select id="issued-year" class="map-select"></select>
+        <select id="issued-month" class="map-select"></select>
+      </label>
+      <div class="slider-control">
+        <label for="trimester">Valid trimester: <strong id="trimester-label">—</strong></label>
+        <input type="range" id="trimester" min="0" max="0" step="1" value="0" />
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="seasonality" />
+        Show alerts outside rainy season
+      </label>
+    </div>
+
+    <div id="map"></div>
+
+    <p id="issued-lock-note" class="lock-note" hidden>Pixel level is only available for the most recent issuance.</p>
+    <p id="pixel-tri-note" class="lock-note" hidden>Pixel level is not available for in-season trimesters — switch to Country, or pick a fully-forecast trimester.</p>
+
+    <div id="legend"></div>
+
+    <p class="note">
+      Forecast issued <span id="issued-label">—</span>. Colours show where this SEAS5
+      forecast sits within its historical distribution, where the seasonal forecast has skill;
+      hatched fills indicate moderate (vs. high) skill. Grey = outside the rainy season; cross-hatch
+      = low skill. Use the <strong>Issued</strong> year/month menus to browse past forecasts (in-sample
+      reconstructions). The <strong>Country</strong>/<strong>Pixel</strong> toggle switches between
+      country averages and the native SEAS5 0.4° grid — pixel level is only available for the most
+      recent issuance. By default, alerts are shown only for the rainy season. The first two
+      trimesters on the slider are <strong>in-season</strong>: they are already underway at issuance,
+      so their 1–2 elapsed months use ERA5 observations and only the remainder is forecast — a much
+      more confident (and higher-skill) estimate of how the season ends up.
+    </p>
+  </section>
+
+  <section id="tab-skillmap" class="tab-panel" hidden>
+    <div id="controls">
+      <div class="seg" id="skillmap-toggle" role="group" aria-label="Resolution">
+        <button class="seg-btn active" data-view="country">Country</button>
+        <button class="seg-btn" data-view="pixel">Pixel</button>
+      </div>
+      <div class="slider-control">
+        <label for="skillmap-tri">Valid trimester: <strong id="skillmap-tri-label">—</strong></label>
+        <input type="range" id="skillmap-tri" min="0" max="11" step="1" value="0" />
+      </div>
+      <div class="slider-control">
+        <label for="skillmap-lead">Issued month: <strong id="skillmap-lead-label">—</strong></label>
+        <input type="range" id="skillmap-lead" min="0" max="4" step="1" value="3" />
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="skillmap-seasonality" />
+        Show skill outside rainy season
+      </label>
+    </div>
+
+    <div id="skill-map"></div>
+
+    <p id="skillmap-pixel-note" class="lock-note" hidden>Pixel level is not available for in-season issues (issued after the trimester started) — country level only.</p>
+
+    <div id="skill-map-legend" class="legend-group"></div>
+
+    <p class="note">
+      SEAS5 hindcast skill — the temporal Pearson correlation (r) against ERA5 over 1981–present —
+      for the selected valid trimester and <strong>leadtime</strong> (months from the issue month to
+      the trimester's first month). Colours are categorical at the skill cutoffs: high (r&nbsp;≥&nbsp;0.5),
+      moderate (0.3–0.5), low (0–0.3), negative. The two rightmost issue months are
+      <strong>in-season</strong> (the trimester has already started): the elapsed months use ERA5
+      observations and only the rest is forecast, so skill is naturally much higher.
+      The <strong>Country</strong>/<strong>Pixel</strong>
+      toggle switches between country averages and the native SEAS5 0.4° grid (pixel: fully-forecast
+      issues only). By default skill is
+      shown only where the trimester is in the rainy season (≥&nbsp;15% of annual rainfall, the rest
+      greyed); the checkbox reveals skill everywhere. Detrended, matching the forecast map's defaults.
+      This shows skill only — not the current forecast.
+    </p>
+  </section>
+
+  <section id="tab-skill" class="tab-panel" hidden>
+    <div id="skill-controls">
+      <label for="skill-country">Country:
+        <select id="skill-country"></select>
+      </label>
+    </div>
+
+    <div id="skill-chart"></div>
+
+    <p class="note">
+      <strong>Top chart:</strong> ERA5 mean rainfall by month. <strong>Heatmap:</strong> blue, bold
+      trimester labels and outlined columns mark the rainy season (≥&nbsp;15% of the annual total).
+      Values show SEAS5 hindcast skill — the
+      temporal Pearson correlation (r) against ERA5 over 1981–present — for every valid trimester (x)
+      at each <strong>leadtime</strong> (y, months from the issue month to the trimester's first
+      month). Each cell is labelled with its <strong>issue month</strong>. Colours are categorical at
+      the skill cutoffs: high (r&nbsp;≥&nbsp;0.5), moderate (0.3–0.5), low (0–0.3), negative. Leadtime
+      stops at 4 because SEAS5 only reaches 6 months ahead, so a longer lead would cover only part of
+      the 3-month trimester. <strong>Negative leadtimes</strong> (the separated top rows) are
+      <strong>in-season</strong> issues: the trimester had already started, so its elapsed 1–2 months
+      use ERA5 observations (with each remaining forecast month bias-corrected per month) — skill is
+      naturally much higher. Skill generally decays with leadtime and is highest in each area's rainy
+      season. Detrended forecasts, matching the map's defaults.
+    </p>
+  </section>
+
+  <section id="tab-methods" class="tab-panel" hidden>
+    <div class="prose">
+      <h2>How the forecast alerts are calculated</h2>
+      <p>
+        Each area is shaded by where the latest <strong>ECMWF SEAS5</strong> seasonal
+        precipitation forecast sits within its own forecast history, but only where the forecast
+        has demonstrated <em>skill</em> against observations. The same method runs at two
+        resolutions — country averages and the native SEAS5 0.4° grid (with ERA5 aggregated to
+        that grid) — switchable with the <strong>Country</strong>/<strong>Pixel</strong> toggle.
+        The values below are the <strong>defaults</strong> used by this map; the
+        <a href="https://chd-ds-seas5-viz-skill-ewcwhteggec2gege.eastus2-01.azurewebsites.net/" target="_blank" rel="noopener">full
+        interactive app</a> lets you change every one of them.
+      </p>
+
+      <h3>1. Data</h3>
+      <ul>
+        <li><strong>Forecast:</strong> ECMWF SEAS5 ensemble-mean precipitation, hindcasts from
+          1981 to present.</li>
+        <li><strong>Observations / climatology:</strong> ERA5 reanalysis precipitation, same
+          areas and period.</li>
+      </ul>
+
+      <h3>2. From a forecast to an anomaly category</h3>
+      <ol>
+        <li><strong>Aggregate to the trimester.</strong> For a given issue month, the monthly
+          forecast is averaged over the 3-month target season (e.g. a June issue → Jul–Aug–Sep),
+          giving one forecast value per year. ERA5 is aggregated the same way (complete seasons
+          only). For <strong>in-season trimesters</strong> (issued after the season started, e.g. an
+          August issue → Jul–Aug–Sep) the already-elapsed months are taken from ERA5 observations
+          and only the remaining month(s) from SEAS5 — each forecast month first bias-corrected
+          against ERA5 for that calendar month (mean and spread matched in log space) so observed
+          and forecast months can be blended without the forecast's month-specific bias leaking
+          into the trimester value.</li>
+        <li><strong>Transform, normalise &amp; detrend.</strong> Values are log-transformed, and
+          the forecast is rescaled to match the ERA5 mean and spread, so the two are comparable. A
+          linear trend is then removed from both the forecast and the observations (in log space,
+          keeping each series' mean) — so the forecast is judged against recent conditions rather
+          than the full historical range, and cases where SEAS5 and ERA5 trend in opposite
+          directions are corrected.</li>
+        <li><strong>Locate the forecast.</strong> The forecast's <em>percentile</em> within the
+          historical forecast distribution is computed, along with an empirical (Weibull)
+          <em>return period</em> — how often a forecast this dry (or this wet) has occurred.</li>
+        <li><strong>Categorise.</strong> Below 50th percentile → drought side, above → flood side.
+          The band depends on the return period (see defaults below).</li>
+      </ol>
+
+      <h3>3. Skill</h3>
+      <p>
+        Skill is the temporal <strong>Pearson correlation (r)</strong> between the normalised,
+        detrended hindcast forecast and ERA5 observations across the full record (1981–present).
+        Areas are only alerted where the forecast is skilful:
+      </p>
+      <ul>
+        <li><strong>High skill:</strong> r ≥ 0.50 — solid fill.</li>
+        <li><strong>Moderate skill:</strong> 0.30 ≤ r &lt; 0.50 — hatched fill.</li>
+        <li><strong>Low skill:</strong> r &lt; 0.30 — no alert (cross-hatch / neutral).</li>
+      </ul>
+      <p class="small">
+        There is no single official correlation cut-off: WMO's
+        <a href="https://library.wmo.int/records/item/56227-guidance-on-verification-of-operational-seasonal-climate-forecasts" target="_blank" rel="noopener">SVSLRF
+        guidance</a> recommends judging significance locally rather than a fixed value. The
+        defaults are chosen so that <strong>0.30 ≈ the 95% statistical-significance level</strong>
+        for a ~40-year hindcast, and <strong>0.50 ≈ "useful" skill</strong> (r ≈ 0.5 explains ~25%
+        of variance; IRI/Tippett et&nbsp;al. 2010 note RPSS ≈ 0.1 corresponds to r ≈ 0.44).
+        ECMWF's familiar <a href="https://confluence.ecmwf.int/display/FUG/Section+6.2.2+Anomaly+Correlation+Coefficient" target="_blank" rel="noopener">ACC ≥ 0.6</a>
+        "useful" mark refers to spatial medium-range skill, a different metric.
+      </p>
+      <p>
+        Skill also depends on <strong>leadtime</strong> — how far ahead the forecast is issued. For a
+        trimester, leadtime is the number of months from the issue month to the trimester's first
+        month (a June issue → Jul–Aug–Sep is leadtime&nbsp;1), and skill generally decays as leadtime
+        grows. SEAS5 runs 6 months ahead, so leadtimes go up to 4 — beyond that a 3-month trimester
+        would extend past the forecast horizon. <strong>Negative leadtimes (−1, −2)</strong> are
+        in-season issues: the trimester had already started, so its elapsed months are ERA5
+        observations and only the remainder is forecast. Their skill is computed the same way (blended
+        series vs. the fully-observed trimester) and is naturally much higher, since 1–2 of the 3
+        months are shared with the observations — read it as confidence in the season's final outcome,
+        not forecast skill per se. The <strong>Skill map</strong> and <strong>Skill by
+        country</strong> tabs show r for every trimester and leadtime, coloured at these same cutoffs
+        (with negative r shown as its own category). Pixel-level layers cover the fully-forecast
+        leadtimes only (0–4); in-season estimates are country-level.
+      </p>
+
+      <h3>4. Rainy-season (in-season) selection</h3>
+      <p>
+        An area–trimester is treated as <strong>in season</strong> when that trimester carries a
+        meaningful share of the annual rainfall — by default, the trimester mean is ≥ 15% of the
+        annual total (with no additional per-month minimum). By default the map only shows alerts
+        for in-season trimesters; the <em>“Show alerts outside rainy season”</em> toggle reveals
+        the rest.
+      </p>
+
+      <h3>Default settings</h3>
+      <table>
+        <tr><th>Setting</th><th>Default</th></tr>
+        <tr><td>Below / Above normal</td><td>3-yr return period (lowest/highest tercile)</td></tr>
+        <tr><td>Strongly below / above normal</td><td>10-yr return period (lowest/highest decile)</td></tr>
+        <tr><td>Moderate skill</td><td>r ≥ 0.30</td></tr>
+        <tr><td>High skill</td><td>r ≥ 0.50</td></tr>
+        <tr><td>Rainy season: trimester share</td><td>≥ 15% of annual rainfall</td></tr>
+      </table>
+
+      <h3>Where this runs</h3>
+      <ul>
+        <li><strong>Full interactive app</strong> (all controls, historical browsing, country
+          detail):
+          <a href="https://chd-ds-seas5-viz-skill-ewcwhteggec2gege.eastus2-01.azurewebsites.net/" target="_blank" rel="noopener">open the full app</a></li>
+        <li><strong>This static map</strong> (latest forecast, defaults only):
+          <a href="https://ocha-dap.github.io/ds-seas5-skill/" target="_blank" rel="noopener">ocha-dap.github.io/ds-seas5-skill</a></li>
+        <li><strong>Source code</strong> (method, pipelines, this site):
+          <a href="https://github.com/OCHA-DAP/ds-seas5-skill" target="_blank" rel="noopener">github.com/OCHA-DAP/ds-seas5-skill</a></li>
+      </ul>
+
+      <p class="small">
+        Note: historical forecasts shown in the full app are in-sample reconstructions
+        (normalisation and ranking use the whole record), not real-time replays. Skill statistics
+        are computed over the full hindcast and do not change with the selected year.
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <p>Data: ECMWF SEAS5 (forecast) &amp; ERA5 (climatology). OCHA Centre for Humanitarian Data.</p>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+  <script src="skillmap.js"></script>
+  <script src="skill.js"></script>
+</body>
+</html>

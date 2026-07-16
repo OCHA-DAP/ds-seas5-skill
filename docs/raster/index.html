@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SEAS5 precipitation alerts — pixel level</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>ECMWF SEAS5 precipitation alerts — pixel level</h1>
+    <p id="subtitle">Loading…</p>
+  </header>
+
+  <div id="controls">
+    <div class="slider-control">
+      <label for="trimester">Valid trimester: <strong id="trimester-label">—</strong></label>
+      <input type="range" id="trimester" min="0" max="0" step="1" value="0" />
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="seasonality" />
+      Show alerts outside rainy season
+    </label>
+  </div>
+
+  <div id="map"></div>
+  <div id="legend"></div>
+
+  <footer>
+    <p>Pixel-level (SEAS5 0.4° grid) version of the
+      <a href="../">country map</a>, same colour scheme. Colours show where the detrended SEAS5
+      forecast sits in its history where it has skill; hatched = moderate skill, cross-hatched =
+      low skill, grey = outside the rainy season. World outlines (no fill) for reference only.</p>
+    <p>Data: ECMWF SEAS5 &amp; ERA5. OCHA Centre for Humanitarian Data.</p>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

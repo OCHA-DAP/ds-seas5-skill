@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SEAS5 precipitation alerts — CBPF + CERF El Niño countries</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Merriweather:wght@700&display=swap" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>SEAS5 precipitation alerts — CBPF &amp; CERF El Niño countries</h1>
+    <p id="subtitle">Loading…</p>
+  </header>
+
+  <section class="tab-panel">
+    <div id="controls">
+      <label class="ctl">Issued
+        <select id="issued-year" class="map-select"></select>
+        <select id="issued-month" class="map-select"></select>
+      </label>
+      <div class="slider-control">
+        <label for="trimester">Valid trimester: <strong id="trimester-label">—</strong></label>
+        <input type="range" id="trimester" min="0" max="0" step="1" value="0" />
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="seasonality" />
+        Show alerts outside rainy season
+      </label>
+    </div>
+
+    <div id="country-sets">
+      <span class="cs-title">Country sets:</span>
+      <label class="toggle">
+        <input type="checkbox" id="show-award" checked />
+        <span class="swatch" style="background:#fff;border:2.5px solid #e31a1c"></span> US-award country
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="show-cbpf" checked />
+        <span class="swatch" style="background:#fff;border:2px solid #ff7f00"></span> Other CBPF/RhPF country
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="show-fw" checked />
+        <span class="swatch" style="background:#fff;border:2px solid #1f78b4"></span> CERF AA framework (El Niño)
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="show-nf" checked />
+        <span class="swatch" style="background:#fff;border:2px solid #33a02c"></span> CERF non-framework AA (El Niño)
+      </label>
+    </div>
+
+    <div id="map"></div>
+
+    <div id="legend"></div>
+
+    <p class="note">
+      Country-level SEAS5 seasonal precipitation alerts for every country. The
+      <strong>20 countries in the second tranche of the US “Humanitarian Reset” award</strong> are
+      outlined in <strong style="color:#e31a1c">red</strong>; the <strong>29 countries with an OCHA pooled-fund
+      envelope</strong> (country-based or regional RHPF) are outlined in
+      <strong style="color:#ff7f00">orange</strong>; the <strong>CERF anticipatory-action El&nbsp;Niño</strong>
+      sets are outlined in <strong style="color:#1f78b4">blue</strong> (framework) and
+      <strong style="color:#33a02c">green</strong> (non-framework). Where a country belongs to several
+      sets, its outlines are <strong>dashed and interleaved</strong> so every colour shows. Countries
+      with no listed membership are shown a little paler. Use the outline toggles to show or hide each
+      set. Countries that are hard to see at this scale (Haiti, El&nbsp;Salvador, oPt, Lebanon, Fiji,
+      Solomon&nbsp;Islands, Vanuatu, Timor-Leste, Lesotho, Bangladesh, Philippines, Guatemala,
+      Honduras, Malawi) are drawn as dots so their forecast value stays visible. Forecast issued <span id="issued-label">—</span>. Colours show where this SEAS5
+      forecast sits within its historical distribution, where the seasonal forecast has skill; hatched
+      fills indicate moderate (vs. high) skill. Grey = outside the rainy season; cross-hatch = low
+      skill. Use the <strong>Issued</strong> year/month menus to browse past forecasts (in-sample
+      reconstructions). By default, alerts are shown only for the rainy season.
+    </p>
+  </section>
+
+  <footer>
+    <p>Data: ECMWF SEAS5 (forecast) &amp; ERA5 (climatology). OCHA Centre for Humanitarian Data.</p>
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="cbpf.js"></script>
+</body>
+</html>
