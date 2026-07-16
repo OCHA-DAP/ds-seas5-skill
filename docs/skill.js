@@ -36,7 +36,7 @@
 
   function render(host, meta, country) {
     const tris = meta.trimesters;          // 12, calendar order
-    const leads = meta.leads;              // [0..6]
+    const leads = meta.leads;              // [-2..4]; negative = in-season (mixed) issues
     const nC = tris.length, nR = leads.length;
     const plotW = nC * CELL_W;
 
@@ -118,12 +118,13 @@
     });
     const yHeat = yTriLbl + TRI_LBL_H;
 
-    // 4) Heatmap (categorical Pearson r): rows = leadtime, cols = trimester
+    // 4) Heatmap (categorical Pearson r): rows = leadtime, cols = trimester.
+    // Negative leads = in-season issues (1–2 months already observed, rest forecast).
     leads.forEach((lead, i) => {
       const ry = yHeat + i * CELL_H;
       svg.appendChild(el("text", {
         x: ML - 10, y: ry + CELL_H / 2 + 4, class: "skill-tick", "text-anchor": "end",
-      }, String(lead)));
+      }, String(lead).replace("-", "−")));
       tris.forEach((t, j) => {
         const x = colX(j);
         const r = country.r[i][j];
@@ -141,8 +142,11 @@
           x, y: ry, width: CELL_W, height: CELL_H, fill: css(cat.color),
           stroke: "#fff", "stroke-width": 1,
         });
+        const leadTxt = lead < 0
+          ? `issued in-season, ${-lead} of 3 months observed`
+          : `leadtime ${lead} mo`;
         cell.appendChild(el("title", {},
-          `${country.name} — ${t.label}\nIssued ${MON[im]}, leadtime ${lead} mo\nr = ${r.toFixed(2)}`));
+          `${country.name} — ${t.label}\nIssued ${MON[im]}, ${leadTxt}\nr = ${r.toFixed(2)}`));
         svg.appendChild(cell);
         svg.appendChild(el("text", {
           x: x + CELL_W / 2, y: ry + 15, class: "skill-cellmo", "text-anchor": "middle",
@@ -153,6 +157,15 @@
         }, r.toFixed(2)));
       });
     });
+
+    // Separator under the in-season (negative-lead) rows.
+    const sepIdx = leads.findIndex((l) => l >= 0);
+    if (sepIdx > 0) {
+      const sy = yHeat + sepIdx * CELL_H;
+      svg.appendChild(el("line", {
+        x1: ML, y1: sy, x2: ML + plotW, y2: sy, stroke: "#555", "stroke-width": 2.5,
+      }));
+    }
 
     // Rainy-season column outlines over the whole heatmap.
     tris.forEach((t, j) => {
@@ -171,7 +184,7 @@
     svg.appendChild(el("text", {
       x: 14, y: yHeat + (nR * CELL_H) / 2, class: "skill-axttl", "text-anchor": "middle",
       transform: `rotate(-90 14 ${yHeat + (nR * CELL_H) / 2})`,
-    }, "Leadtime (months ahead)"));
+    }, "Leadtime (months ahead; − = in-season)"));
 
     // Categorical legend (right of the heatmap)
     const lx = ML + plotW + 16;

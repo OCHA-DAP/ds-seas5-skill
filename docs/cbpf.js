@@ -219,10 +219,21 @@ Promise.all([
   const nfToggle = document.getElementById("show-nf");
   const seasonalityOn = () => seasonality.checked;
   const currentTri = () => fc.trimesters[+triSlider.value].key;
+  // Signed leadtime for the loaded issuance; negative = in-season (trimester underway,
+  // elapsed months observed rather than forecast) — pale the slider as a cue.
+  const TRI_START = { JFM: 1, FMA: 2, MAM: 3, AMJ: 4, MJJ: 5, JJA: 6,
+    JAS: 7, ASO: 8, SON: 9, OND: 10, NDJ: 11, DJF: 12 };
+  const triLead = (key) => {
+    const o = (TRI_START[key] - fc.issued_month + 12) % 12;
+    return o <= 6 ? o : o - 12;
+  };
   const updateTriLabel = () => {
     const t = fc.trimesters[+triSlider.value];
     curTriKey = t.key;
-    triLabel.textContent = `${t.key} (${t.label})`;
+    const inSeason = triLead(t.key) < 0;
+    triSlider.classList.toggle("in-season", inSeason);
+    triLabel.innerHTML = `${t.key} (${t.label})` +
+      (inSeason ? ` <span class="in-season-tag">· in season</span>` : "");
   };
 
   // Map (plate carrée; flush fit with a temporary zoomSnap 0).

@@ -25,7 +25,7 @@
     fetch("raster/skill/meta.json").then((r) => r.json()).catch(() => null),
   ]).then(([sm, geo, rmeta]) => {
     const tris = sm.trimesters;                 // 12, calendar order
-    const leads = sm.leads;                      // [0..6]
+    const leads = sm.leads;                      // [-2..4]; negative = in-season issues
     const CATS = catsFor(sm.thresholds);
     const catFor = (r) => (r == null ? null : CATS.find((c) => r >= c.min) || CATS[CATS.length - 1]);
     const triIdx = (key) => tris.findIndex((t) => t.key === key);
@@ -42,10 +42,12 @@
     triSlider.max = tris.length - 1;
     triSlider.value = Math.max(0, triIdx((rmeta && rmeta.default_trimester) || "JAS"));
     // Issued-month slider runs opposite to leadtime: left = earliest issue (longest
-    // lead), right = issued at the trimester's start (lead 0). Position p → lead maxLead−p.
+    // lead), right = latest issue. Negative leads = issued in-season (months already
+    // observed blended in). Position p → lead maxLead−p.
     const maxLead = leads[leads.length - 1];
+    const minLead = leads[0];
     leadSlider.min = 0;
-    leadSlider.max = maxLead;
+    leadSlider.max = maxLead - minLead;
     const defaultLead = (rmeta && rmeta.default_lead) != null ? rmeta.default_lead : 1;
     leadSlider.value = String(maxLead - defaultLead);
     const seasonality = document.getElementById("skillmap-seasonality");
@@ -57,12 +59,16 @@
     const curTri = () => tris[+triSlider.value].key;
     const curLead = () => maxLead - (+leadSlider.value);
     const issuedMonth = () => ((TRI_START[curTri()] - curLead() - 1 + 144) % 12) + 1;
+    const leadText = (l) => l === 0 ? "same month"
+      : l < 0 ? `${-l} mo into season` : `${l}-month lead`;
     function updateLabels() {
       const t = tris[+triSlider.value];
       triLbl.textContent = `${t.key} (${t.label})`;
       const l = curLead();
-      const leadTxt = l === 0 ? "same month" : `${l}-month lead`;
-      leadLbl.textContent = `${MON[issuedMonth()]} (${leadTxt})`;
+      leadSlider.classList.toggle("in-season", l < 0);
+      leadLbl.innerHTML = l < 0
+        ? `${MON[issuedMonth()]} <span class="in-season-tag">(${leadText(l)})</span>`
+        : `${MON[issuedMonth()]} (${leadText(l)})`;
     }
 
     // ── Map ───────────────────────────────────────────────────────────────────
@@ -117,7 +123,7 @@
           `<div>r = ${r.toFixed(2)}</div>`;
       }
       return `<div class="name">${f.properties.name}</div>` +
-        `<div>Issued ${MON[issuedMonth()]} · ${curTri()} · lead ${curLead()} mo</div>${line}`;
+        `<div>Issued ${MON[issuedMonth()]} · ${curTri()} · ${leadText(curLead())}</div>${line}`;
     };
     const admLayer = L.geoJSON(geo, {
       style: () => ({ weight: OUTLINE_W, color: "#5a5a5a", fillOpacity: 1, opacity: 1 }),
@@ -143,9 +149,20 @@
     const pixUrl = () => `raster/skill/${curTri()}_L${curLead()}.png`;
     const maskUrl = () => `raster/skill/mask_${curTri()}.png`;
     const hasMask = !!(rmeta && rmeta.has_mask);
+    // Baked skill PNGs exist only for the leads in rmeta.leads (0–4); in-season
+    // (negative) leads are country-level only.
+    const pixLeads = (rmeta && rmeta.leads) || [];
+    const pixNote = document.getElementById("skillmap-pixel-note");
     let overlay = null, cover = null;
     function showPixel() {
       if (!rmeta) return;
+      if (!pixLeads.includes(curLead())) {
+        if (pixNote) pixNote.hidden = false;
+        if (overlay && map.hasLayer(overlay)) map.removeLayer(overlay);
+        if (cover && map.hasLayer(cover)) map.removeLayer(cover);
+        return;
+      }
+      if (pixNote) pixNote.hidden = true;
       if (!overlay) {
         overlay = L.imageOverlay(pixUrl(), rmeta.bounds, {
           opacity: 1, className: "skill-overlay", interactive: false,
@@ -177,6 +194,7 @@
       if (mode === "country") {
         if (overlay) map.removeLayer(overlay);
         if (cover) map.removeLayer(cover);
+        if (pixNote) pixNote.hidden = true;
         map.removeLayer(outlineLayer);
         admLayer.addTo(map);
         renderAdm();

@@ -11,6 +11,13 @@ selector, and a rainy-season toggle. Deployable to GitHub Pages.
 - **Skill map** — global hindcast skill (`skillmap.js`): Country/Pixel toggle, valid-trimester +
   leadtime selectors. Shows skill (Pearson r) alone, categorical at the 0.3/0.5 cutoffs.
 - **Skill by country** — per-country leadtime×trimester skill heatmap + climatology (`skill.js`).
+
+Valid trimesters run from leadtime **−2 to 4**. Negative leads are **in-season (mixed)
+trimesters** — the issuance falls inside the trimester, so the elapsed 1–2 months come from ERA5
+observations and only the rest from SEAS5 (each forecast month bias-corrected per calendar month in
+log space before blending; see `src/skill.py:aggregate_mixed_trimester`). Their skill is naturally
+much higher. **Pixel layers cover leads 0–4 / fully-forecast trimesters only** — the in-season
+combos are country-level; the JS shows a note instead of a broken overlay.
 - **Methodology** — static prose.
 
 There are also **unlisted** standalone pages sharing `cbpf.js` — the country forecast map (all
@@ -66,7 +73,8 @@ Notes:
   `--issued-months <N> --no-upload` to refresh only the forecast-pixel layer.
 - **History is frozen.** `export_history_site.py` only writes the new issuance's file (past files'
   in-sample percentiles drift trivially each month; freezing keeps the repo from bloating). Use
-  `--rebuild` to regenerate all of `data/forecasts/`.
+  `--rebuild` to regenerate all of `data/forecasts/` — needed after a methodology change (last
+  done July 2026, adding the in-season trimesters).
 - **Skill pixels are stable.** Skill is a fixed hindcast statistic, so `raster/skill/` only changes
   when the cube is fully recomputed; it can usually be skipped between forecasts.
 

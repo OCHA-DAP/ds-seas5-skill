@@ -25,7 +25,7 @@ def _():
 @app.cell
 def _():
     from src.constants import PROJECT_PREFIX, SEAS5_FORECAST_START_YEAR, TRIMESTERS
-    from src.skill import forecast_metrics_for_year, season_year_for
+    from src.skill import forecast_metrics_for_year, season_year_for, trimester_lead
 
     TRIMESTER_NAMES = list(TRIMESTERS.keys())
     return (
@@ -35,6 +35,7 @@ def _():
         TRIMESTER_NAMES,
         forecast_metrics_for_year,
         season_year_for,
+        trimester_lead,
     )
 
 
@@ -138,16 +139,15 @@ def _(mo):
 
 
 @app.cell
-def _(TRIMESTERS, get_trimester_name, issued_month_dd, mo):
+def _(TRIMESTERS, get_trimester_name, issued_month_dd, mo, trimester_lead):
     _im = issued_month_dd.value
 
     def _tri_valid(months, im):
-        """Valid if NO month is in the past AND at least one future month <= 6 ahead.
-        Signed offset: raw mod-12 if <=6 (present/future), else minus 12 (past).
-        Gives exactly 5 trimesters: current-month trimester + 4 purely-future ones."""
-        signed = [o if (o := (m - im) % 12) <= 6 else o - 12 for m in months]
-        future = [s for s in signed if s > 0]
-        return all(s >= 0 for s in signed) and bool(future) and max(future) <= 6
+        """Valid = lead −2 … 4 (lead = signed months from issue to the trimester's first
+        month). Leads 0–4 are fully-forecast trimesters; −1/−2 are in-season (mixed):
+        the already-observed months come from ERA5, the rest from this issuance.
+        Gives 7 trimesters: 2 in-season + current-month + 4 purely-future ones."""
+        return -2 <= trimester_lead(im, months) <= 4
 
     def _min_signed(tri_months, im):
         return min(o if (o := (m - im) % 12) <= 6 else o - 12 for m in tri_months)
@@ -156,10 +156,12 @@ def _(TRIMESTERS, get_trimester_name, issued_month_dd, mo):
         [name for name, months in TRIMESTERS.items() if _tri_valid(months, _im)],
         key=lambda t: _min_signed(TRIMESTERS[t], _im),
     )
-    # Default = index 1 (second valid trimester: JAS for Jun-issued, one month past the
-    # current-issued-month trimester). Sticky: preserve previous selection if still valid.
+    # Default = the lead-1 trimester (JAS for Jun-issued — one month past the current-
+    # issued-month trimester, as before). Sticky: preserve previous selection if valid.
     _prev = get_trimester_name()
-    _start = valid_trimesters.index(_prev) if _prev in valid_trimesters else 1
+    _def = next((i for i, t in enumerate(valid_trimesters)
+                 if trimester_lead(_im, TRIMESTERS[t]) == 1), 1)
+    _start = valid_trimesters.index(_prev) if _prev in valid_trimesters else _def
     trimester_sl = mo.ui.slider(0, len(valid_trimesters) - 1, step=1, value=_start)
     return trimester_sl, valid_trimesters
 
