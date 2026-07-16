@@ -1,22 +1,21 @@
 "use strict";
 
-// ── Category styling — ported from analysis/prob_alerts.py:400-414 ──────────────
+// ── Category styling — HDX redesign brand tokens (data.humdata.org v2) ───────────
 // [fill, edge, hatch]  hatch: null | "white" | "grey" | "cross"
 const STYLE = {
-  off_season:        ["#D0D0D0", "#BBBBBB", null],
-  no_data:           ["#E8E8E8", "#CCCCCC", null],
-  high_none:         ["#FFFFFF", "#AAAAAA", null],
-  mid_none:          ["#FFFFFF", "#AAAAAA", "grey"],
-  low_skill:         ["#FFFFFF", "#AAAAAA", "cross"],
-  drought_vsev_high: ["#7B3A1A", "#5A2A0A", null],
-  drought_vsev_mod:  ["#7B3A1A", "#5A2A0A", "white"],
-  drought_sev_high:  ["#C8844A", "#A06030", null],
-  drought_sev_mod:   ["#C8844A", "#A06030", "white"],
-  flood_vsev_high:   ["#0D40B0", "#092E88", null],
-  flood_vsev_mod:    ["#0D40B0", "#092E88", "white"],
-  flood_sev_high:    ["#71B3E5", "#4A90C8", null],
-  flood_sev_mod:     ["#71B3E5", "#4A90C8", "white"],
-  unmonitored:       ["#F5F5F5", "#E0E0E0", null],
+  off_season:        ["#b1c1c2", "#9db1b3", null],
+  high_none:         ["#e2e8e8", "#c4d0d1", null],
+  mid_none:          ["#e2e8e8", "#c4d0d1", "grey"],
+  low_skill:         ["#ffffff", "#c4d0d1", "cross"],
+  drought_vsev_high: ["#7f5619", "#5c3e12", null],
+  drought_vsev_mod:  ["#7f5619", "#5c3e12", "white"],
+  drought_sev_high:  ["#dda555", "#b98634", null],
+  drought_sev_mod:   ["#dda555", "#b98634", "white"],
+  flood_vsev_high:   ["#134ead", "#0e3b82", null],
+  flood_vsev_mod:    ["#134ead", "#0e3b82", "white"],
+  flood_sev_high:    ["#74a1e8", "#4681e0", null],
+  flood_sev_mod:     ["#74a1e8", "#4681e0", "white"],
+  unmonitored:       ["#f5f7f7", "#e2e8e8", null],
 };
 
 const CAT_LABEL = {
@@ -24,7 +23,7 @@ const CAT_LABEL = {
   flood_sev: "Above normal", flood_vsev: "Strongly above normal",
   high_none: "Roughly normal", mid_none: "Roughly normal (mod skill)",
   low_skill: "Low skill", off_season: "Outside rainy season",
-  no_data: "No data", unmonitored: "Not monitored",
+  unmonitored: "Not monitored",
 };
 
 // Strip the skill suffix so a category maps to its CAT_LABEL key.
@@ -36,7 +35,8 @@ let T = { sev_rp: 3, vsev_rp: 10, r_mod: 0.3, r_high: 0.5 };
 function classify(rec, rainyOn) {
   if (!rec) return "unmonitored";
   if (!rainyOn && !rec.rainy) return "off_season";
-  if (rec.r == null || rec.pct == null) return "no_data";
+  // Missing r/pct means the country isn't effectively monitored for this slot.
+  if (rec.r == null || rec.pct == null) return "unmonitored";
   if (rec.r < T.r_mod) return "low_skill";
   const vsev_m = 100 / T.vsev_rp, sev_m = 100 / T.sev_rp;
   const pct = rec.pct, r = rec.r;
@@ -63,7 +63,7 @@ function buildPatterns() {
     if (!hatch) { fillFor[cat] = fill; continue; }
     const id = "pat-" + cat;
     const stroke = hatch === "white" ? "rgba(255,255,255,0.7)"
-                 : hatch === "grey" ? "#CCCCCC" : "#BBBBBB";
+                 : hatch === "grey" ? "#9db1b3" : "#b1c1c2";
     const p = document.createElementNS(NS, "pattern");
     p.setAttribute("id", id);
     p.setAttribute("patternUnits", "userSpaceOnUse");
@@ -97,14 +97,23 @@ function makeTile(draw) {
 }
 const TILES = {
   1: makeTile((x) => { x.strokeStyle = "rgba(255,255,255,0.85)"; x.beginPath(); x.moveTo(0, TILE); x.lineTo(TILE, 0); x.stroke(); }),
-  2: makeTile((x) => { x.strokeStyle = "#B4B4B4"; x.beginPath(); x.moveTo(0, TILE); x.lineTo(TILE, 0); x.stroke(); }),
-  3: makeTile((x) => { x.strokeStyle = "#B4B4B4"; x.beginPath(); x.moveTo(0, TILE); x.lineTo(TILE, 0); x.moveTo(0, 0); x.lineTo(TILE, TILE); x.stroke(); }),
+  2: makeTile((x) => { x.strokeStyle = "#9db1b3"; x.beginPath(); x.moveTo(0, TILE); x.lineTo(TILE, 0); x.stroke(); }),
+  3: makeTile((x) => { x.strokeStyle = "#9db1b3"; x.beginPath(); x.moveTo(0, TILE); x.lineTo(TILE, 0); x.moveTo(0, 0); x.lineTo(TILE, TILE); x.stroke(); }),
 };
 
 // Per category code: fill colour (null = transparent → white basemap) and hatch kind.
-const FILL = [null, "#D0D0D0", null, null, null, "#7B3A1A", "#7B3A1A",
-              "#C8844A", "#C8844A", "#71B3E5", "#71B3E5", "#0D40B0", "#0D40B0"];
+// Codes: 1 off-season · 2 low skill · 3/4 roughly normal (high/mod skill) ·
+// 5/6 strongly below · 7/8 below · 9/10 above · 11/12 strongly above.
+const FILL = [null, "#b1c1c2", null, "#e2e8e8", "#e2e8e8", "#7f5619", "#7f5619",
+              "#dda555", "#dda555", "#74a1e8", "#74a1e8", "#134ead", "#134ead"];
 const KIND = [0, 0, 3, 0, 2, 0, 1, 0, 1, 0, 1, 0, 1];
+// Pixel category codes per legend key, for legend-hover highlighting.
+const CODE_GROUPS = {
+  drought_vsev: [5, 6], drought_sev: [7, 8], none: [3, 4],
+  flood_sev: [9, 10], flood_vsev: [11, 12],
+  low_skill: [2], off_season: [1], unmonitored: [],
+  skill_high: [3, 5, 7, 9, 11], skill_mod: [4, 6, 8, 10, 12],
+};
 
 // Canvas layer: draws colour fills AND skill hatch from ONE category grid (shared pixel grid,
 // no drift). Animates with the map on zoom; the hatch is a screen-space pattern (constant coarseness).
@@ -125,6 +134,8 @@ const RasterLayer = L.Layer.extend({
     map.off("zoomanim", this._animateZoom, this);
   },
   setGrid(grid, nx, ny) { this._grid = grid; this._nx = nx; this._ny = ny; this._draw(); },
+  // Legend hover: highlight a set of category codes (null = show all normally).
+  setHighlight(codes) { this._hl = codes ? new Set(codes) : null; this._draw(); },
   _update() {
     const m = this._map, p = this._pad, size = m.getSize();
     this._origin = m.containerPointToLayerPoint(size.multiplyBy(-p)).round();
@@ -142,6 +153,7 @@ const RasterLayer = L.Layer.extend({
   },
   _draw() {
     const ctx = this._ctx;
+    if (!ctx) return;  // layer not on the map (e.g. Country mode) — nothing to draw
     ctx.clearRect(0, 0, this._size.x, this._size.y);
     if (!this._grid) return;
     const m = this._map, b = this._b, W = this._size.x, H = this._size.y;
@@ -155,7 +167,10 @@ const RasterLayer = L.Layer.extend({
     for (let i = 0; i <= ny; i++) ey[i] = Math.round(m.latLngToLayerPoint([n - i * (n - s) / ny, w0]).y - oy);
     let j0 = 0; while (j0 < nx && ex[j0 + 1] < 0) j0++;
     let j1 = nx; while (j1 > 0 && ex[j1 - 1] > W) j1--;
-    const colorPaths = {}, hatchPaths = { 1: new Path2D(), 2: new Path2D(), 3: new Path2D() };
+    // With a legend-hover highlight active, non-matching cells are drawn dimmed and
+    // their hatch is suppressed so the highlighted category stands out.
+    const hl = this._hl;
+    const colorPaths = {}, dimPaths = {}, hatchPaths = { 1: new Path2D(), 2: new Path2D(), 3: new Path2D() };
     const g = this._grid;
     for (let i = 0; i < ny; i++) {
       const y = ey[i], hh = ey[i + 1] - y;
@@ -164,14 +179,18 @@ const RasterLayer = L.Layer.extend({
       for (let j = j0; j < j1; j++) {
         const code = g[off + j];
         if (!code) continue;
+        const dim = hl && !hl.has(code);
         const x = ex[j], cw = ex[j + 1] - x;
-        if (FILL[code]) (colorPaths[code] || (colorPaths[code] = new Path2D())).rect(x, y, cw, hh);
+        if (FILL[code]) ((dim ? dimPaths : colorPaths)[code] ||
+          ((dim ? dimPaths : colorPaths)[code] = new Path2D())).rect(x, y, cw, hh);
         const k = KIND[code];
-        if (k) hatchPaths[k].rect(x, y, cw, hh);
+        if (k && !dim) hatchPaths[k].rect(x, y, cw, hh);
       }
     }
     ctx.globalAlpha = 0.9;
     for (const code in colorPaths) { ctx.fillStyle = FILL[code]; ctx.fill(colorPaths[code]); }
+    ctx.globalAlpha = 0.12;
+    for (const code in dimPaths) { ctx.fillStyle = FILL[code]; ctx.fill(dimPaths[code]); }
     ctx.globalAlpha = 1;
     for (const v of [1, 2, 3]) { ctx.fillStyle = ctx.createPattern(TILES[v], "repeat"); ctx.fill(hatchPaths[v]); }
   },
@@ -229,6 +248,7 @@ Promise.all([
     // Leaflet defaults for scroll (whole-level snap, default wheel speed) — feels responsive.
     // The flush initial fit uses a temporary zoomSnap: 0 below, then restores to 1.
   });
+  L.control.zoom({ position: "topleft" }).addTo(map);
 
   // Grey country outlines: the basemap under the pixel grid (and reference everywhere).
   const outlineLayer = L.geoJSON(geo, {
@@ -286,16 +306,37 @@ Promise.all([
       layer.bindTooltip(() => tooltipHtml(f), { sticky: true });
     },
   });
+  // Legend hover state: a predicate over full category names (null = no highlight).
+  let hlMatch = null;
   function renderAdm() {
     const tri = currentTri(), rainyOn = seasonalityOn();
     admLayer.eachLayer((layer) => {
       const cat = catOf(layer.feature, tri, rainyOn);
       const el = layer._path;
       if (!el) return;
+      const dim = hlMatch && !hlMatch(cat);
       el.setAttribute("fill", fillFor[cat]);
-      el.setAttribute("fill-opacity", "1");
+      el.setAttribute("fill-opacity", dim ? "0.12" : "1");
       el.setAttribute("stroke", STYLE[cat][1]);
+      el.setAttribute("stroke-opacity", dim ? "0.25" : "1");
     });
+  }
+  // Legend hover → highlight matching areas, dim the rest (both views).
+  function setHighlight(key) {
+    if (key == null) {
+      hlMatch = null;
+      rasterLayer.setHighlight(null);
+    } else if (key === "skill_high" || key === "skill_mod") {
+      const suf = key === "skill_high" ? "_high" : "_mod";
+      hlMatch = (cat) => cat.endsWith(suf) || (key === "skill_high" && cat === "high_none")
+        || (key === "skill_mod" && cat === "mid_none");
+      rasterLayer.setHighlight(CODE_GROUPS[key]);
+    } else {
+      hlMatch = (cat) => catBase(cat) === key ||
+        (key === "none" && (cat === "high_none" || cat === "mid_none"));
+      rasterLayer.setHighlight(CODE_GROUPS[key] || []);
+    }
+    if (mode === "country") renderAdm();
   }
 
   // ── Pixel (raster) layer ─────────────────────────────────────────────────────
@@ -382,7 +423,7 @@ Promise.all([
       outlineLayer.addTo(map); rasterLayer.addTo(map);
       loadPixelGrid();
     }
-    buildLegend(mode);
+    buildLegend(mode, setHighlight);
   }
   function refresh() {
     updateTriLabel();
@@ -425,9 +466,13 @@ Promise.all([
     document.querySelectorAll(".tab-panel").forEach((p) => {
       p.hidden = p.id !== "tab-" + name;
     });
-    // Maps need a re-fit once their container is actually visible (rAF = after layout).
+    // Maps need a re-fit once their container is actually visible (rAF = after layout),
+    // plus a settle pass — async web-font loading can shift layout just after the rAF.
     const cb = window.tabShown[name];
-    if (typeof cb === "function") requestAnimationFrame(cb);
+    if (typeof cb === "function") {
+      requestAnimationFrame(cb);
+      setTimeout(cb, 350);
+    }
   }
   buttons.forEach((b) => b.addEventListener("click", () => {
     show(b.dataset.tab);
@@ -439,41 +484,82 @@ Promise.all([
 
 // CSS hatch fill for legend swatches — crosshatch for "cross", single stripe otherwise.
 function hatchBg(hatch) {
-  const color = hatch === "white" ? "rgba(255,255,255,0.7)" : hatch === "grey" ? "#CCC" : "#BBB";
+  const color = hatch === "white" ? "rgba(255,255,255,0.7)" : hatch === "grey" ? "#9db1b3" : "#b1c1c2";
   const stripe = (deg) => `repeating-linear-gradient(${deg}deg, ${color} 0 1.5px, transparent 1.5px 5px)`;
   return hatch === "cross" ? `${stripe(45)}, ${stripe(135)}` : stripe(135);
 }
 
-function buildLegend(mode) {
-  // Pixel grid is land-only with data everywhere → drop the country-only "no data"/"not monitored".
-  const other = mode === "pixel"
-    ? ["mid_none", "low_skill", "off_season"]
-    : ["mid_none", "low_skill", "off_season", "unmonitored"];
-  const groups = [
-    ["Forecast (high skill)", ["drought_vsev_high", "drought_sev_high", "high_none", "flood_sev_high", "flood_vsev_high"]],
-    ["Other", other],
-  ];
+// Redesign legend: a contiguous colour strip drier→wetter, a skill strip below it
+// (solid = high skill, hatched = moderate), and standalone swatches for the rest.
+// Hovering a segment/swatch highlights matching areas on the map and dims the rest.
+function buildLegend(mode, onHover) {
   const root = document.getElementById("legend");
   root.innerHTML = "";
-  for (const [title, cats] of groups) {
-    const g = document.createElement("div");
-    g.className = "legend-group";
+  const hover = (el, key) => {
+    if (!onHover) return;
+    el.addEventListener("mouseenter", () => onHover(key));
+    el.addEventListener("mouseleave", () => onHover(null));
+  };
+
+  function strip(title, segs, segWidth) {
+    const block = document.createElement("div");
+    block.className = "legend-block";
     const t = document.createElement("span");
-    t.style.fontWeight = "600"; t.textContent = title + ":";
-    g.appendChild(t);
-    for (const cat of cats) {
-      const [fill, edge, hatch] = STYLE[cat];
-      const item = document.createElement("span");
-      item.className = "legend-item";
-      const sw = document.createElement("span");
-      sw.className = "swatch";
-      sw.style.background = fill; sw.style.borderColor = edge;
-      if (hatch) sw.style.backgroundImage = hatchBg(hatch);
+    t.className = "lb-title"; t.textContent = title;
+    const row = document.createElement("div");
+    row.className = "legend-strip" + (onHover ? " interactive" : "");
+    for (const s of segs) {
+      const seg = document.createElement("span");
+      seg.className = "ls-seg"; seg.style.width = segWidth + "px";
+      const cell = document.createElement("span");
+      cell.className = "ls-cell"; cell.style.background = s.fill;
+      if (s.hatch) cell.style.backgroundImage = hatchBg(s.hatch);
+      if (s.border) cell.style.boxShadow = "inset 0 0 0 1px #c4d0d1";
       const lbl = document.createElement("span");
-      lbl.textContent = CAT_LABEL[catBase(cat)] || cat;
-      item.append(sw, lbl);
-      g.appendChild(item);
+      lbl.className = "ls-lbl"; lbl.textContent = s.label;
+      seg.append(cell, lbl);
+      hover(seg, s.key);
+      row.appendChild(seg);
     }
-    root.appendChild(g);
+    block.append(t, row);
+    root.appendChild(block);
   }
+
+  // 1) Forecast anomaly: drier → wetter (solid = high-skill rendering of each category).
+  strip("Forecast", [
+    { key: "drought_vsev", fill: STYLE.drought_vsev_high[0], label: "Strongly below" },
+    { key: "drought_sev", fill: STYLE.drought_sev_high[0], label: "Below" },
+    { key: "none", fill: STYLE.high_none[0], label: "Roughly normal" },
+    { key: "flood_sev", fill: STYLE.flood_sev_high[0], label: "Above" },
+    { key: "flood_vsev", fill: STYLE.flood_vsev_high[0], label: "Strongly above" },
+  ], 86);
+
+  // 2) Skill: how the fills above are rendered — white cells with grey hatching so the
+  // strip demos the pattern without reading as a forecast category.
+  strip("Skill", [
+    { key: "skill_high", fill: "#ffffff", border: true, label: "High — solid" },
+    { key: "skill_mod", fill: "#ffffff", border: true, hatch: "grey", label: "Moderate — hatched" },
+    { key: "low_skill", fill: "#ffffff", border: true, hatch: "cross", label: "Low — no alert" },
+  ], 118);
+
+  // 3) The rest as plain swatches.
+  const other = mode === "pixel" ? ["off_season"] : ["off_season", "unmonitored"];
+  const g = document.createElement("div");
+  g.className = "legend-group";
+  g.style.paddingTop = "18px";
+  for (const cat of other) {
+    const [fill, edge, hatch] = STYLE[cat];
+    const item = document.createElement("span");
+    item.className = "legend-item" + (onHover ? " interactive" : "");
+    const sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = fill; sw.style.borderColor = edge;
+    if (hatch) sw.style.backgroundImage = hatchBg(hatch);
+    const lbl = document.createElement("span");
+    lbl.textContent = CAT_LABEL[cat] || cat;
+    item.append(sw, lbl);
+    hover(item, cat);
+    g.appendChild(item);
+  }
+  root.appendChild(g);
 }

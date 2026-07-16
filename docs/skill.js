@@ -30,9 +30,11 @@
   }
 
   // Layout (internal SVG units; the <svg> scales to its container via viewBox).
-  const ML = 70, MR = 132, MT = 22, MB = 40;
+  // ML leaves room for the J/F overhang bars PLUS an axis-label gutter left of them
+  // (the y ticks and the heatmap lead labels share that gutter).
+  const ML = 106, MR = 156, MT = 22, MB = 40;
   const CELL_W = 60, CELL_H = 40;
-  const BAR_H_M = 60, BAR_H_T = 70, MON_LBL_H = 15, TRI_LBL_H = 18, SEC_GAP = 16;
+  const BAR_H_M = 78, MON_LBL_H = 15, TRI_LBL_H = 18, SEC_GAP = 16;
 
   function render(host, meta, country) {
     const tris = meta.trimesters;          // 12, calendar order
@@ -42,17 +44,20 @@
 
     const RMOD = (meta.thresholds && meta.thresholds.r_mod) || 0.3;
     const RHIGH = (meta.thresholds && meta.thresholds.r_high) || 0.5;
+    // HDX brand tokens; negative is a PALE error-scale brown so it doesn't shout.
     const CATS = [
-      { min: RHIGH, color: [26, 152, 80], label: `≥ ${RHIGH.toFixed(2)}  high` },
-      { min: RMOD, color: [166, 217, 106], label: `${RMOD.toFixed(2)}–${RHIGH.toFixed(2)}  moderate` },
-      { min: 0, color: [254, 224, 139], label: `0–${RMOD.toFixed(2)}  low` },
-      { min: -Infinity, color: [229, 115, 115], label: `< 0  negative` },
+      { min: RHIGH, color: [30, 121, 95], label: `≥ ${RHIGH.toFixed(2)}  high` },
+      { min: RMOD, color: [125, 193, 173], label: `${RMOD.toFixed(2)}–${RHIGH.toFixed(2)}  moderate` },
+      { min: 0, color: [212, 234, 228], label: `0–${RMOD.toFixed(2)}  low` },
+      { min: -Infinity, color: [243, 218, 215], label: `< 0  negative` },
     ];
     const catFor = (r) => CATS.find((c) => r >= c.min) || CATS[CATS.length - 1];
+    const RAINY = "#0e3b82";  // rainy-season outline + label colour (HDX primary-7)
 
-    // Shared rainfall scale across both climatology charts (monthly is the finer signal).
+    // Rainfall scale for the monthly chart (|| 1 guards the all-zero desert case —
+    // a zero max would make the y-axis tick step 0 and loop forever).
     const monVals = country.clim_monthly.filter((v) => v != null);
-    const climMax = monVals.length ? Math.max(...monVals) : 1;
+    const climMax = (monVals.length ? Math.max(...monVals) : 1) || 1;
 
     const colX = (j) => ML + j * CELL_W;
     const colMid = (j) => ML + (j + 0.5) * CELL_W;
@@ -65,35 +70,47 @@
       preserveAspectRatio: "xMidYMid meet", class: "skill-svg",
     });
 
-    // helper: a climatology bar chart from explicit bar specs [{col, v, label, rainy}].
-    function climChart(bars, barH, opts) {
-      svg.appendChild(el("text", { x: ML, y: y - 6, class: "skill-axttl" }, opts.title));
-      const base = y + barH;
-      svg.appendChild(el("line", { x1: ML, y1: base, x2: ML + plotW, y2: base, stroke: "#bbb" }));
-      bars.forEach((b) => {
-        if (b.v == null) return;
-        const h = (b.v / climMax) * barH;
-        const bar = el("rect", {
-          x: colX(b.col) + opts.pad, y: base - h, width: CELL_W - 2 * opts.pad, height: h,
-          fill: b.rainy ? "#4a78c4" : opts.fill,
-          stroke: b.rainy ? "#1f4e9b" : "none", "stroke-width": b.rainy ? 1 : 0,
-        });
-        bar.appendChild(el("title", {}, `${b.label}: ${b.v.toFixed(2)} mm/day`));
-        svg.appendChild(bar);
-      });
-      y = base;
-    }
-
     // 1) Monthly climatology — each month centred on the trimester whose MIDDLE month it
     // is. That shifts the cycle so it brackets the trimester axis: Jan (JFM's first month)
     // overhangs to the left of column 0 and Feb (DJF's last month) overhangs to the right
     // of the last column, the run reading J F M A M J J A S O N D J F.
+    // (The trimester bar chart was dropped: the heatmap's labels + rainy outlines carry
+    // that information.)
     const monBars = [];
     for (let j = -1; j <= nC; j++) {
       const m = ((j + 13) % 12) + 1; // middle month of the trimester at column j
       monBars.push({ col: j, v: country.clim_monthly[m - 1], label: MON[m], letter: MON1[m - 1] });
     }
-    climChart(monBars, BAR_H_M, { title: "ERA5 monthly rainfall (mm/day)", fill: "#9bb3d4", pad: 6 });
+    svg.appendChild(el("text", { x: ML, y: y - 6, class: "skill-axttl" }, "ERA5 monthly rainfall (mm/day)"));
+    const base = y + BAR_H_M;
+
+    // y-axis with gridlines: a "nice" step (1/2/5 progression) giving ~4 ticks. The
+    // labels sit in the gutter LEFT of the overhanging Jan bar (col −1), and gridlines
+    // span the full bar run (J … F), so nothing overlaps the January column.
+    const axX = ML - CELL_W - 8;   // shared axis-label gutter (also the lead labels)
+    const rawStep = climMax / 4;
+    const pow = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const step = [1, 2, 5, 10].map((k) => k * pow).find((s) => s >= rawStep) || rawStep;
+    for (let v = 0; v <= climMax + 1e-9; v += step) {
+      const gy = base - (v / climMax) * BAR_H_M;
+      svg.appendChild(el("line", {
+        x1: ML - CELL_W, y1: gy, x2: ML + plotW + CELL_W, y2: gy,
+        stroke: v === 0 ? "#c4d0d1" : "#ebeff0",
+      }));
+      svg.appendChild(el("text", {
+        x: axX, y: gy + 3.5, class: "skill-tick", "text-anchor": "end",
+      }, step >= 1 ? String(Math.round(v)) : v.toFixed(1)));
+    }
+    monBars.forEach((b) => {
+      if (b.v == null) return;
+      const h = (b.v / climMax) * BAR_H_M;
+      const bar = el("rect", {
+        x: colX(b.col) + 6, y: base - h, width: CELL_W - 12, height: h, fill: "#74a1e8",
+      });
+      bar.appendChild(el("title", {}, `${b.label}: ${b.v.toFixed(2)} mm/day`));
+      svg.appendChild(bar);
+    });
+    y = base;
     monBars.forEach((b) => {
       svg.appendChild(el("text", {
         x: colMid(b.col), y: y + 11, class: "skill-tick", "text-anchor": "middle",
@@ -101,19 +118,13 @@
     });
     y += MON_LBL_H + SEC_GAP;
 
-    // 2) Trimester climatology
-    const triBars = country.clim.map((v, j) => ({
-      col: j, v, label: tris[j].label, rainy: country.rainy[j],
-    }));
-    climChart(triBars, BAR_H_T, { title: "ERA5 trimester rainfall (mm/day)", fill: "#cdd6e2", pad: 8 });
-
-    // 3) Trimester labels (shared column headers between the bars and the heatmap)
+    // 2) Trimester labels (column headers for the heatmap; blue+bold = rainy season)
     const yTriLbl = y;
     tris.forEach((t, j) => {
       svg.appendChild(el("text", {
         x: colMid(j), y: yTriLbl + 14, class: "skill-trilbl", "text-anchor": "middle",
         "font-weight": country.rainy[j] ? "700" : "400",
-        fill: country.rainy[j] ? "#1f4e9b" : "#333",
+        fill: country.rainy[j] ? RAINY : "#333",
       }, t.key));
     });
     const yHeat = yTriLbl + TRI_LBL_H;
@@ -123,7 +134,7 @@
     leads.forEach((lead, i) => {
       const ry = yHeat + i * CELL_H;
       svg.appendChild(el("text", {
-        x: ML - 10, y: ry + CELL_H / 2 + 4, class: "skill-tick", "text-anchor": "end",
+        x: ML - CELL_W - 8, y: ry + CELL_H / 2 + 4, class: "skill-tick", "text-anchor": "end",
       }, String(lead).replace("-", "−")));
       tris.forEach((t, j) => {
         const x = colX(j);
@@ -158,23 +169,30 @@
       });
     });
 
-    // Separator under the in-season (negative-lead) rows.
+    // Separator under the in-season (negative-lead) rows: a thicker white gap.
     const sepIdx = leads.findIndex((l) => l >= 0);
     if (sepIdx > 0) {
       const sy = yHeat + sepIdx * CELL_H;
       svg.appendChild(el("line", {
-        x1: ML, y1: sy, x2: ML + plotW, y2: sy, stroke: "#555", "stroke-width": 2.5,
+        x1: ML, y1: sy, x2: ML + plotW, y2: sy, stroke: "#fff", "stroke-width": 5,
       }));
     }
 
-    // Rainy-season column outlines over the whole heatmap.
-    tris.forEach((t, j) => {
-      if (!country.rainy[j]) return;
-      svg.appendChild(el("rect", {
-        x: colX(j), y: yHeat, width: CELL_W, height: nR * CELL_H,
-        fill: "none", stroke: "#1f4e9b", "stroke-width": 2,
-      }));
-    });
+    // Rainy-season outline: ONE contiguous rounded box per run of adjacent rainy
+    // trimesters (not per-column, which doubled the borders between neighbours).
+    let runStart = null;
+    for (let j = 0; j <= nC; j++) {
+      const rainy = j < nC && country.rainy[j];
+      if (rainy && runStart == null) runStart = j;
+      if (!rainy && runStart != null) {
+        svg.appendChild(el("rect", {
+          x: colX(runStart) + 1, y: yHeat + 1,
+          width: (j - runStart) * CELL_W - 2, height: nR * CELL_H - 2,
+          rx: 4, fill: "none", stroke: RAINY, "stroke-width": 2.5,
+        }));
+        runStart = null;
+      }
+    }
 
     // Axis titles
     const H = yHeat + nR * CELL_H + MB;
@@ -198,6 +216,17 @@
         x: lx + 21, y: ly + 12, class: "skill-tick",
       }, c.label));
     });
+    const lyRainy = yHeat + 4 + CATS.length * 22 + 6;
+    svg.appendChild(el("rect", {
+      x: lx, y: lyRainy, width: 15, height: 15, rx: 3,
+      fill: "none", stroke: RAINY, "stroke-width": 2,
+    }));
+    svg.appendChild(el("text", {
+      x: lx + 21, y: lyRainy + 12, class: "skill-tick",
+    }, "Rainy season"));
+    svg.appendChild(el("text", {
+      x: lx, y: lyRainy + 34, class: "skill-tick",
+    }, "Cell text = issue month"));
 
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     host.replaceChildren(svg);

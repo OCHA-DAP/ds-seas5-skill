@@ -5,17 +5,18 @@
 
 (function () {
   const OUTLINE_W = 1.1;
-  const NODATA = "#f5f5f5";  // matches the forecast adm0 "unmonitored" fill
-  const OFF_SEASON = "#d0d0d0";
+  const NODATA = "#f5f7f7";  // matches the forecast adm0 "unmonitored" fill
+  const OFF_SEASON = "#b1c1c2";
 
+  // HDX brand ramp (data.humdata.org v2 tokens); negative = a pale error-scale tint.
   function catsFor(thr) {
     const RMOD = (thr && thr.r_mod) || 0.3;
     const RHIGH = (thr && thr.r_high) || 0.5;
     return [
-      { min: RHIGH, color: "rgb(26,152,80)", label: `High (r ≥ ${RHIGH.toFixed(2)})` },
-      { min: RMOD, color: "rgb(166,217,106)", label: `Moderate (${RMOD.toFixed(2)}–${RHIGH.toFixed(2)})` },
-      { min: 0, color: "rgb(254,224,139)", label: `Low (0–${RMOD.toFixed(2)})` },
-      { min: -Infinity, color: "rgb(229,115,115)", label: "Negative (< 0)" },
+      { min: RHIGH, color: "#1e795f", label: `High (r ≥ ${RHIGH.toFixed(2)})` },
+      { min: RMOD, color: "#7dc1ad", label: `Moderate (${RMOD.toFixed(2)}–${RHIGH.toFixed(2)})` },
+      { min: 0, color: "#bee0d6", label: `Low (0–${RMOD.toFixed(2)})` },
+      { min: -Infinity, color: "#f3dad7", label: "Negative (< 0)" },
     ];
   }
 
@@ -76,6 +77,7 @@
       crs: L.CRS.EPSG4326, minZoom: 1, maxZoom: 8,
       attributionControl: false, zoomControl: false, maxBoundsViscosity: 1.0,
     });
+    L.control.zoom({ position: "topleft" }).addTo(map);
     const outlineLayer = L.geoJSON(geo, {
       interactive: false,
       style: { color: "#5a5a5a", weight: OUTLINE_W, fillOpacity: 0, opacity: 0.95 },
@@ -224,15 +226,34 @@
     leadSlider.addEventListener("input", onSlide);
     seasonality.addEventListener("change", refresh);
 
-    // ── Legend ──────────────────────────────────────────────────────────────────
+    // ── Legend: contiguous ramp strip (ordered scale, negative → high) ───────────
     const legend = document.getElementById("skill-map-legend");
     if (legend) {
       legend.innerHTML = "";
-      const items = CATS.concat([
-        { color: OFF_SEASON, label: "Outside rainy season" },
-        { color: NODATA, label: "Not monitored" },
-      ]);
-      for (const it of items) {
+      const block = document.createElement("div");
+      block.className = "legend-block";
+      const t = document.createElement("span");
+      t.className = "lb-title"; t.textContent = "Skill (Pearson r)";
+      const row = document.createElement("div");
+      row.className = "legend-strip";
+      for (const c of [...CATS].reverse()) {   // ascending: negative → low → moderate → high
+        const seg = document.createElement("span");
+        seg.className = "ls-seg"; seg.style.width = "108px";
+        const cell = document.createElement("span");
+        cell.className = "ls-cell"; cell.style.background = c.color;
+        const lbl = document.createElement("span");
+        lbl.className = "ls-lbl"; lbl.textContent = c.label;
+        seg.append(cell, lbl);
+        row.appendChild(seg);
+      }
+      block.append(t, row);
+      legend.appendChild(block);
+
+      const g = document.createElement("div");
+      g.className = "legend-group";
+      g.style.paddingTop = "18px";
+      for (const it of [{ color: OFF_SEASON, label: "Outside rainy season" },
+                        { color: NODATA, label: "Not monitored" }]) {
         const span = document.createElement("span");
         span.className = "legend-item";
         const sw = document.createElement("span");
@@ -240,8 +261,9 @@
         const lbl = document.createElement("span");
         lbl.textContent = it.label;
         span.append(sw, lbl);
-        legend.appendChild(span);
+        g.appendChild(span);
       }
+      legend.appendChild(g);
     }
 
     updateLabels();

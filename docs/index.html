@@ -4,6 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SEAS5 precipitation alerts — latest forecast</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Merriweather:wght@700&display=swap" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -113,14 +116,15 @@
     <div id="skill-chart"></div>
 
     <p class="note">
-      <strong>Top two charts:</strong> ERA5 mean rainfall by month, then by trimester (blue = rainy
-      season, ≥&nbsp;15% of the annual total). <strong>Heatmap:</strong> SEAS5 hindcast skill — the
+      <strong>Top chart:</strong> ERA5 mean rainfall by month. <strong>Heatmap:</strong> blue, bold
+      trimester labels and outlined columns mark the rainy season (≥&nbsp;15% of the annual total).
+      Values show SEAS5 hindcast skill — the
       temporal Pearson correlation (r) against ERA5 over 1981–present — for every valid trimester (x)
       at each <strong>leadtime</strong> (y, months from the issue month to the trimester's first
       month). Each cell is labelled with its <strong>issue month</strong>. Colours are categorical at
       the skill cutoffs: high (r&nbsp;≥&nbsp;0.5), moderate (0.3–0.5), low (0–0.3), negative. Leadtime
       stops at 4 because SEAS5 only reaches 6 months ahead, so a longer lead would cover only part of
-      the 3-month trimester. <strong>Negative leadtimes</strong> (above the dark line) are
+      the 3-month trimester. <strong>Negative leadtimes</strong> (the separated top rows) are
       <strong>in-season</strong> issues: the trimester had already started, so its elapsed 1–2 months
       use ERA5 observations (with each remaining forecast month bias-corrected per month) — skill is
       naturally much higher. Skill generally decays with leadtime and is highest in each area's rainy
