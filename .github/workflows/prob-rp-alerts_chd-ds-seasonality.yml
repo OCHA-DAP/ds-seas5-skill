@@ -7,7 +7,7 @@ name: Build and deploy Python app to Azure Web App - chd-ds-seasonality
 on:
   push:
     branches:
-      - prob-rp-alerts
+      - main
   workflow_dispatch:
 
 jobs:
