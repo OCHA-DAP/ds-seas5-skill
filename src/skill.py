@@ -266,7 +266,10 @@ def run_all_combinations(
 
             skill = compute_skill_metrics(df_s_norm, df_e_log)
 
-            # ERA5 log-space stats
+            # ERA5 log-space stats. Full ERA5 record, whereas normalize_seas5 matched
+            # mean/std over the SEAS5∩ERA5 overlap years — in practice identical, since
+            # both records start in 1981 (obs years ⊆ forecast years), so the overlap IS
+            # the full obs record. Would only diverge if ERA5 ever predated the hindcast.
             era5_mean_log = float(df_e_log["obs_mean"].mean()) if not df_e_log.empty else None
             era5_std_log = float(df_e_log["obs_mean"].std(ddof=1)) if len(df_e_log) > 1 else None
 

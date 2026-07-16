@@ -6,6 +6,7 @@ numpy==2.4.4
 pandas==3.0.2
 scipy==1.17.1
 ocha-stratus==0.1.7
+geopandas==1.1.3
 tqdm==4.67.3
 azure-core==1.39.0
 azure-storage-blob==12.28.0
