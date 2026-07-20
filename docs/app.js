@@ -344,8 +344,8 @@ Promise.all([
                                           [worldBounds.getNorth(), worldBounds.getEast()]];
   const rasterLayer = new RasterLayer(rbounds);
   const variant = () => (seasonalityOn() ? "all" : "masked");
-  // Baked pixel PNGs exist only for the fully-forecast trimesters in rmeta; the two
-  // in-season (mixed obs+forecast) trimesters are country-level only.
+  // Baked pixel PNGs exist only for the trimesters listed in rmeta (incl. the in-season
+  // mixed obs+forecast ones); the note is a fallback for trimesters missing from rmeta.
   const pixTriNote = document.getElementById("pixel-tri-note");
   const pixelHasTri = (key) => !!rmeta && rmeta.trimesters.some((t) => t.key === key);
   function loadPixelGrid() {
