@@ -1,6 +1,8 @@
 import ocha_stratus as stratus
 import pandas as pd
 
+from src.datasources.seas5 import _engine
+
 
 def load_era5(pcode: str) -> pd.DataFrame:
     query = """
@@ -8,8 +10,7 @@ def load_era5(pcode: str) -> pd.DataFrame:
     FROM public.era5
     WHERE pcode = %s
     """
-    engine = stratus.get_engine("prod")
-    with engine.connect() as conn:
+    with _engine().connect() as conn:
         df = pd.read_sql(
             query,
             conn,
