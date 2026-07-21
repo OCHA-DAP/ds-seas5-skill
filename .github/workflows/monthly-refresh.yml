@@ -4,13 +4,35 @@ on:
   schedule:
     - cron: "0 3 7 * *"  # 03:00 UTC on the 7th of every month (buffer after ~5th SEAS5 issuance)
   workflow_dispatch:
+    inputs:
+      test_push:
+        description: "Only test that the bot can push to main (skips the pipeline)"
+        type: boolean
+        default: false
 
 # NOTE: compute_skill_raster.py (pixel-level forecast layer) is intentionally
 # excluded — it is memory/time-heavy and not suited for a standard 7 GB runner.
 # Refresh the raster layer manually when needed.
 
 jobs:
+  # Dispatch-only push check: verifies github-actions[bot] can push to main (the same
+  # push the refresh job ends with) without running the 40-minute pipeline.
+  test-push:
+    if: ${{ inputs.test_push }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push empty commit as github-actions[bot]
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "ci: verify refresh bot can push to main [skip ci]"
+          git push
+
   refresh:
+    if: ${{ !inputs.test_push }}
     runs-on: ubuntu-latest
     # Runtime: compute_skill.py takes ~30 min for all ~152 countries.
     # NOTE: The PROD Azure DB firewall must allow GitHub Actions egress IPs.
