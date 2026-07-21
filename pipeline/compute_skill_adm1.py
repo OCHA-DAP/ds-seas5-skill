@@ -16,6 +16,7 @@ from pathlib import Path
 
 import ocha_stratus as stratus
 import pandas as pd
+from azure.core.exceptions import ResourceNotFoundError
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -102,9 +103,13 @@ def _run_targeted(pcodes: list[str]) -> None:
         )
 
     def _load_or_empty(blob: str) -> pd.DataFrame:
+        # Only a genuinely-missing blob means "start fresh". Any other failure must
+        # abort: an empty baseline here would make the merge below silently drop every
+        # non-targeted ADM1 unit when the result is uploaded back over the blob.
         try:
             return stratus.load_parquet_from_blob(blob)
-        except Exception:
+        except ResourceNotFoundError:
+            tqdm.write(f"  {blob}: not found, starting fresh")
             return pd.DataFrame()
 
     df_skill_base     = _load_or_empty(SKILL_BLOB)

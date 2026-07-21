@@ -7,9 +7,15 @@ produced by compute_skill_adm1.py and writes JSON files keyed by pcode
 Output: one JSON per (issued_year, issued_month) in docs/data/forecasts/adm1/
         plus an index.json listing available issuances.
 
-Run:  uv run python pipeline/export_history_site_adm1.py
+Freeze (default): existing issuance files are NOT rewritten — a monthly run only adds the
+new month's file (plus the index), same as the ADM0 export. Pass --rebuild to regenerate
+every file (e.g. after a methodology change or a data correction).
+
+Run:  uv run python pipeline/export_history_site_adm1.py            # freeze: add the new issuance
+      uv run python pipeline/export_history_site_adm1.py --rebuild  # rewrite all issuances
 """
 
+import argparse
 import calendar
 import json
 import sys
@@ -25,30 +31,14 @@ sys.path.insert(0, str(HERE))
 
 from src.constants import PROJECT_PREFIX, TRIMESTERS  # noqa: E402
 from export_static_site import (  # noqa: E402
-    THRESHOLDS, compute_rainy_set, _min_signed, _tri_label, _tri_valid,
+    THRESHOLDS, compute_rainy_set, _default_tri, _min_signed, _tri_label, _tri_valid,
+    issued_year_for_season,
 )
 
 SKILL_BLOB     = f"{PROJECT_PREFIX}/processed/skill_stats_detrended_adm1.parquet"
 PAIRED_BLOB    = f"{PROJECT_PREFIX}/processed/paired_yearly_detrended_adm1.parquet"
 
 OUT = HERE.parent / "docs" / "data" / "forecasts" / "adm1"
-
-
-def issued_year_of(season_year: int, im: int, tri: str) -> int:
-    """Map (season_year, issue month, trimester) back to the calendar issue year.
-
-    Args:
-        season_year: The season year assigned during skill computation.
-        im: Issued month (1-12).
-        tri: Trimester key (e.g. "JJA").
-
-    Returns:
-        The calendar year in which the forecast was issued.
-    """
-    months = TRIMESTERS[tri]
-    is_wrap = 12 in months and 1 in months
-    is_cross = (not is_wrap) and (min(months) < im)
-    return int(season_year) - (1 if is_cross else 0)
 
 
 def compute_metrics(paired: pd.DataFrame) -> pd.DataFrame:
@@ -89,6 +79,12 @@ def compute_metrics(paired: pd.DataFrame) -> pd.DataFrame:
 
 def main() -> None:
     """Export per-issuance ADM1 forecast JSON files to docs/data/forecasts/adm1/."""
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--rebuild", action="store_true",
+                    help="Rewrite ALL issuance files. Default: freeze — only write issuances "
+                         "that don't exist yet (see module docstring).")
+    args = ap.parse_args()
+
     OUT.mkdir(parents=True, exist_ok=True)
 
     print("Loading ADM1 paired_yearly + skill stats (detrended)...")
@@ -123,7 +119,7 @@ def main() -> None:
         met.apply(lambda r: _tri_valid(TRIMESTERS[r["trimester"]], r["issued_month"]), axis=1)
     ].copy()
     met["issued_year"] = [
-        issued_year_of(sy, im, t)
+        issued_year_for_season(sy, im, t)
         for sy, im, t in zip(met["season_year"], met["issued_month"], met["trimester"])
     ]
     # Keep only pcodes that appear in skill (have sufficient data).
@@ -132,14 +128,20 @@ def main() -> None:
 
     years = sorted(met["issued_year"].unique().tolist())
     months_by_year: dict[str, list[int]] = {}
-    n_files = 0
+    n_files = n_frozen = 0
 
     for (iy, im), grp in met.groupby(["issued_year", "issued_month"]):
+        # Every issuance goes in the index regardless of whether we (re)write its file.
+        months_by_year.setdefault(str(int(iy)), []).append(int(im))
+        path = OUT / f"{int(iy)}-{int(im):02d}.json"
+        if path.exists() and not args.rebuild:
+            n_frozen += 1  # freeze: keep the existing file, don't rewrite
+            continue
         valid_tris = sorted(
             grp["trimester"].unique(),
             key=lambda t: _min_signed(TRIMESTERS[t], im),
         )
-        default_tri = valid_tris[1] if len(valid_tris) > 1 else valid_tris[0]
+        default_tri = _default_tri(valid_tris, im)
         data: dict[str, dict] = {}
         for _, row in grp.iterrows():
             pcode, tri = row["pcode"], row["trimester"]
@@ -162,10 +164,7 @@ def main() -> None:
             "default_trimester": default_tri,
             "data": data,
         }
-        (OUT / f"{int(iy)}-{int(im):02d}.json").write_text(
-            json.dumps(payload, separators=(",", ":"))
-        )
-        months_by_year.setdefault(str(int(iy)), []).append(int(im))
+        path.write_text(json.dumps(payload, separators=(",", ":")))
         n_files += 1
 
     for y in months_by_year:
@@ -185,7 +184,8 @@ def main() -> None:
     }
     (OUT / "index.json").write_text(json.dumps(index, separators=(",", ":")))
     size = sum(f.stat().st_size for f in OUT.glob("*.json")) / 1024
-    print(f"Wrote {n_files} issuance files + index.json to {OUT}  ({size:.0f} KB total)")
+    print(f"Wrote {n_files} new/updated issuance file(s), froze {n_frozen} existing, "
+          f"+ index.json to {OUT}  ({size:.0f} KB total)")
     print(f"Years {years[0]}-{years[-1]}; latest issuance {latest_year}-{latest_month:02d}")
 
 
