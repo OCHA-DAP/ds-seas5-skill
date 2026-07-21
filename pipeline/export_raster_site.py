@@ -22,9 +22,14 @@ from PIL import Image
 from rasterio.features import rasterize
 from rasterio.transform import from_bounds
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))  # for src
+sys.path.insert(0, str(HERE))         # for the sibling export_static_site module
+
 from src.constants import TRIMESTERS  # noqa: E402
+from src.skill import trimester_lead  # noqa: E402
 from src.skill_raster import rainy_from_cube  # noqa: E402
+from export_static_site import _default_tri, issued_year_for_season  # noqa: E402
 
 RAINY_TRIMESTER_PCT = 0.15  # matches the country export's trimester_pct default
 
@@ -97,18 +102,16 @@ def main():
     ds = xr.open_dataset(_ensure_cube())
 
     # adm0-style helpers: trimester validity and season_year -> issue_year mapping.
+    # Valid = lead −2 … 4, matching the country site: 0–4 are fully-forecast complete
+    # trimesters; −1/−2 are in-season (mixed obs+forecast).
     def tri_valid(months, m):
-        signed = [o if (o := (mm - m) % 12) <= 6 else o - 12 for mm in months]
-        future = [s for s in signed if s > 0]
-        return all(s >= 0 for s in signed) and bool(future) and max(future) <= 6
+        return -2 <= trimester_lead(m, months) <= 4
 
     def min_signed(months, m):
         return min(o if (o := (mm - m) % 12) <= 6 else o - 12 for mm in months)
 
-    def issue_year(cfy, m, months):
-        is_wrap = 12 in months and 1 in months
-        is_cross = not is_wrap and min(months) < m
-        return int(cfy) - (1 if is_cross else 0)
+    def issue_year(cfy, m, tri):
+        return issued_year_for_season(int(cfy), m, tri)
 
     cfy = ds["current_forecast_year"]
     if args.issued_month:
@@ -117,7 +120,7 @@ def main():
         # Latest real issuance = most recent (issue_year, issued_month) over valid combos.
         iy_by_month = {}
         for m in range(1, 13):
-            ys = [issue_year(float(cfy.sel(issued_month=m, trimester=t)), m, TRIMESTERS[t])
+            ys = [issue_year(float(cfy.sel(issued_month=m, trimester=t)), m, t)
                   for t in TRIMESTERS
                   if tri_valid(TRIMESTERS[t], m)
                   and np.isfinite(float(cfy.sel(issued_month=m, trimester=t)))]
@@ -125,13 +128,16 @@ def main():
                 iy_by_month[m] = max(ys)
         ymax = max(iy_by_month.values())
         im = max(m for m, iy in iy_by_month.items() if iy == ymax)
-    issued_year = max(issue_year(float(cfy.sel(issued_month=im, trimester=t)), im, TRIMESTERS[t])
+    issued_year = max(issue_year(float(cfy.sel(issued_month=im, trimester=t)), im, t)
                       for t in TRIMESTERS if tri_valid(TRIMESTERS[t], im)
                       and np.isfinite(float(cfy.sel(issued_month=im, trimester=t))))
     issued_label = f"{calendar.month_name[im]} {issued_year}"
 
     sl = ds.sel(issued_month=im)
-    tris = sorted([t for t in TRIMESTERS if tri_valid(TRIMESTERS[t], im)],
+    # Only trimesters the cube actually has data for — an older cube without the
+    # in-season combos would otherwise bake fully-transparent PNGs for them.
+    tris = sorted([t for t in TRIMESTERS if tri_valid(TRIMESTERS[t], im)
+                   and np.isfinite(float(cfy.sel(issued_month=im, trimester=t)))],
                   key=lambda t: min_signed(TRIMESTERS[t], im))
     print(f"Issuance: {issued_label} (month {im}); trimesters: {tris}", flush=True)
 
@@ -148,7 +154,7 @@ def main():
                      fill=0, all_touched=True).astype(bool)
 
     meta = {"issued_label": issued_label, "issued_month": im, "issued_year": issued_year,
-            "bounds": bounds, "thresholds": THRESH, "default_trimester": tris[min(1, len(tris) - 1)],
+            "bounds": bounds, "thresholds": THRESH, "default_trimester": _default_tri(tris, im),
             "trimesters": [{"key": t, "label": "–".join(calendar.month_abbr[m] for m in TRIMESTERS[t])}
                            for t in tris]}
 

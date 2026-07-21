@@ -135,7 +135,12 @@ def main():
             seas5 = load_seas5_issued_month(im, args.end_date, "prod", clip_gdf)
         for ti, tri in enumerate(TRI_NAMES):
             valid = TRIMESTERS[tri]
-            fc = sr.aggregate_seas5_trimester_grid(seas5, im, valid)
+            # In-season (mixed) trimesters — issuance falls inside the trimester, so the
+            # already-observed months come from ERA5 and only the rest is forecast.
+            if sr.trimester_lead(im, valid) in (-1, -2):
+                fc = sr.aggregate_mixed_trimester_grid(seas5, era5, im, valid)
+            else:
+                fc = sr.aggregate_seas5_trimester_grid(seas5, im, valid)
             obs = sr.aggregate_era5_trimester_grid(era5, valid)
             if fc is None or obs is None:
                 continue

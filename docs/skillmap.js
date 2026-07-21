@@ -151,8 +151,8 @@
     const pixUrl = () => `raster/skill/${curTri()}_L${curLead()}.png`;
     const maskUrl = () => `raster/skill/mask_${curTri()}.png`;
     const hasMask = !!(rmeta && rmeta.has_mask);
-    // Baked skill PNGs exist only for the leads in rmeta.leads (0–4); in-season
-    // (negative) leads are country-level only.
+    // Baked skill PNGs exist only for the leads in rmeta.leads (−2..4 incl. in-season);
+    // anything else falls back to the note.
     const pixLeads = (rmeta && rmeta.leads) || [];
     const pixNote = document.getElementById("skillmap-pixel-note");
     let overlay = null, cover = null;
