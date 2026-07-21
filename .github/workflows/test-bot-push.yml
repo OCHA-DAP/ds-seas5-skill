@@ -1,3 +1,4 @@
+# Temporary — verifies github-actions[bot] can push to main past the org ruleset.
 name: Test bot push to main (temporary)
 
 on:
