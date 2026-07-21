@@ -5,13 +5,15 @@ table and writes results to ADM1-specific blob paths.  The SEAS5 and ERA5
 data are fetched from the same public.seas5 / public.era5 tables using the
 ADM1 pcode values.
 
-Run:  uv run python pipeline/compute_skill_adm1.py
+Run:  uv run python pipeline/compute_skill_adm1.py                 # parallel (default 8 workers)
+      uv run python pipeline/compute_skill_adm1.py --workers 4
       uv run python pipeline/compute_skill_adm1.py --pcodes ETH001 ETH002
 """
 
 import argparse
 import json
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import ocha_stratus as stratus
@@ -86,6 +88,28 @@ def _clear_checkpoint() -> None:
             CHECKPOINT_DIR.rmdir()
         except OSError:
             pass
+
+
+def _compute_unit(unit: tuple[str, str, str]):
+    """Worker: load one ADM1 unit's data and run all combos (raw + detrended).
+
+    Runs in a subprocess. Returns (pcode, status, dfs) where dfs is
+    (skill, paired, skill_dt, paired_dt) on success, else None. Exceptions are
+    caught and reported as a status string so one bad unit can't kill the run.
+    """
+    pcode, iso3, name = unit
+    try:
+        df_seas5 = load_seas5(pcode)
+        df_era5 = load_era5(pcode)
+        if df_seas5.empty and df_era5.empty:
+            return pcode, "empty", None
+        df_skill, df_paired = run_all_combinations(pcode, iso3, name, df_seas5, df_era5)
+        df_skill_dt, df_paired_dt = run_all_combinations(
+            pcode, iso3, name, df_seas5, df_era5, detrend=True
+        )
+        return pcode, "ok", (df_skill, df_paired, df_skill_dt, df_paired_dt)
+    except Exception as e:  # noqa: BLE001 — fault isolation: report, don't crash the pool
+        return pcode, f"error: {type(e).__name__}: {e}", None
 
 
 def _run_targeted(pcodes: list[str]) -> None:
@@ -173,6 +197,10 @@ def main() -> None:
         "--pcodes", nargs="+", metavar="PCODE",
         help="Recompute only these ADM1 pcodes and merge with existing blob data",
     )
+    parser.add_argument(
+        "--workers", type=int, default=8,
+        help="Parallel worker processes (each loads + computes one unit at a time)",
+    )
     args = parser.parse_args()
 
     if args.pcodes:
@@ -190,45 +218,39 @@ def main() -> None:
 
     completed, all_skill, all_paired, all_skill_dt, all_paired_dt = _load_checkpoint()
     since_checkpoint = 0
+    failed: list[tuple[str, str]] = []
 
-    for _, adm1_row in tqdm(df_adm1.iterrows(), total=len(df_adm1), desc="pcodes"):
-        pcode = adm1_row["pcode"]
-        iso3 = adm1_row["iso3"]
-        region_name = adm1_row["name"]
+    pending = [
+        (r["pcode"], r["iso3"], r["name"])
+        for _, r in df_adm1.iterrows()
+        if r["pcode"] not in completed
+    ]
+    tqdm.write(f"{len(pending):,} units to compute with {args.workers} workers", file=sys.stderr)
 
-        if pcode in completed:
-            continue
-
-        df_seas5 = load_seas5(pcode)
-        df_era5 = load_era5(pcode)
-        if df_seas5.empty and df_era5.empty:
+    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+        futures = {pool.submit(_compute_unit, u): u[0] for u in pending}
+        for fut in tqdm(as_completed(futures), total=len(futures), desc="pcodes"):
+            pcode, status, dfs = fut.result()
+            if status == "ok":
+                df_skill, df_paired, df_skill_dt, df_paired_dt = dfs
+                all_skill.append(df_skill)
+                all_paired.append(df_paired)
+                all_skill_dt.append(df_skill_dt)
+                all_paired_dt.append(df_paired_dt)
+            elif status != "empty":
+                failed.append((pcode, status))
+                tqdm.write(f"  {pcode}: {status}", file=sys.stderr)
+                continue  # not marked completed — a rerun retries it
             completed.add(pcode)
-            continue
+            since_checkpoint += 1
+            if since_checkpoint >= SAVE_EVERY:
+                _save_checkpoint(completed, all_skill, all_paired, all_skill_dt, all_paired_dt)
+                since_checkpoint = 0
 
-        tqdm.write(
-            f"\n{region_name} ({pcode}): SEAS5 {len(df_seas5):,} rows | ERA5 {len(df_era5):,} rows"
-        )
-
-        with tqdm(total=144, desc=pcode, leave=False) as pbar:
-            df_skill, df_paired = run_all_combinations(
-                pcode, iso3, region_name, df_seas5, df_era5, progress=pbar
-            )
-        with tqdm(total=144, desc=f"{pcode} dt", leave=False) as pbar_dt:
-            df_skill_dt, df_paired_dt = run_all_combinations(
-                pcode, iso3, region_name, df_seas5, df_era5, progress=pbar_dt, detrend=True
-            )
-
-        all_skill.append(df_skill)
-        all_paired.append(df_paired)
-        all_skill_dt.append(df_skill_dt)
-        all_paired_dt.append(df_paired_dt)
-        completed.add(pcode)
-        since_checkpoint += 1
-
-        if since_checkpoint >= SAVE_EVERY:
-            tqdm.write("  [checkpoint saved]")
-            _save_checkpoint(completed, all_skill, all_paired, all_skill_dt, all_paired_dt)
-            since_checkpoint = 0
+    if failed:
+        tqdm.write(f"\n{len(failed)} unit(s) FAILED (rerun to retry):", file=sys.stderr)
+        for pcode, status in failed:
+            tqdm.write(f"  {pcode}: {status}", file=sys.stderr)
 
     df_skill_all     = pd.concat(all_skill,     ignore_index=True)
     df_paired_all    = pd.concat(all_paired,    ignore_index=True)

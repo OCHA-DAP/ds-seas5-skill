@@ -10,9 +10,12 @@ def load_era5(pcode: str) -> pd.DataFrame:
     """
     engine = stratus.get_engine("prod")
     with engine.connect() as conn:
-        return pd.read_sql(
+        df = pd.read_sql(
             query,
             conn,
             params=(pcode,),
             parse_dates=["valid_date"],
         )
+    # See load_seas5: all-NULL mean -> object dtype -> ufunc crashes; drop NULL rows.
+    df["mean"] = pd.to_numeric(df["mean"], errors="coerce")
+    return df.dropna(subset=["mean"]).reset_index(drop=True)
