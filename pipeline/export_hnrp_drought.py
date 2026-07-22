@@ -18,13 +18,16 @@ hpc.needs_admin alongside. Figures published at admin-2/3 are summed to admin-1
 Run:  uv run python pipeline/export_hnrp_drought.py
 """
 
+import argparse
 import calendar
 import json
 import sys
 from pathlib import Path
 
+import geopandas as gpd
 import ocha_stratus as stratus
 import pandas as pd
+import topojson as tp
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -38,6 +41,47 @@ from export_static_site import (  # noqa: E402
 
 SKILL_BLOB = f"{PROJECT_PREFIX}/processed/skill_stats_detrended_adm1.parquet"
 OUT = HERE.parent / "docs" / "data" / "hnrp_drought.json"
+GEO_OUT = HERE.parent / "docs" / "data" / "hnrp_adm1.geojson"
+SIMPLIFY_TOLERANCE = 0.02  # per-country topology-preserving simplify (adm1 scale)
+
+
+def export_geometry(isos: list[str], names: dict[str, str]) -> None:
+    """ADM1 boundaries for the HNRP countries -> one simplified geojson.
+
+    Source: the COD shapefiles the zonal-stats pipeline rasterized ({iso3}_shp.zip in
+    the PROD `polygon` container), so pcodes match the skill data by construction.
+    Simplified per country with topology preserved (shared borders stay gap-free);
+    cross-country borders come from different files and may not align exactly.
+    """
+    parts = []
+    for iso3 in isos:
+        try:
+            g = stratus.load_shp_from_blob(
+                f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm1.shp",
+                stage="prod", container_name="polygon",
+            )
+        except Exception as e:  # noqa: BLE001 — a missing country shouldn't kill the export
+            print(f"  {iso3}: boundary load failed ({type(e).__name__}), skipped")
+            continue
+        pcol = next((c for c in g.columns if c.lower() in ("adm1_pcode", "pcode")), None)
+        if pcol is None:
+            print(f"  {iso3}: no pcode column, skipped")
+            continue
+        g = g[[pcol, "geometry"]].rename(columns={pcol: "pcode"})
+        topo = tp.Topology(g, prequantize=True, shared_coords=True)
+        g = topo.toposimplify(SIMPLIFY_TOLERANCE).to_gdf()
+        g["geometry"] = g["geometry"].make_valid()
+        # make_valid can emit GeometryCollections/points; keep polygonal parts only
+        # (a stray Point renders as a Leaflet marker and wrecks the map fit).
+        g = g.explode(index_parts=False)
+        g = g[g.geometry.geom_type.isin(["Polygon", "MultiPolygon"])]
+        g = g.dissolve("pcode", as_index=False)
+        parts.append(g.assign(iso3=iso3))
+        print(f"  {iso3}: {len(g)} adm1 polygons")
+    gdf = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs=parts[0].crs)
+    gdf["name"] = gdf["pcode"].map(names)
+    GEO_OUT.write_text(gdf.to_json())
+    print(f"Wrote {GEO_OUT}  ({GEO_OUT.stat().st_size / 1e6:.1f} MB, {len(gdf)} polygons)")
 
 
 def load_pin_adm1() -> pd.DataFrame:
@@ -125,6 +169,12 @@ def load_severity_adm1() -> pd.DataFrame:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--rebuild-geometry", action="store_true",
+                    help="Rewrite the adm1 geojson even if it already exists (it is "
+                         "stable between runs; the default skips it when present).")
+    args = ap.parse_args()
+
     print(f"Loading ADM1 skill stats: {SKILL_BLOB}")
     skill = stratus.load_parquet_from_blob(SKILL_BLOB, stage="dev")
     df_pin = load_pin_adm1()
@@ -232,6 +282,10 @@ def main() -> None:
     }
     OUT.write_text(json.dumps(payload, separators=(",", ":")))
     print(f"Wrote {OUT}  ({OUT.stat().st_size / 1024:.1f} KB)")
+
+    if args.rebuild_geometry or not GEO_OUT.exists():
+        print("Building ADM1 geometry from COD shapefiles (polygon container)...")
+        export_geometry(sorted(merged["iso3"].dropna().unique()), names)
 
 
 if __name__ == "__main__":

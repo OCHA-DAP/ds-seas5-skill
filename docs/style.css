@@ -201,3 +201,12 @@ footer p { margin: 4px 0; }
 #hnrp-table tbody tr:hover { background: var(--hdx-neutral-01); }
 #hnrp-table td.skill-high { font-weight: 700; }
 #hnrp-table .in-season-tag { color: var(--hdx-neutral-5); font-weight: 600; font-size: 0.75rem; }
+#hnrp-map { height: 430px; border: 1px solid var(--line); border-radius: var(--hdx-radius-md); margin-bottom: 18px; background: #fff; }
+#hnrp-scatter-wrap { position: relative; margin-bottom: 6px; }
+#hnrp-scatter { width: 100%; height: 460px; display: block; }
+#hnrp-tip { position: absolute; pointer-events: none; background: #fff; border: 1px solid var(--line);
+  border-radius: var(--hdx-radius-sm); box-shadow: var(--hdx-shadow-sm); padding: 7px 10px;
+  font-size: 0.78rem; line-height: 1.45; max-width: 240px; z-index: 10; }
+#hnrp-scatter-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted); margin-bottom: 18px; }
+#hnrp-scatter-legend i { display: inline-block; width: 12px; height: 12px; border: 1px solid rgba(0,0,0,0.15); vertical-align: -2px; margin-right: 4px; }
+#hnrp-scatter-legend i.hatched { background: repeating-linear-gradient(45deg, #7f5619 0 2px, rgba(255,255,255,0.7) 2px 4px); }
