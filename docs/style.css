@@ -188,3 +188,16 @@ h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 
 footer { color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 10px; }
 footer p { margin: 4px 0; }
+
+/* ── Forecast × HNRP tab ─────────────────────────────────────────────────── */
+#hnrp-controls { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; margin-bottom: 10px; }
+#hnrp-controls #hnrp-issued { margin: 0 0 0 auto; }
+#hnrp-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+#hnrp-table th, #hnrp-table td { padding: 5px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+#hnrp-table th { cursor: pointer; user-select: none; font-weight: 600; color: var(--muted);
+  border-bottom: 2px solid var(--line); white-space: nowrap; }
+#hnrp-table th.sorted { color: var(--ink); }
+#hnrp-table th.num, #hnrp-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+#hnrp-table tbody tr:hover { background: var(--hdx-neutral-01); }
+#hnrp-table td.skill-high { font-weight: 700; }
+#hnrp-table .in-season-tag { color: var(--hdx-neutral-5); font-weight: 600; font-size: 0.75rem; }
