@@ -10,11 +10,10 @@ Selection per ADM1 unit (latest issuance):
   - drought side only (forecast percentile < 50); severity = directional drought RP
   - the unit's row reports its WORST qualifying slot (max drought RP)
 
-Humanitarian weight: intersectoral PiN (INN) and targeted (TGT), category 'total',
-each country's latest reference period. Countries publishing at admin-2 are rolled up
-by summing to admin-1 (PiN is additive across geography within one sector/status).
-NOTE: this is PiN, not JIAF severity classes — severity 4+ is a phase-2 swap once a
-severity table exists in ds-hnrp-mirror.
+Humanitarian weight: population in JIAF severity 4+ (hpc.severity_admin, latest
+analysis year per country), with intersectoral PiN (INN) and targeted (TGT) from
+hpc.needs_admin alongside. Figures published at admin-2/3 are summed to admin-1
+(both are additive across geography).
 
 Run:  uv run python pipeline/export_hnrp_drought.py
 """
@@ -81,13 +80,62 @@ def load_pin_adm1() -> pd.DataFrame:
     return out
 
 
+def load_severity_adm1() -> pd.DataFrame:
+    """Population in JIAF severity 4+ per ADM1 pcode, each country's latest analysis year.
+
+    Rows sit at the country's finest published level (admin-2; COD admin-3) and always
+    carry admin1_code, so severity-4+ population sums straight to admin-1. Population
+    groups overlap rather than partition: per country prefer the overall (blank) group,
+    then 'Global_Population', then the largest named group (the most inclusive union,
+    e.g. Cameroon's 'IDPs, Returnees, Refugees, Host communities').
+    """
+    engine = stratus.get_engine("dev")
+    q = """
+    SELECT iso3, year, admin1_code, population_group, final_severity, population
+    FROM hpc.severity_admin
+    """
+    with engine.connect() as conn:
+        df = pd.read_sql(q, conn)
+    df = df[df["year"] == df.groupby("iso3")["year"].transform("max")]
+    df["population_group"] = df["population_group"].fillna("")
+
+    rows = []
+    for iso3, g in df.groupby("iso3"):
+        groups = set(g["population_group"])
+        if "" in groups:
+            grp = ""
+        elif "Global_Population" in groups:
+            grp = "Global_Population"
+        else:
+            grp = g.groupby("population_group")["population"].sum().idxmax()
+        g = g[g["population_group"] == grp]
+        sev4 = g[g["final_severity"] >= 4].groupby("admin1_code")["population"].sum()
+        total = g.groupby("admin1_code")["population"].sum()
+        for pcode, tot in total.items():
+            rows.append({
+                "pcode": pcode, "iso3": iso3,
+                "sev4": int(sev4.get(pcode, 0)),
+                "sev_total": int(tot),
+                "sev_year": int(g["year"].iloc[0]),
+            })
+    out = pd.DataFrame(rows)
+    print(f"Severity: {out['iso3'].nunique()} countries, {len(out)} ADM1 units, "
+          f"{out['sev4'].sum():,} people in severity 4+")
+    return out
+
+
 def main() -> None:
     print(f"Loading ADM1 skill stats: {SKILL_BLOB}")
     skill = stratus.load_parquet_from_blob(SKILL_BLOB, stage="dev")
     df_pin = load_pin_adm1()
+    df_sev = load_severity_adm1()
+    # Union of PiN and severity units; iso3 from whichever side has it.
+    df_hum = df_pin.merge(df_sev, on="pcode", how="outer", suffixes=("", "_sev"))
+    df_hum["iso3"] = df_hum["iso3"].combine_first(df_hum["iso3_sev"])
+    df_hum = df_hum.drop(columns=["iso3_sev"])
 
     # Restrict everything downstream to HNRP units — keeps the climatology query small.
-    skill = skill[skill["pcode"].isin(set(df_pin["pcode"]))]
+    skill = skill[skill["pcode"].isin(set(df_hum["pcode"]))]
     if skill.empty:
         sys.exit("No overlap between ADM1 skill pcodes and HNRP PiN pcodes")
 
@@ -162,7 +210,7 @@ def main() -> None:
         records.append(row)
 
     df_fc = pd.DataFrame(records)
-    merged = df_pin.merge(df_fc, on="pcode", how="left")
+    merged = df_hum.merge(df_fc, on="pcode", how="left")
     merged["country"] = merged["iso3"].map(country_names)
     n_signal = merged["rp"].notna().sum()
     print(f"{len(merged)} HNRP ADM1 units; {n_signal} with a qualifying drought signal")
@@ -173,9 +221,9 @@ def main() -> None:
         "issued_year": int(global_max_iy),
         "thresholds": THRESHOLDS,
         "weight_note": (
-            "Humanitarian weight is intersectoral People in Need (PiN) and targeted from "
-            "the latest HNRP reference period (ds-hnrp-mirror / HDX HAPI) — not JIAF "
-            "severity classes. Severity 4+ replaces PiN in a later phase."
+            "Humanitarian weight is population in JIAF inter-sectoral severity 4+ from the "
+            "HNRP severity analysis (ds-hnrp-mirror, latest analysis year per country), with "
+            "intersectoral PiN / targeted alongside. Admin-2/3 figures are summed to admin-1."
         ),
         "rows": [
             {k: (None if pd.isna(v) else v) for k, v in rec.items()}

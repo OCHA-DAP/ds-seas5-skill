@@ -31,6 +31,7 @@
   const COLS = [
     { key: "country", label: "Country", num: false },
     { key: "name", label: "Admin 1", num: false },
+    { key: "sev4", label: "Severity 4+ pop", num: true },
     { key: "pin", label: "PiN", num: true },
     { key: "targeted", label: "Targeted", num: true },
     { key: "tri_label", label: "Season", num: false },
@@ -38,9 +39,9 @@
     { key: "pct", label: "Percentile", num: true },
     { key: "r", label: "Skill (r)", num: true },
   ];
-  // Default: worst-first within the RP filter, biggest caseload as tiebreak → rank by
-  // PiN among qualifying rows (the ask: highest caseload with the worst forecast).
-  let sortKey = "pin", sortDesc = true;
+  // Default: among rows passing the RP/skill filters, the biggest severity-4+
+  // population first (the ask: highest high-severity caseload, worst forecast).
+  let sortKey = "sev4", sortDesc = true;
 
   const fmtN = (v) => (v == null ? "–" : v.toLocaleString("en-US"));
   const fmt = (v, d) => (v == null ? "–" : Number(v).toFixed(d));
@@ -92,6 +93,7 @@
       tr.innerHTML =
         `<td>${r.country ?? r.iso3}</td>` +
         `<td>${r.name ?? r.pcode}</td>` +
+        `<td class="num">${fmtN(r.sev4)}</td>` +
         `<td class="num">${fmtN(r.pin)}</td>` +
         `<td class="num">${fmtN(r.targeted)}</td>` +
         `<td>${r.tri_label ?? "–"}${inSeason ? ' <span class="in-season-tag">· in season</span>' : ""}</td>` +
