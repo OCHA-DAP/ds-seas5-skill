@@ -5,7 +5,7 @@ Reproduces the site's classification (docs/cbpf.js `classify`) and the four
 country-set memberships hardcoded there, so the CSV matches what the map shows.
 
 Usage:
-    uv run pipeline/export_cerf_csv.py [--issued 2026-07] [-o outputs/cerf_tab.csv]
+    uv run pipeline/export_cerf_csv.py [--issued 2026-07] [-o outputs/out.csv]
 """
 
 import argparse
@@ -65,7 +65,7 @@ def main():
     names = {f["properties"]["iso3"]: f["properties"]["name"] for f in geo["features"]}
     thresholds = fc["thresholds"]
 
-    out = Path(args.out) if args.out else ROOT / "outputs" / f"cerf_tab_{issued}.csv"
+    out = Path(args.out) if args.out else ROOT / "outputs" / f"seas5_adm0_issued_{issued}.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
 
     cols = [
@@ -75,9 +75,11 @@ def main():
         "forecast_skill", "skill_correlation",
         "us_award", "cbpf_rhpf_envelope", "cerf_aa_framework_elnino", "cerf_nonframework_aa_elnino",
     ]
-    tri_labels = {t["key"]: t["label"] for t in fc["trimesters"]}
+    # ASCII separator in month labels (site uses en-dashes, which mangle in Excel).
+    tri_labels = {t["key"]: t["label"].replace("–", "|") for t in fc["trimesters"]}
 
-    with out.open("w", newline="") as f:
+    # utf-8-sig: BOM so Excel decodes accented country names correctly.
+    with out.open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(cols)
         for iso3 in sorted(names, key=lambda i: names[i]):
