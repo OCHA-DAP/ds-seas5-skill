@@ -31,14 +31,17 @@ CERF_NF = {"AGO", "ETH", "LSO", "MDG", "MWI", "MNG", "MOZ", "PER", "SOM", "TLS",
 
 
 def classify(rec, thresholds):
-    """Port of docs/cbpf.js classify(): (direction, severity, skill, category_label)."""
+    """(direction, severity, skill, category_label), or None if not monitored.
+
+    Direction and severity come straight from the forecast percentile (reported even
+    at low skill); the category label matches the map (docs/cbpf.js classify), which
+    masks low-skill slots.
+    """
     t = thresholds
     if rec is None or rec.get("r") is None or rec.get("pct") is None:
-        return "", "", "", "Not monitored"
+        return None
     r, pct = rec["r"], rec["pct"]
     skill = "high" if r >= t["r_high"] else "moderate" if r >= t["r_mod"] else "low"
-    if skill == "low":
-        return "", "", skill, "Low skill"
     vsev_m, sev_m = 100 / t["vsev_rp"], 100 / t["sev_rp"]
     direction = "drought (below normal)" if pct < 50 else "flood (above normal)"
     if pct <= vsev_m or pct >= 100 - vsev_m:
@@ -46,9 +49,16 @@ def classify(rec, thresholds):
     elif pct <= sev_m or pct >= 100 - sev_m:
         sev = "severe"
     else:
-        return "", "none", skill, "Roughly normal"
+        sev = "none"
     updown = "below" if pct < 50 else "above"
-    label = f"Strongly {updown} normal" if sev == "very severe" else f"{updown.capitalize()} normal"
+    if skill == "low":
+        label = "Low skill"
+    elif sev == "none":
+        label = "Roughly normal"
+    elif sev == "severe":
+        label = f"{updown.capitalize()} normal"
+    else:
+        label = f"Strongly {updown} normal"
     return direction, sev, skill, label
 
 
@@ -86,15 +96,18 @@ def main():
             recs = fc["data"].get(iso3, {})
             for key, label in tri_labels.items():
                 rec = recs.get(key)
-                direction, sev, skill, cat = classify(rec, thresholds)
-                rainy = "" if rec is None else ("yes" if rec.get("rainy") else "no")
+                cls = classify(rec, thresholds)
+                if cls is None:  # not monitored — leave out of the export
+                    continue
+                direction, sev, skill, cat = cls
                 w.writerow([
-                    iso3, names[iso3], fc["issued_label"], key, label, rainy,
+                    iso3, names[iso3], fc["issued_label"], key, label,
+                    "yes" if rec.get("rainy") else "no",
                     cat, direction, sev,
-                    "" if rec is None else rec.get("rp", ""),
-                    "" if rec is None else rec.get("pct", ""),
+                    rec.get("rp", ""),
+                    rec.get("pct", ""),
                     skill,
-                    "" if rec is None else rec.get("r", ""),
+                    rec.get("r", ""),
                     "yes" if iso3 in US_AWARD else "no",
                     "yes" if iso3 in (US_AWARD | CBPF_ALL) else "no",
                     "yes" if iso3 in CERF_FW else "no",
