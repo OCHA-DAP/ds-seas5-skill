@@ -21,7 +21,9 @@ Run:  uv run python pipeline/export_hnrp_drought.py
 import argparse
 import calendar
 import json
+import re
 import sys
+import unicodedata
 from pathlib import Path
 
 import geopandas as gpd
@@ -84,6 +86,106 @@ def export_geometry(isos: list[str], names: dict[str, str]) -> None:
     print(f"Wrote {GEO_OUT}  ({GEO_OUT.stat().st_size / 1e6:.1f} MB, {len(gdf)} polygons)")
 
 
+def _fold(s: str) -> str:
+    """Casefold + strip accents for name comparison."""
+    return "".join(c for c in unicodedata.normalize("NFKD", str(s))
+                   if not unicodedata.combining(c)).casefold().strip()
+
+
+# Admin reforms newer than our COD vintage: map reformed/new codes back to the old
+# unit that CONTAINS them, so population is neither dropped nor mis-attributed.
+# (iso3, source pcode) -> (our pcode, {folded names that must match} | None).
+# The name guard disambiguates code reuse across vintages (Mali's 2026 system reuses
+# ML09 for Taoudenni where the old system means Bamako).
+REFORM_XWALK = {
+    # Mali 2023 reorganisation (19 regions + Bamako district):
+    ("MLI", "ML09"): ("ML06", {"taoudenni", "taoudeni", "taoudenit"}),  # ⊂ old Tombouctou
+    ("MLI", "MLI-XXX"): ("ML06", {"taoudenni", "taoudeni", "taoudenit"}),
+    ("MLI", "ML20"): ("ML09", {"bamako"}),
+    ("MLI", "ML11"): ("ML01", None), ("MLI", "ML12"): ("ML01", None),  # Nioro, Kita ⊂ Kayes
+    ("MLI", "ML13"): ("ML02", None), ("MLI", "ML14"): ("ML02", None),  # Dioïla, Nara ⊂ Koulikoro
+    ("MLI", "ML15"): ("ML03", None), ("MLI", "ML16"): ("ML03", None),  # Bougouni, Koutiala ⊂ Sikasso
+    ("MLI", "ML17"): ("ML04", None),                                   # San ⊂ Ségou
+    ("MLI", "ML18"): ("ML05", None), ("MLI", "ML19"): ("ML05", None),  # Douentza, Bandiagara ⊂ Mopti
+    # Burkina Faso 2024 reorganisation (13 -> 17 regions; BF46/BF52/BF56 dissolved into
+    # splits, the other codes were kept — renamed, boundaries approximately the old ones):
+    ("BFA", "BF61"): ("BF46", None), ("BFA", "BF62"): ("BF46", None),  # Sourou, Bankui ⊂ Boucle du Mouhoun
+    ("BFA", "BF58"): ("BF52", None), ("BFA", "BF60"): ("BF52", None),  # Sirba, Tapoa ⊂ Est
+    ("BFA", "BF63"): ("BF52", None),                                   # Goulmou ⊂ Est
+    ("BFA", "BF59"): ("BF56", None), ("BFA", "BF64"): ("BF56", None),  # Soum, Liptako ⊂ Sahel
+    # CAR: prefectures created 2020, after our COD vintage:
+    ("CAF", "CF33"): ("CF32", None),  # Ouham-Fafa ⊂ Ouham
+    ("CAF", "CF34"): ("CF31", None),  # Lim-Pendé ⊂ Ouham-Pendé
+}
+
+
+def normalize_pcodes(df: pd.DataFrame, poly: pd.DataFrame, label: str) -> pd.DataFrame:
+    """Reconcile humanitarian admin-1 pcodes to the COD vintage the skill data uses.
+
+    Two mechanical mismatch classes are fixed by re-deriving each country's code style
+    from our polygon table instead of hardcoding: prefix style (HPC/HAPI often use an
+    ISO3 prefix where the COD uses ISO2 — NER001→NE001, TCD01→TD01) and zero-padding
+    (CO5→CO05). A cautious name fallback (unique accent-folded exact match within the
+    country) catches renumberings like GT23 'Quiché'. Unattributable placeholders
+    (*-XXX 'UNSPECIFIED') are dropped. Genuinely new admin units (e.g. Mali's 2023
+    regions, Burkina's new provinces) have no COD polygon or forecast in our vintage —
+    they stay unmatched and are reported so drift is visible on every run.
+    """
+    ref_by_iso = poly.groupby("iso3")["pcode"].apply(set).to_dict()
+    name_ix = {
+        iso3: {_fold(n): p for p, n in zip(g["pcode"], g["name"])}
+        for iso3, g in poly.groupby("iso3")
+    }
+    out = df.copy()
+    fixed, dropped, unmatched = [], [], []
+    for i, row in out.iterrows():
+        code, iso3 = row["pcode"], row["iso3"]
+        ref = ref_by_iso.get(iso3, set())
+        # Reform crosswalk first — it outranks a raw code hit, because reformed
+        # vintages reuse codes with different meanings (Mali ML09).
+        xw = REFORM_XWALK.get((iso3, code))
+        if xw and (xw[1] is None or _fold(row.get("name") or "") in xw[1]):
+            fixed.append(f"{code}→{xw[0]} (reform)")
+            out.loc[i, "pcode"] = xw[0]
+            continue
+        if code in ref:
+            continue
+        # Non-geographic placeholders: plan-wide caseloads not attributed to any admin
+        # unit ("-XXX" codes, Mali's "PDI land" IDP bucket) — droppable, but loudly.
+        if code.upper().endswith("-XXX") or _fold(row.get("name") or "") in {"pdi land", "unspecified"}:
+            dropped.append(f"{code} ({row.get('name')})")
+            out.loc[i, "pcode"] = None
+            continue
+        new = None
+        m = re.fullmatch(r"([A-Za-z]+)[-_]?(\d+)", code)
+        if m and ref:
+            r0 = next(iter(ref))
+            rm = re.fullmatch(r"([A-Za-z]+)(\d+)", r0)
+            if rm:
+                cand = rm.group(1) + str(int(m.group(2))).zfill(len(rm.group(2)))
+                if cand in ref:
+                    new = cand
+        if new is None and "name" in row and pd.notna(row.get("name")):
+            cand = name_ix.get(iso3, {}).get(_fold(row["name"]))
+            if cand is not None:
+                new = cand
+        if new is not None:
+            fixed.append(f"{code}→{new}")
+            out.loc[i, "pcode"] = new
+        else:
+            unmatched.append(f"{iso3}:{code}")
+    out = out[out["pcode"].notna()]
+    if fixed:
+        print(f"  {label}: normalized {len(fixed)} pcodes ({', '.join(fixed[:8])}"
+              f"{'…' if len(fixed) > 8 else ''})")
+    if dropped:
+        print(f"  {label}: dropped {len(dropped)} unattributable placeholder(s): {dropped}")
+    if unmatched:
+        print(f"  {label}: {len(unmatched)} unit(s) have no polygon in our COD vintage "
+              f"(new admin divisions?): {unmatched}")
+    return out
+
+
 def load_pin_adm1() -> pd.DataFrame:
     """Intersectoral PiN + targeted per ADM1 pcode, each country's latest reference period.
 
@@ -92,7 +194,7 @@ def load_pin_adm1() -> pd.DataFrame:
     """
     engine = stratus.get_engine("dev")
     q = """
-    SELECT location_code, admin1_code, admin2_code, admin_level,
+    SELECT location_code, admin1_code, admin1_name, admin2_code, admin_level,
            population_status, population, reference_period_start
     FROM hpc.needs_admin
     WHERE sector_code = 'Intersectoral' AND category = 'total'
@@ -108,10 +210,11 @@ def load_pin_adm1() -> pd.DataFrame:
     for (loc, ref), g in df.groupby(["location_code", "reference_period_start"]):
         lvl = 1 if (g["admin_level"] == 1).any() else 2
         g = g[g["admin_level"] == lvl]
+        a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
         agg = g.groupby(["admin1_code", "population_status"])["population"].sum().unstack()
         for pcode, r in agg.iterrows():
             rows.append({
-                "pcode": pcode, "iso3": loc,
+                "pcode": pcode, "iso3": loc, "name": a1names.get(pcode),
                 "pin": int(r["INN"]) if pd.notna(r.get("INN")) else None,
                 "targeted": int(r["TGT"]) if pd.notna(r.get("TGT")) else None,
                 "ref_year": int(ref.year),
@@ -135,7 +238,7 @@ def load_severity_adm1() -> pd.DataFrame:
     """
     engine = stratus.get_engine("dev")
     q = """
-    SELECT iso3, year, admin1_code, population_group, final_severity, population
+    SELECT iso3, year, admin1_code, admin1_name, population_group, final_severity, population
     FROM hpc.severity_admin
     """
     with engine.connect() as conn:
@@ -145,19 +248,28 @@ def load_severity_adm1() -> pd.DataFrame:
 
     rows = []
     for iso3, g in df.groupby("iso3"):
-        groups = set(g["population_group"])
-        if "" in groups:
-            grp = ""
-        elif "Global_Population" in groups:
-            grp = "Global_Population"
-        else:
-            grp = g.groupby("population_group")["population"].sum().idxmax()
-        g = g[g["population_group"] == grp]
+        # Population groups differ per plan: an overall group (blank/'Global_Population')
+        # when it actually covers the country; union-style overlapping groups (commas in
+        # the name, e.g. Cameroon's 'IDPs, Returnees, Refugees, Host communities') where
+        # only the most inclusive one may be used; or disjoint displacement categories
+        # (Mali: PDI / Rapatries / Communauté Hôte / …) which partition the analysed
+        # population and must be summed.
+        units = g.groupby("population_group")["admin1_code"].nunique()
+        n_units = g["admin1_code"].nunique()
+        if units.get("", 0) >= 0.5 * n_units:
+            g = g[g["population_group"] == ""]
+        elif "Global_Population" in units.index:
+            g = g[g["population_group"] == "Global_Population"]
+        elif any("," in grp for grp in units.index):
+            top = g.groupby("population_group")["population"].sum().idxmax()
+            g = g[g["population_group"] == top]
+        # else: disjoint categories — keep all rows and let the sums add them up.
+        a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
         sev4 = g[g["final_severity"] >= 4].groupby("admin1_code")["population"].sum()
         total = g.groupby("admin1_code")["population"].sum()
         for pcode, tot in total.items():
             rows.append({
-                "pcode": pcode, "iso3": iso3,
+                "pcode": pcode, "iso3": iso3, "name": a1names.get(pcode),
                 "sev4": int(sev4.get(pcode, 0)),
                 "sev_total": int(tot),
                 "sev_year": int(g["year"].iloc[0]),
@@ -177,12 +289,29 @@ def main() -> None:
 
     print(f"Loading ADM1 skill stats: {SKILL_BLOB}")
     skill = stratus.load_parquet_from_blob(SKILL_BLOB, stage="dev")
-    df_pin = load_pin_adm1()
-    df_sev = load_severity_adm1()
-    # Union of PiN and severity units; iso3 from whichever side has it.
+
+    engine = stratus.get_engine("prod")
+    with engine.connect() as conn:
+        poly = pd.read_sql("SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=1", conn)
+        country_names = pd.read_sql(
+            "SELECT iso3, name FROM public.polygon WHERE adm_level=0", conn,
+        ).set_index("iso3")["name"].to_dict()
+    names = poly.set_index("pcode")["name"].to_dict()
+
+    print("Reconciling humanitarian pcodes to the COD vintage...")
+    df_pin = normalize_pcodes(load_pin_adm1(), poly, "PiN")
+    df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
+    # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
+    df_pin = (df_pin.groupby(["pcode", "iso3"], as_index=False)
+              .agg({"name": "first", "pin": "sum", "targeted": "sum",
+                    "ref_year": "max", "pin_admin_level": "max"}))
+    df_sev = (df_sev.groupby(["pcode", "iso3"], as_index=False)
+              .agg({"name": "first", "sev4": "sum", "sev_total": "sum", "sev_year": "max"}))
+    # Union of PiN and severity units; iso3/name from whichever side has them.
     df_hum = df_pin.merge(df_sev, on="pcode", how="outer", suffixes=("", "_sev"))
-    df_hum["iso3"] = df_hum["iso3"].combine_first(df_hum["iso3_sev"])
-    df_hum = df_hum.drop(columns=["iso3_sev"])
+    for col in ["iso3", "name"]:
+        df_hum[col] = df_hum[col].combine_first(df_hum[f"{col}_sev"])
+    df_hum = df_hum.drop(columns=["iso3_sev", "name_sev"]).rename(columns={"name": "name_hum"})
 
     # Restrict everything downstream to HNRP units — keeps the climatology query small.
     skill = skill[skill["pcode"].isin(set(df_hum["pcode"]))]
@@ -203,7 +332,6 @@ def main() -> None:
 
     # Rainy-season mask over the HNRP ADM1 units (same ERA5 climatology as other exports).
     pcodes = sorted(set(skill["pcode"].dropna()))
-    engine = stratus.get_engine("prod")
     ph = ",".join(["%s"] * len(pcodes))
     print(f"Querying ERA5 climatology for {len(pcodes)} ADM1 pcodes...")
     with engine.connect() as conn:
@@ -211,13 +339,6 @@ def main() -> None:
             f"SELECT pcode, valid_date, mean FROM public.era5 WHERE pcode IN ({ph})",
             conn, params=tuple(pcodes), parse_dates=["valid_date"],
         )
-        names = pd.read_sql(
-            f"SELECT pcode, name FROM public.polygon WHERE adm_level=1 AND pcode IN ({ph})",
-            conn, params=tuple(pcodes),
-        ).set_index("pcode")["name"].to_dict()
-        country_names = pd.read_sql(
-            "SELECT iso3, name FROM public.polygon WHERE adm_level=0", conn,
-        ).set_index("iso3")["name"].to_dict()
     monthly_clim = (
         era5.assign(month=era5["valid_date"].dt.month)
         .groupby(["pcode", "month"])["mean"].mean()
@@ -261,9 +382,24 @@ def main() -> None:
 
     df_fc = pd.DataFrame(records)
     merged = df_hum.merge(df_fc, on="pcode", how="left")
+    # COD name where we have the polygon; the plan's own name for unmatched units.
+    merged["name"] = merged["name"].combine_first(merged["name_hum"])
+    merged = merged.drop(columns=["name_hum"])
     merged["country"] = merged["iso3"].map(country_names)
     n_signal = merged["rp"].notna().sum()
     print(f"{len(merged)} HNRP ADM1 units; {n_signal} with a qualifying drought signal")
+
+    # Coverage report: every humanitarian unit should have forecast data and a polygon.
+    no_fc = merged.loc[~merged["pcode"].isin(set(skill["pcode"])), ["iso3", "pcode"]]
+    if len(no_fc):
+        print(f"NOTE: {len(no_fc)} humanitarian unit(s) have NO forecast data (absent from "
+              f"the zonal stats): {sorted(no_fc['iso3'] + ':' + no_fc['pcode'])}")
+    if GEO_OUT.exists():
+        gp = {f["properties"]["pcode"] for f in json.loads(GEO_OUT.read_text())["features"]}
+        no_geo = merged.loc[~merged["pcode"].isin(gp), ["iso3", "pcode"]]
+        if len(no_geo):
+            print(f"NOTE: {len(no_geo)} unit(s) missing from the geojson (not on the map): "
+                  f"{sorted(no_geo['iso3'] + ':' + no_geo['pcode'])}")
 
     payload = {
         "issued_label": issued_label,
