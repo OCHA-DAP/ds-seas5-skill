@@ -32,12 +32,26 @@
   const fillOf = (cat) => fillFor[cat];
   const byPcode = new Map(data.rows.map((r) => [r.pcode, r]));
 
-  issuedEl.textContent = `Forecast issued ${data.issued_label}.`;
+  // Plan cycle varies by country (e.g. Guatemala's latest is the 2025 HNRP) — surface
+  // the year everywhere caseload figures appear.
+  const planYrOf = (r) => {
+    const ys = [r.ref_year, r.sev_year].filter((y) => y != null);
+    return ys.length ? Math.max(...ys) : null;
+  };
+  const planYrByCountry = new Map();
+  for (const r of data.rows) {
+    const y = planYrOf(r);
+    if (r.country && y) planYrByCountry.set(r.country, Math.max(planYrByCountry.get(r.country) ?? 0, y));
+  }
+  const allYrs = [...new Set(planYrByCountry.values())].sort();
+  issuedEl.textContent = `Forecast issued ${data.issued_label}. HNRP plan data ` +
+    (allYrs.length > 1 ? `${allYrs[0]}–${allYrs[allYrs.length - 1]} (year varies by country — shown per row)` : `${allYrs[0]}`) + ".";
 
   const countries = [...new Set(data.rows.map((r) => r.country).filter(Boolean))].sort();
   for (const c of countries) {
     const o = document.createElement("option");
-    o.value = c; o.textContent = c;
+    o.value = c;
+    o.textContent = planYrByCountry.has(c) ? `${c} — ${planYrByCountry.get(c)}` : c;
     countrySel.appendChild(o);
   }
 
@@ -99,6 +113,8 @@
     }
     if (r.sev4 != null) rows += `<div>Severity 4+: ${fmtN(r.sev4)}</div>`;
     if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
+    const py = planYrOf(r);
+    if (py) rows += `<div>Plan data: ${py}</div>`;
     const catLine = cat
       ? `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>`
       : `<div class="cat" style="color:#9db1b3">In HNRP — ${droughtOnly() ? "no qualifying drought signal" : "no forecast data"}</div>`;
@@ -333,6 +349,7 @@
   const COLS = [
     { key: "country", label: "Country", num: false },
     { key: "name", label: "Admin 1", num: false },
+    { key: "_plan_yr", label: "Plan", num: true },
     { key: "sev4", label: "Severity 4+ pop", num: true },
     { key: "pin", label: "PiN", num: true },
     { key: "targeted", label: "Targeted", num: true },
@@ -362,8 +379,9 @@
     }
     thead.appendChild(trh);
 
+    const kv = (row) => (sortKey === "_plan_yr" ? planYrOf(row) : row[colKey(sortKey)]);
     const rs = data.rows.filter(passes).sort((a, b) => {
-      const x = a[colKey(sortKey)], y = b[colKey(sortKey)];
+      const x = kv(a), y = kv(b);
       if (x == null) return 1;
       if (y == null) return -1;
       const cmp = typeof x === "number" ? x - y : String(x).localeCompare(String(y));
@@ -377,6 +395,7 @@
       tr.innerHTML =
         `<td>${r.country ?? r.iso3}</td>` +
         `<td>${r.name ?? r.pcode}</td>` +
+        `<td class="num">${planYrOf(r) ?? "–"}</td>` +
         `<td class="num">${fmtN(r.sev4)}</td>` +
         `<td class="num">${fmtN(pinOf(r))}</td>` +
         `<td class="num">${fmtN(tgtOf(r))}</td>` +
