@@ -5,11 +5,12 @@
 // skill), and the ranked table. Reuses app.js globals: STYLE, classify, catBase,
 // CAT_LABEL, T, buildPatterns.
 (async function () {
-  let data, geo;
+  let data, geo, world;
   try {
-    [data, geo] = await Promise.all([
+    [data, geo, world] = await Promise.all([
       fetch("data/hnrp_drought.json").then((r) => r.json()),
       fetch("data/hnrp_adm1.geojson").then((r) => r.json()),
+      fetch("data/countries.geojson").then((r) => r.json()),
     ]);
   } catch {
     return; // data files not built yet — leave the tab empty
@@ -19,6 +20,7 @@
   const rpSel = document.getElementById("hnrp-rp");
   const sectorSel = document.getElementById("hnrp-sector");
   const countrySel = document.getElementById("hnrp-country");
+  const droughtOnlyEl = document.getElementById("hnrp-drought-only");
   const issuedEl = document.getElementById("hnrp-issued");
   const thead = document.querySelector("#hnrp-table thead");
   const tbody = document.querySelector("#hnrp-table tbody");
@@ -48,6 +50,8 @@
   const tgtOf = (r) => (fscOn() ? r.fsc_targeted : r.targeted);
   const secTag = () => (fscOn() ? " (FSC)" : "");
 
+  const droughtOnly = () => droughtOnlyEl.checked;
+
   function passes(r) {
     if (r.rp == null) return false; // no qualifying drought slot
     if (r.rp < +rpSel.value) return false;
@@ -55,10 +59,25 @@
     if (countrySel.value && r.country !== countrySel.value) return false;
     return true;
   }
-  // Rows passing filters classify exactly like the Map tab (they are rainy-season,
-  // drought-side, r ≥ mod by construction); everything else greys out.
-  const catOf = (r) => (r && passes(r) ? classify({ pct: r.pct, r: r.r, rainy: true }, false)
-                                       : "unmonitored");
+  // A row's display slot: the worst qualifying drought slot when it passes the filters,
+  // else the default (lead-1) trimester — every HNRP unit gets its real forecast
+  // category (drought/flood/normal/low-skill/off-season) like the Map tab.
+  function slotOf(r) {
+    if (passes(r)) {
+      return { label: r.tri_label, lead: r.lead, rp: r.rp, pct: r.pct, r: r.r, rainy: true };
+    }
+    if (droughtOnly() || r.fb_pct == null) return null;
+    if (countrySel.value && r.country !== countrySel.value) return null;
+    return { label: r.fb_label, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r,
+             rainy: !!r.fb_rainy };
+  }
+  // Style for HNRP units with nothing to display (drought-only mode, or no forecast):
+  // distinct from both the world background and the classified categories.
+  const HNRP_MUTED = { fill: "#e9eeee", edge: "#c4d0d1" };
+  function catOf(r) {
+    const s = r && slotOf(r);
+    return s ? classify({ pct: s.pct, r: s.r, rainy: s.rainy }, false) : null;
+  }
 
   // ── ADM1 choropleth ──────────────────────────────────────────────────────────
   const map = L.map("hnrp-map", {
@@ -67,15 +86,23 @@
   const tipHtml = (f) => {
     const p = f.properties, r = byPcode.get(p.pcode);
     const cat = catOf(r);
+    const s = r && slotOf(r);
     let rows = "";
-    if (r && r.rp != null) {
-      rows = `<div>${r.tri_label}${r.lead < 0 ? " · in season" : ""} — RP ${fmt(r.rp, 1)} yr, r ${fmt(r.r, 2)}</div>`;
+    if (s && s.rp != null) {
+      rows = `<div>${s.label}${s.lead < 0 ? " · in season" : ""} — RP ${fmt(s.rp, 1)} yr, r ${fmt(s.r, 2)}</div>`;
     }
     if (r && r.sev4 != null) rows += `<div>Severity 4+: ${fmtN(r.sev4)}</div>`;
     if (r && tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
-    return `<div class="name">${p.name ?? p.pcode}</div>` +
-      `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || "No qualifying signal"}</div>` + rows;
+    const catLine = cat
+      ? `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>`
+      : `<div class="cat" style="color:#9db1b3">In HNRP — ${droughtOnly() ? "no qualifying drought signal" : "no forecast data"}</div>`;
+    return `<div class="name">${p.name ?? p.pcode}</div>` + catLine + rows;
   };
+  // World countries beneath as context (non-interactive, like the Map tab's backdrop).
+  L.geoJSON(world, {
+    interactive: false,
+    style: { color: "#d9dedf", weight: 0.5, fillColor: "#f7f9f9", fillOpacity: 1 },
+  }).addTo(map);
   const layer = L.geoJSON(geo, {
     filter: (f) => /Polygon/.test(f.geometry.type),
     // Neutral initial style so nothing flashes Leaflet-blue before renderMap runs.
@@ -88,8 +115,8 @@
       const cat = catOf(byPcode.get(l.feature.properties.pcode));
       const el = l._path;
       if (!el) return;
-      el.setAttribute("fill", fillOf(cat));
-      el.setAttribute("stroke", STYLE[cat][1]);
+      el.setAttribute("fill", cat ? fillOf(cat) : HNRP_MUTED.fill);
+      el.setAttribute("stroke", cat ? STYLE[cat][1] : HNRP_MUTED.edge);
     });
   }
 
@@ -100,12 +127,14 @@
   const M = { l: 58, r: 16, t: 12, b: 46 };
 
   function scatterRows() {
-    return data.rows.filter((r) => passes(r) && r.sev_total > 0 && tgtOf(r) != null);
+    return data.rows.filter((r) => r.sev_total > 0 && tgtOf(r) != null && slotOf(r) != null);
   }
 
   function renderScatter() {
-    const W = svg.parentElement.clientWidth || 900, H = 460;
+    // Square: both axes are population shares, so equal visual weight per axis.
+    const W = Math.min(svg.parentElement.clientWidth || 640, 640), H = W;
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.style.height = H + "px";
     svg.innerHTML = "";
     const rows = scatterRows();
     const g = (tag, attrs, parent = svg) => {
@@ -145,7 +174,7 @@
     // Bubbles: big ones first so small ones stay hoverable; 2px surface ring.
     const sorted = [...rows].sort((a, b) => b.sev_total - a.sev_total);
     for (const r of sorted) {
-      const cat = classify({ pct: r.pct, r: r.r, rainy: true }, false);
+      const cat = catOf(r);
       const c = g("circle", {
         cx: X(pctOf(r.sev4, r.sev_total)), cy: Y(pctOf(tgtOf(r), r.sev_total)),
         r: R(r.sev_total), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
@@ -156,12 +185,13 @@
       });
       c.style.cursor = "pointer";
       c.addEventListener("mouseenter", (ev) => {
+        const s = slotOf(r);
         tip.hidden = false;
         tip.innerHTML = `<strong>${r.name ?? r.pcode}</strong> — ${r.country ?? r.iso3}<br>` +
           `Severity 4+: ${fmtN(r.sev4)} (${fmt(pctOf(r.sev4, r.sev_total), 1)}%)<br>` +
           `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), r.sev_total), 1)}%)<br>` +
           `Analysed population: ${fmtN(r.sev_total)}<br>` +
-          `${r.tri_label}${r.lead < 0 ? " · in season" : ""}: RP ${fmt(r.rp, 1)} yr, pct ${fmt(r.pct, 1)}, r ${fmt(r.r, 2)}`;
+          (s ? `${s.label}${s.lead < 0 ? " · in season" : ""}: RP ${fmt(s.rp, 1)} yr, pct ${fmt(s.pct, 1)}, r ${fmt(s.r, 2)}` : "");
       });
       c.addEventListener("mousemove", (ev) => {
         const b = svg.parentElement.getBoundingClientRect();
@@ -178,6 +208,93 @@
         "text-anchor": "middle", "font-size": 10, fill: "#333",
       }).textContent = r.name ?? r.pcode;
     }
+  }
+
+  // ── Severity-breakdown bars (per admin, when a country is selected) ──────────
+  // Population by JIAF class 1–5 (stacked, sequential reds — distinct from the
+  // categorical drought/flood hues), a tick for the targeted population, and the
+  // unit's forecast category as a swatch beside its name.
+  const SEV_COLORS = ["#f9eae8", "#f0c4bf", "#e29691", "#cd5a54", "#96201c"];
+  const barsWrap = document.getElementById("hnrp-bars-wrap");
+  const barsHint = document.getElementById("hnrp-bars-hint");
+  const barsSvg = document.getElementById("hnrp-bars");
+  const barsTitle = document.getElementById("hnrp-bars-title");
+  const barsLegend = document.getElementById("hnrp-bars-legend");
+  const fmtSI = (v) => (v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M"
+    : v >= 1e3 ? Math.round(v / 1e3) + "k" : String(Math.round(v)));
+
+  barsLegend.innerHTML =
+    SEV_COLORS.map((c, i) => `<span><i style="background:${c}"></i> Severity ${i + 1}</span>`).join("") +
+    `<span><i class="tick"></i> targeted${"" /* sector tag applied on render */}</span>` +
+    `<span>left swatch = forecast category</span>`;
+
+  function renderBars() {
+    const country = countrySel.value;
+    const rows = country
+      ? data.rows.filter((r) => r.country === country && r.sev_total > 0)
+          .sort((a, b) => (b.sev4 ?? 0) - (a.sev4 ?? 0))
+      : [];
+    barsWrap.hidden = rows.length === 0;
+    barsHint.hidden = rows.length > 0;
+    if (!rows.length) return;
+    barsTitle.textContent = `${country} — population by severity class, per admin 1 ` +
+      `(analysis year ${rows[0].sev_year ?? "–"})`;
+
+    const W = barsSvg.parentElement.clientWidth || 900;
+    const ROW = 26, M = { l: 205, r: 24, t: 6, b: 34 };
+    const H = M.t + M.b + rows.length * ROW;
+    barsSvg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    barsSvg.style.height = H + "px";
+    barsSvg.innerHTML = "";
+    const g = (tag, attrs, parent = barsSvg) => {
+      const el = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      parent.appendChild(el);
+      return el;
+    };
+    const xmax = Math.max(...rows.map((r) => Math.max(r.sev_total ?? 0, tgtOf(r) ?? 0))) * 1.04;
+    const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
+
+    // x grid: 4 round ticks.
+    const step = Math.pow(10, Math.floor(Math.log10(xmax / 4)));
+    const tick = Math.ceil(xmax / 4 / step) * step;
+    for (let v = 0; v <= xmax; v += tick) {
+      g("line", { x1: X(v), x2: X(v), y1: M.t, y2: H - M.b, stroke: "#eef1f1" });
+      g("text", { x: X(v), y: H - M.b + 16, "text-anchor": "middle", "font-size": 10, fill: "#888" })
+        .textContent = fmtSI(v);
+    }
+    g("text", { x: (M.l + W - M.r) / 2, y: H - 4, "text-anchor": "middle", "font-size": 11, fill: "#555" })
+      .textContent = "People (analysed population by severity class)";
+
+    rows.forEach((r, i) => {
+      const y = M.t + i * ROW;
+      const cat = catOf(r);
+      // Forecast-category swatch + admin name.
+      g("rect", { x: M.l - 199, y: y + ROW / 2 - 7, width: 13, height: 13,
+                  fill: cat ? fillOf(cat) : HNRP_MUTED.fill,
+                  stroke: cat ? STYLE[cat][1] : HNRP_MUTED.edge, "stroke-width": 1 });
+      const name = (r.name ?? r.pcode).length > 24 ? (r.name ?? r.pcode).slice(0, 23) + "…" : (r.name ?? r.pcode);
+      g("text", { x: M.l - 180, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" }).textContent = name;
+
+      // Stacked severity segments with a white spacer between them.
+      let acc = 0;
+      for (let c = 0; c < 5; c++) {
+        const v = r[`s${c + 1}`] ?? 0;
+        if (v <= 0) continue;
+        const seg = g("rect", { x: X(acc), y: y + 4, width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
+                                height: ROW - 9, fill: SEV_COLORS[c] });
+        const title = document.createElementNS(NS, "title");
+        title.textContent = `${r.name ?? r.pcode} — severity ${c + 1}: ${fmtN(v)}`;
+        seg.appendChild(title);
+        acc += v;
+      }
+      // Targeted tick (dark vertical line).
+      const tgt = tgtOf(r);
+      if (tgt != null) {
+        g("line", { x1: X(tgt), x2: X(tgt), y1: y + 1, y2: y + ROW - 3,
+                    stroke: "#1d2021", "stroke-width": 2 });
+      }
+    });
   }
 
   // ── Table ────────────────────────────────────────────────────────────────────
@@ -249,8 +366,8 @@
     });
     if (bounds) map.fitBounds(bounds, { padding: [10, 10] });
   }
-  function renderAll() { renderMap(); renderScatter(); renderTable(); }
-  for (const el of [skillSel, rpSel, sectorSel]) el.addEventListener("change", renderAll);
+  function renderAll() { renderMap(); renderScatter(); renderBars(); renderTable(); }
+  for (const el of [skillSel, rpSel, sectorSel, droughtOnlyEl]) el.addEventListener("change", renderAll);
   countrySel.addEventListener("change", () => { renderAll(); fitCountry(); });
 
   // Hidden-panel sizing: (re)fit when the tab becomes visible.

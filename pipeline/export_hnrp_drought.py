@@ -270,13 +270,21 @@ def load_severity_adm1() -> pd.DataFrame:
         a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
         sev4 = g[g["final_severity"] >= 4].groupby("admin1_code")["population"].sum()
         total = g.groupby("admin1_code")["population"].sum()
+        # Full class breakdown (each source row carries ONE final_severity 1-5 for its
+        # population; an admin-1's distribution comes from its sub-units' classes).
+        by_class = g.pivot_table(index="admin1_code", columns="final_severity",
+                                 values="population", aggfunc="sum")
         for pcode, tot in total.items():
-            rows.append({
+            row = {
                 "pcode": pcode, "iso3": iso3, "name": a1names.get(pcode),
                 "sev4": int(sev4.get(pcode, 0)),
                 "sev_total": int(tot),
                 "sev_year": int(g["year"].iloc[0]),
-            })
+            }
+            for c in range(1, 6):
+                v = by_class.loc[pcode, c] if c in by_class.columns else None
+                row[f"s{c}"] = int(v) if pd.notna(v) else 0
+            rows.append(row)
     out = pd.DataFrame(rows)
     print(f"Severity: {out['iso3'].nunique()} countries, {len(out)} ADM1 units, "
           f"{out['sev4'].sum():,} people in severity 4+")
@@ -311,7 +319,8 @@ def main() -> None:
                     "fsc_pin": _sum, "fsc_targeted": _sum,
                     "ref_year": "max", "pin_admin_level": "max"}))
     df_sev = (df_sev.groupby(["pcode", "iso3"], as_index=False)
-              .agg({"name": "first", "sev4": "sum", "sev_total": "sum", "sev_year": "max"}))
+              .agg({"name": "first", "sev4": "sum", "sev_total": "sum", "sev_year": "max",
+                    **{f"s{c}": "sum" for c in range(1, 6)}}))
     # Union of PiN and severity units; iso3/name from whichever side has them.
     df_hum = df_pin.merge(df_sev, on="pcode", how="outer", suffixes=("", "_sev"))
     for col in ["iso3", "name"]:
@@ -383,6 +392,23 @@ def main() -> None:
             best["pct"] = round(best["pct"], 1)
             best["r"] = round(best["r"], 3)
             row |= best
+        # Fallback display slot for units with no qualifying drought signal: the default
+        # (lead-1) trimester, same as the Map tab's default selection. Lets the site show
+        # every HNRP unit with its real forecast category (flood/normal/low-skill/
+        # off-season) instead of a blank.
+        fb = next((r for _, r in g.iterrows()
+                   if trimester_lead(issued_month, TRIMESTERS[r["trimester"]]) == 1), None)
+        if fb is not None:
+            fpct, fr = fb["forecast_percentile"], fb["pearson_r"]
+            frp = fb["forecast_rp"] if pd.notna(fpct) and fpct < 50 else fb["flood_rp"]
+            row |= {
+                "fb_tri": fb["trimester"],
+                "fb_label": _tri_label(TRIMESTERS[fb["trimester"]]),
+                "fb_pct": round(float(fpct), 1) if pd.notna(fpct) else None,
+                "fb_r": round(float(fr), 3) if pd.notna(fr) else None,
+                "fb_rp": round(float(frp), 1) if pd.notna(frp) else None,
+                "fb_rainy": (pcode, fb["trimester"]) in rainy_set,
+            }
         records.append(row)
 
     df_fc = pd.DataFrame(records)

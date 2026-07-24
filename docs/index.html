@@ -157,6 +157,10 @@
       <label class="ctl">Country
         <select id="hnrp-country" class="map-select"><option value="">All</option></select>
       </label>
+      <label class="toggle">
+        <input type="checkbox" id="hnrp-drought-only" />
+        Drought signals only
+      </label>
       <span id="hnrp-issued" class="lock-note"></span>
     </div>
 
@@ -170,9 +174,21 @@
       <span><i style="background:#7f5619"></i> Strongly below normal</span>
       <span><i style="background:#dda555"></i> Below normal</span>
       <span><i style="background:#e2e8e8"></i> Roughly normal</span>
+      <span><i style="background:#74a1e8"></i> Above normal</span>
+      <span><i style="background:#134ead"></i> Strongly above</span>
+      <span><i style="background:#b1c1c2"></i> Outside rainy season</span>
       <span><i class="hatched"></i> hatched = moderate skill (solid = high)</span>
       <span>bubble area = analysed population</span>
     </div>
+
+    <div id="hnrp-bars-wrap" hidden>
+      <h3 id="hnrp-bars-title"></h3>
+      <svg id="hnrp-bars"></svg>
+      <div id="hnrp-bars-legend"></div>
+    </div>
+    <p id="hnrp-bars-hint" class="lock-note">Select a country above to see its per-admin
+      severity breakdown (population in each JIAF severity class, targeted population, and
+      the forecast category).</p>
 
     <table id="hnrp-table">
       <thead></thead>
