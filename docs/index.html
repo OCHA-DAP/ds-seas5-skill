@@ -141,7 +141,7 @@
           <option value="high">High only (r ≥ 0.50)</option>
         </select>
       </label>
-      <label class="ctl">Drought return period ≥
+      <label class="ctl">Return period ≥
         <select id="hnrp-rp" class="map-select">
           <option value="1">any</option>
           <option value="3" selected>3 yr (alert)</option>
@@ -158,7 +158,7 @@
         <select id="hnrp-country" class="map-select"><option value="">All</option></select>
       </label>
       <label class="toggle">
-        <input type="checkbox" id="hnrp-drought-only" />
+        <input type="checkbox" id="hnrp-drought-only" checked />
         Drought signals only
       </label>
       <span id="hnrp-issued" class="lock-note"></span>
@@ -182,7 +182,18 @@
     </div>
 
     <div id="hnrp-bars-wrap" hidden>
-      <h3 id="hnrp-bars-title"></h3>
+      <div id="hnrp-bars-head">
+        <h3 id="hnrp-bars-title"></h3>
+        <label class="ctl">Sort by
+          <select id="hnrp-bar-sort" class="map-select">
+            <option value="sev4" selected>Severity 4+ population</option>
+            <option value="total">Analysed population</option>
+            <option value="targeted">Targeted</option>
+            <option value="forecast">Forecast category</option>
+            <option value="name">Name</option>
+          </select>
+        </label>
+      </div>
       <svg id="hnrp-bars"></svg>
       <div id="hnrp-bars-legend"></div>
     </div>
