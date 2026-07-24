@@ -187,43 +187,46 @@ def normalize_pcodes(df: pd.DataFrame, poly: pd.DataFrame, label: str) -> pd.Dat
 
 
 def load_pin_adm1() -> pd.DataFrame:
-    """Intersectoral PiN + targeted per ADM1 pcode, each country's latest reference period.
+    """PiN + targeted per ADM1 pcode: Intersectoral and Food Security (FSC) side by side.
 
-    Prefers rows published at admin-1; falls back to summing admin-2 rows per
-    admin1_code for countries that only publish at admin-2.
+    Per (country, sector): the latest reference period; rows published at admin-1
+    preferred, else admin-2 summed per admin1_code. FSC lands in fsc_pin/fsc_targeted
+    (the site's caseload selector); Intersectoral keeps the unprefixed columns.
     """
     engine = stratus.get_engine("dev")
     q = """
-    SELECT location_code, admin1_code, admin1_name, admin2_code, admin_level,
+    SELECT location_code, sector_code, admin1_code, admin1_name, admin_level,
            population_status, population, reference_period_start
     FROM hpc.needs_admin
-    WHERE sector_code = 'Intersectoral' AND category = 'total'
+    WHERE sector_code IN ('Intersectoral', 'FSC') AND category = 'total'
       AND population_status IN ('INN', 'TGT') AND admin_level IN (1, 2)
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_start"])
 
-    latest = df.groupby("location_code")["reference_period_start"].transform("max")
-    df = df[df["reference_period_start"] == latest]
-
-    rows = []
-    for (loc, ref), g in df.groupby(["location_code", "reference_period_start"]):
+    KEYS = {"Intersectoral": ("pin", "targeted"), "FSC": ("fsc_pin", "fsc_targeted")}
+    rows: dict[str, dict] = {}
+    for (loc, sector), g in df.groupby(["location_code", "sector_code"]):
+        ref = g["reference_period_start"].max()
+        g = g[g["reference_period_start"] == ref]
         lvl = 1 if (g["admin_level"] == 1).any() else 2
         g = g[g["admin_level"] == lvl]
         a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
         agg = g.groupby(["admin1_code", "population_status"])["population"].sum().unstack()
+        k_inn, k_tgt = KEYS[sector]
         for pcode, r in agg.iterrows():
-            rows.append({
-                "pcode": pcode, "iso3": loc, "name": a1names.get(pcode),
-                "pin": int(r["INN"]) if pd.notna(r.get("INN")) else None,
-                "targeted": int(r["TGT"]) if pd.notna(r.get("TGT")) else None,
-                "ref_year": int(ref.year),
-                "pin_admin_level": lvl,
-            })
-    out = pd.DataFrame(rows)
+            row = rows.setdefault(pcode, {"pcode": pcode, "iso3": loc,
+                                          "name": a1names.get(pcode)})
+            row[k_inn] = int(r["INN"]) if pd.notna(r.get("INN")) else None
+            row[k_tgt] = int(r["TGT"]) if pd.notna(r.get("TGT")) else None
+            row["ref_year"] = max(row.get("ref_year", 0), int(ref.year))
+            row["pin_admin_level"] = lvl
+    out = pd.DataFrame(rows.values())
+    for col in ["pin", "targeted", "fsc_pin", "fsc_targeted"]:
+        if col not in out.columns:
+            out[col] = None
     print(f"PiN: {out['iso3'].nunique()} countries, {len(out)} ADM1 units "
-          f"(admin-1 direct: {(out['pin_admin_level'] == 1).sum()}, "
-          f"admin-2 rollup: {(out['pin_admin_level'] == 2).sum()})")
+          f"(intersectoral: {out['pin'].notna().sum()}, FSC: {out['fsc_pin'].notna().sum()})")
     return out
 
 
@@ -302,8 +305,10 @@ def main() -> None:
     df_pin = normalize_pcodes(load_pin_adm1(), poly, "PiN")
     df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
+    _sum = lambda s: s.sum(min_count=1)  # noqa: E731 — all-NaN stays None, not 0
     df_pin = (df_pin.groupby(["pcode", "iso3"], as_index=False)
-              .agg({"name": "first", "pin": "sum", "targeted": "sum",
+              .agg({"name": "first", "pin": _sum, "targeted": _sum,
+                    "fsc_pin": _sum, "fsc_targeted": _sum,
                     "ref_year": "max", "pin_admin_level": "max"}))
     df_sev = (df_sev.groupby(["pcode", "iso3"], as_index=False)
               .agg({"name": "first", "sev4": "sum", "sev_total": "sum", "sev_year": "max"}))

@@ -148,6 +148,12 @@
           <option value="10">10 yr (severe alert)</option>
         </select>
       </label>
+      <label class="ctl">Caseload
+        <select id="hnrp-sector" class="map-select">
+          <option value="is" selected>Intersectoral</option>
+          <option value="fsc">Food Security</option>
+        </select>
+      </label>
       <label class="ctl">Country
         <select id="hnrp-country" class="map-select"><option value="">All</option></select>
       </label>
@@ -184,8 +190,10 @@
       occurs about once a decade in the 1981–present hindcast for that area and season.
       <strong>Severity 4+ pop</strong> is the population in JIAF inter-sectoral severity
       classes 4–5 from the HNRP severity analysis (latest analysis year per country);
-      <strong>PiN / Targeted</strong> are the intersectoral People in Need and targeted figures
-      from the plan's latest reference period. Both via <a
+      <strong>PiN / Targeted</strong> are the People in Need and targeted figures from the plan's
+      latest reference period — the <strong>Caseload</strong> selector switches them between the
+      Intersectoral and Food Security (FSC) cluster figures (severity classes exist only
+      inter-sectorally; IPC phases are the planned food-security severity weight). Both via <a
       href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>; figures published at
       admin-2/3 are summed to admin-1. Forecast data: detrended, matching the Map tab's defaults.
     </p>

@@ -461,7 +461,12 @@ Promise.all([
 // Tabs (Map / Methodology) with #hash deep-linking.
 (function setupTabs() {
   const buttons = document.querySelectorAll(".tab");
+  const TABS = ["map", "skillmap", "skill", "hnrp", "methods"];
   function show(name) {
+    // Unlisted tabs (hidden buttons, reachable only by #hash): once explicitly opened,
+    // reveal the button for this session so navigating away and back works.
+    const btn = document.querySelector(`.tab[data-tab="${name}"]`);
+    if (btn && btn.hidden) btn.hidden = false;
     buttons.forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
     document.querySelectorAll(".tab-panel").forEach((p) => {
       p.hidden = p.id !== "tab-" + name;
@@ -479,7 +484,13 @@ Promise.all([
     history.replaceState(null, "", "#" + b.dataset.tab);
   }));
   const initial = location.hash.replace("#", "");
-  if (["map", "skillmap", "skill", "hnrp", "methods"].includes(initial)) show(initial);
+  if (TABS.includes(initial)) show(initial);
+  // Editing the #hash in the address bar (or back/forward) also switches tabs —
+  // without this, a hash edit after load does nothing until a full reload.
+  window.addEventListener("hashchange", () => {
+    const h = location.hash.replace("#", "");
+    if (TABS.includes(h)) show(h);
+  });
 })();
 
 // CSS hatch fill for legend swatches — crosshatch for "cross", single stripe otherwise.

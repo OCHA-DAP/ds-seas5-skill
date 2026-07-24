@@ -17,6 +17,7 @@
 
   const skillSel = document.getElementById("hnrp-skill");
   const rpSel = document.getElementById("hnrp-rp");
+  const sectorSel = document.getElementById("hnrp-sector");
   const countrySel = document.getElementById("hnrp-country");
   const issuedEl = document.getElementById("hnrp-issued");
   const thead = document.querySelector("#hnrp-table thead");
@@ -41,6 +42,11 @@
   const fmtN = (v) => (v == null ? "–" : Math.round(v).toLocaleString("en-US"));
   const fmt = (v, d) => (v == null ? "–" : Number(v).toFixed(d));
   const pctOf = (num, den) => (num == null || !den ? null : (100 * num) / den);
+  // Caseload selector: PiN/targeted come from Intersectoral or Food Security (FSC).
+  const fscOn = () => sectorSel.value === "fsc";
+  const pinOf = (r) => (fscOn() ? r.fsc_pin : r.pin);
+  const tgtOf = (r) => (fscOn() ? r.fsc_targeted : r.targeted);
+  const secTag = () => (fscOn() ? " (FSC)" : "");
 
   function passes(r) {
     if (r.rp == null) return false; // no qualifying drought slot
@@ -66,7 +72,7 @@
       rows = `<div>${r.tri_label}${r.lead < 0 ? " · in season" : ""} — RP ${fmt(r.rp, 1)} yr, r ${fmt(r.r, 2)}</div>`;
     }
     if (r && r.sev4 != null) rows += `<div>Severity 4+: ${fmtN(r.sev4)}</div>`;
-    if (r && r.targeted != null) rows += `<div>Targeted: ${fmtN(r.targeted)}</div>`;
+    if (r && tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
     return `<div class="name">${p.name ?? p.pcode}</div>` +
       `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || "No qualifying signal"}</div>` + rows;
   };
@@ -94,7 +100,7 @@
   const M = { l: 58, r: 16, t: 12, b: 46 };
 
   function scatterRows() {
-    return data.rows.filter((r) => passes(r) && r.sev_total > 0 && r.targeted != null);
+    return data.rows.filter((r) => passes(r) && r.sev_total > 0 && tgtOf(r) != null);
   }
 
   function renderScatter() {
@@ -114,7 +120,7 @@
       return;
     }
     const xmax = Math.min(100, Math.max(10, ...rows.map((r) => pctOf(r.sev4, r.sev_total))) * 1.08);
-    const ymax = Math.min(100, Math.max(10, ...rows.map((r) => pctOf(r.targeted, r.sev_total))) * 1.08);
+    const ymax = Math.min(100, Math.max(10, ...rows.map((r) => pctOf(tgtOf(r), r.sev_total))) * 1.08);
     const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
     const Y = (v) => H - M.b - (v / ymax) * (H - M.t - M.b);
     const pmax = Math.max(...rows.map((r) => r.sev_total));
@@ -133,7 +139,7 @@
     g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 11, fill: "#555" })
       .textContent = "Population in severity 4+ (% of analysed population)";
     const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 11, fill: "#555" });
-    yl.textContent = "Targeted (% of analysed population)";
+    yl.textContent = `Targeted${secTag()} (% of analysed population)`;
     yl.setAttribute("transform", `rotate(-90 14 ${(M.t + H - M.b) / 2})`);
 
     // Bubbles: big ones first so small ones stay hoverable; 2px surface ring.
@@ -141,7 +147,7 @@
     for (const r of sorted) {
       const cat = classify({ pct: r.pct, r: r.r, rainy: true }, false);
       const c = g("circle", {
-        cx: X(pctOf(r.sev4, r.sev_total)), cy: Y(pctOf(r.targeted, r.sev_total)),
+        cx: X(pctOf(r.sev4, r.sev_total)), cy: Y(pctOf(tgtOf(r), r.sev_total)),
         r: R(r.sev_total), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
       });
       g("circle", {
@@ -153,7 +159,7 @@
         tip.hidden = false;
         tip.innerHTML = `<strong>${r.name ?? r.pcode}</strong> — ${r.country ?? r.iso3}<br>` +
           `Severity 4+: ${fmtN(r.sev4)} (${fmt(pctOf(r.sev4, r.sev_total), 1)}%)<br>` +
-          `Targeted: ${fmtN(r.targeted)} (${fmt(pctOf(r.targeted, r.sev_total), 1)}%)<br>` +
+          `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), r.sev_total), 1)}%)<br>` +
           `Analysed population: ${fmtN(r.sev_total)}<br>` +
           `${r.tri_label}${r.lead < 0 ? " · in season" : ""}: RP ${fmt(r.rp, 1)} yr, pct ${fmt(r.pct, 1)}, r ${fmt(r.r, 2)}`;
       });
@@ -168,7 +174,7 @@
     // Selective direct labels: the 6 largest analysed populations.
     for (const r of sorted.slice(0, 6)) {
       g("text", {
-        x: X(pctOf(r.sev4, r.sev_total)), y: Y(pctOf(r.targeted, r.sev_total)) - R(r.sev_total) - 4,
+        x: X(pctOf(r.sev4, r.sev_total)), y: Y(pctOf(tgtOf(r), r.sev_total)) - R(r.sev_total) - 4,
         "text-anchor": "middle", "font-size": 10, fill: "#333",
       }).textContent = r.name ?? r.pcode;
     }
@@ -187,13 +193,16 @@
     { key: "r", label: "Skill (r)", num: true },
   ];
   let sortKey = "sev4", sortDesc = true;
+  // PiN/Targeted columns follow the caseload selector.
+  const colKey = (k) => (fscOn() && (k === "pin" || k === "targeted") ? "fsc_" + k : k);
 
   function renderTable() {
     thead.innerHTML = "";
     const trh = document.createElement("tr");
     for (const c of COLS) {
       const th = document.createElement("th");
-      th.textContent = c.label + (c.key === sortKey ? (sortDesc ? " ↓" : " ↑") : "");
+      const label = c.label + (fscOn() && (c.key === "pin" || c.key === "targeted") ? " (FSC)" : "");
+      th.textContent = label + (c.key === sortKey ? (sortDesc ? " ↓" : " ↑") : "");
       th.className = (c.num ? "num" : "") + (c.key === sortKey ? " sorted" : "");
       th.addEventListener("click", () => {
         if (sortKey === c.key) sortDesc = !sortDesc;
@@ -205,7 +214,7 @@
     thead.appendChild(trh);
 
     const rs = data.rows.filter(passes).sort((a, b) => {
-      const x = a[sortKey], y = b[sortKey];
+      const x = a[colKey(sortKey)], y = b[colKey(sortKey)];
       if (x == null) return 1;
       if (y == null) return -1;
       const cmp = typeof x === "number" ? x - y : String(x).localeCompare(String(y));
@@ -220,8 +229,8 @@
         `<td>${r.country ?? r.iso3}</td>` +
         `<td>${r.name ?? r.pcode}</td>` +
         `<td class="num">${fmtN(r.sev4)}</td>` +
-        `<td class="num">${fmtN(r.pin)}</td>` +
-        `<td class="num">${fmtN(r.targeted)}</td>` +
+        `<td class="num">${fmtN(pinOf(r))}</td>` +
+        `<td class="num">${fmtN(tgtOf(r))}</td>` +
         `<td>${r.tri_label ?? "–"}${r.lead != null && r.lead < 0 ? ' <span class="in-season-tag">· in season</span>' : ""}</td>` +
         `<td class="num">${fmt(r.rp, 1)}</td>` +
         `<td class="num">${fmt(r.pct, 1)}</td>` +
@@ -241,7 +250,7 @@
     if (bounds) map.fitBounds(bounds, { padding: [10, 10] });
   }
   function renderAll() { renderMap(); renderScatter(); renderTable(); }
-  for (const el of [skillSel, rpSel]) el.addEventListener("change", renderAll);
+  for (const el of [skillSel, rpSel, sectorSel]) el.addEventListener("change", renderAll);
   countrySel.addEventListener("change", () => { renderAll(); fitCountry(); });
 
   // Hidden-panel sizing: (re)fit when the tab becomes visible.
