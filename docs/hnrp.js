@@ -1,0 +1,434 @@
+// Forecast × HNRP tab: ADM1 drought forecast vs HNRP severity/targeted caseloads.
+// Three linked views — an ADM1 choropleth (same classification as the Map tab), a
+// scatter (x = % of analysed population in severity 4+, y = targeted as % of analysed
+// population, bubble area = analysed population, fill/hatch = forecast category ×
+// skill), and the ranked table. Reuses app.js globals: STYLE, classify, catBase,
+// CAT_LABEL, T, buildPatterns.
+(async function () {
+  let data, geo, world;
+  try {
+    [data, geo, world] = await Promise.all([
+      fetch("data/hnrp_drought.json").then((r) => r.json()),
+      fetch("data/hnrp_adm1.geojson").then((r) => r.json()),
+      fetch("data/countries.geojson").then((r) => r.json()),
+    ]);
+  } catch {
+    return; // data files not built yet — leave the tab empty
+  }
+
+  const skillSel = document.getElementById("hnrp-skill");
+  const rpSel = document.getElementById("hnrp-rp");
+  const sectorSel = document.getElementById("hnrp-sector");
+  const countrySel = document.getElementById("hnrp-country");
+  const droughtOnlyEl = document.getElementById("hnrp-drought-only");
+  const issuedEl = document.getElementById("hnrp-issued");
+  const thead = document.querySelector("#hnrp-table thead");
+  const tbody = document.querySelector("#hnrp-table tbody");
+  const emptyEl = document.getElementById("hnrp-empty");
+
+  // buildPatterns() returns the complete cat -> fill map (solid hex or pattern url);
+  // app.js already registered the pattern defs, duplicate ids resolve to the first.
+  const fillFor = buildPatterns();
+  const fillOf = (cat) => fillFor[cat];
+  const byPcode = new Map(data.rows.map((r) => [r.pcode, r]));
+
+  // Plan cycle varies by country (e.g. Guatemala's latest is the 2025 HNRP) — surface
+  // the year everywhere caseload figures appear.
+  const planYrOf = (r) => {
+    const ys = [r.ref_year, r.sev_year].filter((y) => y != null);
+    return ys.length ? Math.max(...ys) : null;
+  };
+  const planYrByCountry = new Map();
+  for (const r of data.rows) {
+    const y = planYrOf(r);
+    if (r.country && y) planYrByCountry.set(r.country, Math.max(planYrByCountry.get(r.country) ?? 0, y));
+  }
+  const allYrs = [...new Set(planYrByCountry.values())].sort();
+  issuedEl.textContent = `Forecast issued ${data.issued_label}. HNRP plan data ` +
+    (allYrs.length > 1 ? `${allYrs[0]}–${allYrs[allYrs.length - 1]} (year varies by country — shown per row)` : `${allYrs[0]}`) + ".";
+
+  const countries = [...new Set(data.rows.map((r) => r.country).filter(Boolean))].sort();
+  for (const c of countries) {
+    const o = document.createElement("option");
+    o.value = c;
+    o.textContent = planYrByCountry.has(c) ? `${c} — ${planYrByCountry.get(c)}` : c;
+    countrySel.appendChild(o);
+  }
+
+  const fmtN = (v) => (v == null ? "–" : Math.round(v).toLocaleString("en-US"));
+  const fmt = (v, d) => (v == null ? "–" : Number(v).toFixed(d));
+  const pctOf = (num, den) => (num == null || !den ? null : (100 * num) / den);
+  // Caseload selector: PiN/targeted come from Intersectoral or Food Security (FSC).
+  const fscOn = () => sectorSel.value === "fsc";
+  const pinOf = (r) => (fscOn() ? r.fsc_pin : r.pin);
+  const tgtOf = (r) => (fscOn() ? r.fsc_targeted : r.targeted);
+  const secTag = () => (fscOn() ? " (FSC)" : "");
+
+  const droughtOnly = () => droughtOnlyEl.checked;
+
+  function passes(r) {
+    if (r.rp == null) return false; // no qualifying drought slot
+    if (r.rp < +rpSel.value) return false;
+    if (skillSel.value === "high" && r.r < T.r_high) return false;
+    if (countrySel.value && r.country !== countrySel.value) return false;
+    return true;
+  }
+  // A row's display slot: the worst qualifying drought slot when it passes the filters,
+  // else the default (lead-1) trimester — every HNRP unit gets its real forecast
+  // category (drought/flood/normal/low-skill/off-season) like the Map tab.
+  function slotOf(r) {
+    if (passes(r)) {
+      return { label: r.tri_label, lead: r.lead, rp: r.rp, pct: r.pct, r: r.r, rainy: true };
+    }
+    if (droughtOnly() || r.fb_pct == null) return null;
+    if (countrySel.value && r.country !== countrySel.value) return null;
+    return { label: r.fb_label, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r,
+             rainy: !!r.fb_rainy };
+  }
+  // Style for HNRP units with nothing to display (drought-only mode, or no forecast):
+  // distinct from both the world background and the classified categories.
+  const HNRP_MUTED = { fill: "#e9eeee", edge: "#c4d0d1" };
+  function catOf(r) {
+    const s = r && slotOf(r);
+    return s ? classify({ pct: s.pct, r: s.r, rainy: s.rainy }, false) : null;
+  }
+
+  // ── ADM1 choropleth ──────────────────────────────────────────────────────────
+  const map = L.map("hnrp-map", {
+    crs: L.CRS.EPSG4326, attributionControl: false, maxZoom: 8,
+  });
+  const tipHtml = (f) => {
+    const p = f.properties, r = byPcode.get(p.pcode);
+    // No PiN/severity row = not part of the plan's admin-level analysis (e.g. Nigeria's
+    // HNRP covers only Borno/Adamawa/Yobe) — context only, never labelled "in HNRP".
+    if (!r) {
+      return `<div class="name">${p.name ?? p.pcode}</div>` +
+        `<div class="cat" style="color:#9db1b3">Not in the HNRP admin-level analysis</div>`;
+    }
+    const cat = catOf(r);
+    const s = slotOf(r);
+    let rows = "";
+    if (s && s.rp != null) {
+      rows = `<div>${s.label}${s.lead < 0 ? " · in season" : ""} — RP ${fmt(s.rp, 1)} yr, r ${fmt(s.r, 2)}</div>`;
+    }
+    if (r.sev4 != null) rows += `<div>Severity 4+: ${fmtN(r.sev4)}</div>`;
+    if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
+    const py = planYrOf(r);
+    if (py) rows += `<div>Plan data: ${py}</div>`;
+    const catLine = cat
+      ? `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>`
+      : `<div class="cat" style="color:#9db1b3">In HNRP — ${droughtOnly() ? "no qualifying drought signal" : "no forecast data"}</div>`;
+    return `<div class="name">${p.name ?? p.pcode}</div>` + catLine + rows;
+  };
+  // World countries beneath as context (non-interactive, like the Map tab's backdrop).
+  L.geoJSON(world, {
+    interactive: false,
+    style: { color: "#d9dedf", weight: 0.5, fillColor: "#f7f9f9", fillOpacity: 1 },
+  }).addTo(map);
+  const layer = L.geoJSON(geo, {
+    filter: (f) => /Polygon/.test(f.geometry.type),
+    // Neutral initial style so nothing flashes Leaflet-blue before renderMap runs.
+    style: () => ({ weight: 0.6, fillOpacity: 1, color: "#e2e8e8", fillColor: "#f5f7f7" }),
+    onEachFeature: (f, l) => l.bindTooltip(() => tipHtml(f), { sticky: true }),
+  }).addTo(map);
+  map.fitBounds(layer.getBounds());
+  function renderMap() {
+    layer.eachLayer((l) => {
+      const el = l._path;
+      if (!el) return;
+      const r = byPcode.get(l.feature.properties.pcode);
+      if (!r) {
+        // Out of plan scope: blend into the world backdrop (tooltip still names it).
+        el.setAttribute("fill", "#f7f9f9");
+        el.setAttribute("stroke", "#d9dedf");
+        return;
+      }
+      const cat = catOf(r);
+      el.setAttribute("fill", cat ? fillOf(cat) : HNRP_MUTED.fill);
+      el.setAttribute("stroke", cat ? STYLE[cat][1] : HNRP_MUTED.edge);
+    });
+  }
+
+  // ── Scatter ──────────────────────────────────────────────────────────────────
+  const svg = document.getElementById("hnrp-scatter");
+  const tip = document.getElementById("hnrp-tip");
+  const NS = "http://www.w3.org/2000/svg";
+  const M = { l: 58, r: 16, t: 12, b: 46 };
+
+  function scatterRows() {
+    return data.rows.filter((r) => r.sev_total > 0 && tgtOf(r) != null && slotOf(r) != null);
+  }
+
+  function renderScatter() {
+    // Square: both axes are population shares, so equal visual weight per axis.
+    const W = Math.min(svg.parentElement.clientWidth || 640, 640), H = W;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.style.height = H + "px";
+    svg.innerHTML = "";
+    const rows = scatterRows();
+    const g = (tag, attrs, parent = svg) => {
+      const el = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      parent.appendChild(el);
+      return el;
+    };
+    if (!rows.length) {
+      g("text", { x: W / 2, y: H / 2, "text-anchor": "middle", fill: "#888", "font-size": 13 })
+        .textContent = "No admin-1 units match the current filters.";
+      return;
+    }
+    const xmax = Math.min(100, Math.max(10, ...rows.map((r) => pctOf(r.sev4, r.sev_total))) * 1.08);
+    const ymax = Math.min(100, Math.max(10, ...rows.map((r) => pctOf(tgtOf(r), r.sev_total))) * 1.08);
+    const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
+    const Y = (v) => H - M.b - (v / ymax) * (H - M.t - M.b);
+    const pmax = Math.max(...rows.map((r) => r.sev_total));
+    const R = (p) => 4 + 22 * Math.sqrt(p / pmax);
+
+    // Recessive grid + axes.
+    const ticks = (max) => { const s = max > 50 ? 20 : max > 20 ? 10 : 5; const o = []; for (let v = 0; v <= max; v += s) o.push(v); return o; };
+    for (const v of ticks(xmax)) {
+      g("line", { x1: X(v), x2: X(v), y1: M.t, y2: H - M.b, stroke: "#eef1f1" });
+      g("text", { x: X(v), y: H - M.b + 16, "text-anchor": "middle", "font-size": 10, fill: "#888" }).textContent = v + "%";
+    }
+    for (const v of ticks(ymax)) {
+      g("line", { x1: M.l, x2: W - M.r, y1: Y(v), y2: Y(v), stroke: "#eef1f1" });
+      g("text", { x: M.l - 6, y: Y(v) + 3, "text-anchor": "end", "font-size": 10, fill: "#888" }).textContent = v + "%";
+    }
+    g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 11, fill: "#555" })
+      .textContent = "Population in severity 4+ (% of analysed population)";
+    const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 11, fill: "#555" });
+    yl.textContent = `Targeted${secTag()} (% of analysed population)`;
+    yl.setAttribute("transform", `rotate(-90 14 ${(M.t + H - M.b) / 2})`);
+
+    // Bubbles: big ones first so small ones stay hoverable; 2px surface ring.
+    const sorted = [...rows].sort((a, b) => b.sev_total - a.sev_total);
+    for (const r of sorted) {
+      const cat = catOf(r);
+      const c = g("circle", {
+        cx: X(pctOf(r.sev4, r.sev_total)), cy: Y(pctOf(tgtOf(r), r.sev_total)),
+        r: R(r.sev_total), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
+      });
+      g("circle", {
+        cx: c.getAttribute("cx"), cy: c.getAttribute("cy"), r: R(r.sev_total),
+        fill: "none", stroke: STYLE[cat][1], "stroke-width": 1,
+      });
+      c.style.cursor = "pointer";
+      c.addEventListener("mouseenter", (ev) => {
+        const s = slotOf(r);
+        tip.hidden = false;
+        tip.innerHTML = `<strong>${r.name ?? r.pcode}</strong> — ${r.country ?? r.iso3}<br>` +
+          `Severity 4+: ${fmtN(r.sev4)} (${fmt(pctOf(r.sev4, r.sev_total), 1)}%)<br>` +
+          `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), r.sev_total), 1)}%)<br>` +
+          `Analysed population: ${fmtN(r.sev_total)}<br>` +
+          (s ? `${s.label}${s.lead < 0 ? " · in season" : ""}: RP ${fmt(s.rp, 1)} yr, pct ${fmt(s.pct, 1)}, r ${fmt(s.r, 2)}` : "");
+      });
+      c.addEventListener("mousemove", (ev) => {
+        const b = svg.parentElement.getBoundingClientRect();
+        tip.style.left = Math.min(ev.clientX - b.left + 14, b.width - 240) + "px";
+        tip.style.top = (ev.clientY - b.top + 14) + "px";
+      });
+      c.addEventListener("mouseleave", () => { tip.hidden = true; });
+    }
+
+    // Selective direct labels: the 6 largest analysed populations.
+    for (const r of sorted.slice(0, 6)) {
+      g("text", {
+        x: X(pctOf(r.sev4, r.sev_total)), y: Y(pctOf(tgtOf(r), r.sev_total)) - R(r.sev_total) - 4,
+        "text-anchor": "middle", "font-size": 10, fill: "#333",
+      }).textContent = r.name ?? r.pcode;
+    }
+  }
+
+  // ── Severity-breakdown bars (per admin, when a country is selected) ──────────
+  // Population by JIAF class 1–5 (stacked), a tick for the targeted population, and
+  // the unit's forecast category as a swatch beside its name. Severity uses the
+  // IPC/CH-convention colours — a domain-standard scale this audience reads at a
+  // glance, and far more separable than a single-hue ramp.
+  const SEV_COLORS = ["#cdfacd", "#fae61e", "#e67800", "#c80000", "#640000"];
+  const SEV_LABELS = ["1 — minimal", "2 — stress", "3 — severe", "4 — extreme", "5 — catastrophic"];
+  const barsWrap = document.getElementById("hnrp-bars-wrap");
+  const barsHint = document.getElementById("hnrp-bars-hint");
+  const barsSvg = document.getElementById("hnrp-bars");
+  const barsTitle = document.getElementById("hnrp-bars-title");
+  const barsLegend = document.getElementById("hnrp-bars-legend");
+  const fmtSI = (v) => (v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M"
+    : v >= 1e3 ? Math.round(v / 1e3) + "k" : String(Math.round(v)));
+
+  barsLegend.innerHTML =
+    SEV_COLORS.map((c, i) => `<span><i style="background:${c}"></i> ${SEV_LABELS[i]}</span>`).join("") +
+    `<span><i class="tick"></i> targeted</span>` +
+    `<span>left swatch = forecast category</span>`;
+
+  // Sort control: severity 4+ first by default; forecast order puts droughts on top.
+  const barSortSel = document.getElementById("hnrp-bar-sort");
+  const CAT_ORDER = ["drought_vsev_high", "drought_vsev_mod", "drought_sev_high",
+    "drought_sev_mod", "flood_vsev_high", "flood_vsev_mod", "flood_sev_high",
+    "flood_sev_mod", "high_none", "mid_none", "low_skill", "off_season"];
+  const catRank = (r) => {
+    const i = CAT_ORDER.indexOf(catOf(r) ?? "");
+    return i === -1 ? CAT_ORDER.length : i;
+  };
+  const BAR_SORTS = {
+    sev4: (a, b) => (b.sev4 ?? 0) - (a.sev4 ?? 0),
+    total: (a, b) => (b.sev_total ?? 0) - (a.sev_total ?? 0),
+    targeted: (a, b) => (tgtOf(b) ?? 0) - (tgtOf(a) ?? 0),
+    forecast: (a, b) => catRank(a) - catRank(b) || (b.sev4 ?? 0) - (a.sev4 ?? 0),
+    name: (a, b) => String(a.name ?? a.pcode).localeCompare(String(b.name ?? b.pcode)),
+  };
+
+  function renderBars() {
+    const country = countrySel.value;
+    const rows = country
+      ? data.rows.filter((r) => r.country === country && r.sev_total > 0)
+          .sort(BAR_SORTS[barSortSel.value] || BAR_SORTS.sev4)
+      : [];
+    barsWrap.hidden = rows.length === 0;
+    barsHint.hidden = rows.length > 0;
+    if (!rows.length) return;
+    barsTitle.textContent = `${country} — population by severity class, per admin 1 ` +
+      `(analysis year ${rows[0].sev_year ?? "–"})`;
+
+    const W = barsSvg.parentElement.clientWidth || 900;
+    const ROW = 26, M = { l: 205, r: 24, t: 6, b: 34 };
+    const H = M.t + M.b + rows.length * ROW;
+    barsSvg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    barsSvg.style.height = H + "px";
+    barsSvg.innerHTML = "";
+    const g = (tag, attrs, parent = barsSvg) => {
+      const el = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      parent.appendChild(el);
+      return el;
+    };
+    const xmax = Math.max(...rows.map((r) => Math.max(r.sev_total ?? 0, tgtOf(r) ?? 0))) * 1.04;
+    const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
+
+    // x grid: 4 round ticks.
+    const step = Math.pow(10, Math.floor(Math.log10(xmax / 4)));
+    const tick = Math.ceil(xmax / 4 / step) * step;
+    for (let v = 0; v <= xmax; v += tick) {
+      g("line", { x1: X(v), x2: X(v), y1: M.t, y2: H - M.b, stroke: "#eef1f1" });
+      g("text", { x: X(v), y: H - M.b + 16, "text-anchor": "middle", "font-size": 10, fill: "#888" })
+        .textContent = fmtSI(v);
+    }
+    g("text", { x: (M.l + W - M.r) / 2, y: H - 4, "text-anchor": "middle", "font-size": 11, fill: "#555" })
+      .textContent = "People (analysed population by severity class)";
+
+    rows.forEach((r, i) => {
+      const y = M.t + i * ROW;
+      const cat = catOf(r);
+      // Forecast-category swatch + admin name.
+      g("rect", { x: M.l - 199, y: y + ROW / 2 - 7, width: 13, height: 13,
+                  fill: cat ? fillOf(cat) : HNRP_MUTED.fill,
+                  stroke: cat ? STYLE[cat][1] : HNRP_MUTED.edge, "stroke-width": 1 });
+      const name = (r.name ?? r.pcode).length > 24 ? (r.name ?? r.pcode).slice(0, 23) + "…" : (r.name ?? r.pcode);
+      g("text", { x: M.l - 180, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" }).textContent = name;
+
+      // Stacked severity segments with a white spacer between them.
+      let acc = 0;
+      for (let c = 0; c < 5; c++) {
+        const v = r[`s${c + 1}`] ?? 0;
+        if (v <= 0) continue;
+        const seg = g("rect", { x: X(acc), y: y + 4, width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
+                                height: ROW - 9, fill: SEV_COLORS[c] });
+        const title = document.createElementNS(NS, "title");
+        title.textContent = `${r.name ?? r.pcode} — severity ${c + 1}: ${fmtN(v)}`;
+        seg.appendChild(title);
+        acc += v;
+      }
+      // Targeted tick (dark vertical line).
+      const tgt = tgtOf(r);
+      if (tgt != null) {
+        g("line", { x1: X(tgt), x2: X(tgt), y1: y + 1, y2: y + ROW - 3,
+                    stroke: "#1d2021", "stroke-width": 2 });
+      }
+    });
+  }
+
+  // ── Table ────────────────────────────────────────────────────────────────────
+  const COLS = [
+    { key: "country", label: "Country", num: false },
+    { key: "name", label: "Admin 1", num: false },
+    { key: "_plan_yr", label: "Plan", num: true },
+    { key: "sev4", label: "Severity 4+ pop", num: true },
+    { key: "pin", label: "PiN", num: true },
+    { key: "targeted", label: "Targeted", num: true },
+    { key: "tri_label", label: "Season", num: false },
+    { key: "rp", label: "Drought RP (yr)", num: true },
+    { key: "pct", label: "Percentile", num: true },
+    { key: "r", label: "Skill (r)", num: true },
+  ];
+  let sortKey = "sev4", sortDesc = true;
+  // PiN/Targeted columns follow the caseload selector.
+  const colKey = (k) => (fscOn() && (k === "pin" || k === "targeted") ? "fsc_" + k : k);
+
+  function renderTable() {
+    thead.innerHTML = "";
+    const trh = document.createElement("tr");
+    for (const c of COLS) {
+      const th = document.createElement("th");
+      const label = c.label + (fscOn() && (c.key === "pin" || c.key === "targeted") ? " (FSC)" : "");
+      th.textContent = label + (c.key === sortKey ? (sortDesc ? " ↓" : " ↑") : "");
+      th.className = (c.num ? "num" : "") + (c.key === sortKey ? " sorted" : "");
+      th.addEventListener("click", () => {
+        if (sortKey === c.key) sortDesc = !sortDesc;
+        else { sortKey = c.key; sortDesc = c.num; }
+        renderTable();
+      });
+      trh.appendChild(th);
+    }
+    thead.appendChild(trh);
+
+    const kv = (row) => (sortKey === "_plan_yr" ? planYrOf(row) : row[colKey(sortKey)]);
+    const rs = data.rows.filter(passes).sort((a, b) => {
+      const x = kv(a), y = kv(b);
+      if (x == null) return 1;
+      if (y == null) return -1;
+      const cmp = typeof x === "number" ? x - y : String(x).localeCompare(String(y));
+      return sortDesc ? -cmp : cmp;
+    });
+    tbody.innerHTML = "";
+    emptyEl.hidden = rs.length > 0;
+    for (const r of rs) {
+      const tr = document.createElement("tr");
+      const skillCls = r.r >= T.r_high ? "skill-high" : "skill-mod";
+      tr.innerHTML =
+        `<td>${r.country ?? r.iso3}</td>` +
+        `<td>${r.name ?? r.pcode}</td>` +
+        `<td class="num">${planYrOf(r) ?? "–"}</td>` +
+        `<td class="num">${fmtN(r.sev4)}</td>` +
+        `<td class="num">${fmtN(pinOf(r))}</td>` +
+        `<td class="num">${fmtN(tgtOf(r))}</td>` +
+        `<td>${r.tri_label ?? "–"}${r.lead != null && r.lead < 0 ? ' <span class="in-season-tag">· in season</span>' : ""}</td>` +
+        `<td class="num">${fmt(r.rp, 1)}</td>` +
+        `<td class="num">${fmt(r.pct, 1)}</td>` +
+        `<td class="num ${skillCls}">${fmt(r.r, 2)}</td>`;
+      tbody.appendChild(tr);
+    }
+  }
+
+  function fitCountry() {
+    const c = countrySel.value;
+    let bounds = null;
+    layer.eachLayer((l) => {
+      const r = byPcode.get(l.feature.properties.pcode);
+      if (c && (!r || r.country !== c)) return;
+      bounds = bounds ? bounds.extend(l.getBounds()) : L.latLngBounds(l.getBounds());
+    });
+    if (bounds) map.fitBounds(bounds, { padding: [10, 10] });
+  }
+  function renderAll() { renderMap(); renderScatter(); renderBars(); renderTable(); }
+  for (const el of [skillSel, rpSel, sectorSel, droughtOnlyEl]) el.addEventListener("change", renderAll);
+  barSortSel.addEventListener("change", renderBars);
+  countrySel.addEventListener("change", () => { renderAll(); fitCountry(); });
+
+  // Hidden-panel sizing: (re)fit when the tab becomes visible.
+  window.tabShown = window.tabShown || {};
+  window.tabShown.hnrp = () => {
+    map.invalidateSize();
+    map.fitBounds(layer.getBounds());
+    renderAll(); // paths may mount after the panel becomes visible — restyle then
+  };
+  renderAll();
+  requestAnimationFrame(renderMap); // catch paths that mounted after the first pass
+})();
