@@ -32,6 +32,28 @@ toggles, and dashed/interleaved outlines where a country is in several sets:
 `data/forecasts/` (no extra export); the country lists are the `CBPF_AWARD` and `CBPF_ALL` sets at
 the top of `cbpf.js`.
 
+## Unlisted CMA (CMME) mirror — `/cma/`
+
+`cma/index.html` is a full mirror of the main site (Map, Skill map, Skill by country,
+Methodology) driven by **CMA CMME** forecasts instead of SEAS5, at **country level only** —
+no pixel layers, no cbpf/cerf pages. Not linked from the nav; shared by direct link only
+(`<meta name="robots" content="noindex">`).
+
+It reuses the SAME `app.js` / `skillmap.js` / `skill.js` untouched: those scripts fetch
+`data/…` relative to the page, so the page ships its own `cma/data/` (forecast issuances +
+`skill_matrix.json`, leads 1–4) and points `window.SITE_GEO` at the main site's
+`countries.geojson` to avoid duplicating the geometry. The raster `meta.json` fetches 404 →
+the scripts fall back to country-only and the page has no Country/Pixel toggles.
+
+CMME specifics: ensemble-mean precipitation at 1°, monthly leads 1–6 (the issue month itself
+is not forecast → trimester leads 1–4, no in-season trimesters), hindcast inits 1991–2020 +
+realtime from Aug 2025 (nothing in between). Rebuild with:
+
+```bash
+uv run python pipeline/compute_skill_cma.py   # CMME blob → adm0 skill parquets (processed/cma/)
+uv run python pipeline/export_cma_site.py     # → docs/cma/data/  (--rebuild to rewrite history)
+```
+
 ## Files
 - `index.html`, `app.js`, `skillmap.js`, `skill.js`, `style.css` — the page (loads Leaflet from a
   CDN; queries nothing else).

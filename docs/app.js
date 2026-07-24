@@ -205,7 +205,8 @@ window.tabShown = window.tabShown || {};
 
 Promise.all([
   fetch("data/forecasts/index.json").then((r) => r.json()),
-  fetch("data/countries.geojson").then((r) => r.json()),
+  // window.SITE_GEO lets sibling pages (e.g. /cma) share the main site's geometry.
+  fetch(window.SITE_GEO || "data/countries.geojson").then((r) => r.json()),
   fetch("raster/data/meta.json").then((r) => r.json()).catch(() => null),
 ]).then(([index, geo, rmeta]) => {
   T = index.thresholds;

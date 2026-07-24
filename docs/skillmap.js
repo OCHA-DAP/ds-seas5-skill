@@ -22,7 +22,8 @@
 
   Promise.all([
     fetch("data/skill_matrix.json").then((r) => r.json()),
-    fetch("data/countries.geojson").then((r) => r.json()),
+    // window.SITE_GEO lets sibling pages (e.g. /cma) share the main site's geometry.
+    fetch(window.SITE_GEO || "data/countries.geojson").then((r) => r.json()),
     fetch("raster/skill/meta.json").then((r) => r.json()).catch(() => null),
   ]).then(([sm, geo, rmeta]) => {
     const tris = sm.trimesters;                 // 12, calendar order
