@@ -291,6 +291,47 @@ def load_severity_adm1() -> pd.DataFrame:
     return out
 
 
+def load_ipc_adm1() -> pd.DataFrame:
+    """IPC/CH acute food insecurity phases per ADM1 pcode, per analysis period.
+
+    From ipc.population_admin (ds-ipc-mirror, HDX HAPI food-security): every
+    (period type × validity window) is kept — current vs first/second projection —
+    because rounds overlap and the right comparison window is a user choice.
+    Admin-2 rows are summed to admin-1 where a country publishes deeper.
+    """
+    engine = stratus.get_engine("dev")
+    q = """
+    SELECT location_code, admin1_code, admin1_name, admin_level, ipc_phase, ipc_type,
+           population_in_phase, reference_period_start, reference_period_end
+    FROM ipc.population_admin
+    WHERE admin_level IN (1, 2) AND ipc_phase IN ('1', '2', '3', '4', '5', 'all')
+      AND admin1_code IS NOT NULL AND reference_period_end >= '2025-06-01'
+    """
+    with engine.connect() as conn:
+        df = pd.read_sql(q, conn, parse_dates=["reference_period_start", "reference_period_end"])
+
+    rows = []
+    for (loc, t, s, e), g in df.groupby(
+        ["location_code", "ipc_type", "reference_period_start", "reference_period_end"]
+    ):
+        lvl = 1 if (g["admin_level"] == 1).any() else 2
+        g = g[g["admin_level"] == lvl]
+        piv = g.pivot_table(index="admin1_code", columns="ipc_phase",
+                            values="population_in_phase", aggfunc="sum")
+        a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
+        for pcode in piv.index:
+            row = {"pcode": pcode, "iso3": loc, "name": a1names.get(pcode),
+                   "t": t, "s": s, "e": e}
+            for ph in ["1", "2", "3", "4", "5", "all"]:
+                v = piv.loc[pcode, ph] if ph in piv.columns else None
+                row[f"p{ph}"] = int(v) if pd.notna(v) else 0
+            rows.append(row)
+    out = pd.DataFrame(rows)
+    print(f"IPC: {out['iso3'].nunique()} countries, {out['pcode'].nunique()} ADM1 units, "
+          f"{out.groupby(['iso3', 't', 's']).ngroups} analysis periods")
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rebuild-geometry", action="store_true",
@@ -312,6 +353,24 @@ def main() -> None:
     print("Reconciling humanitarian pcodes to the COD vintage...")
     df_pin = normalize_pcodes(load_pin_adm1(), poly, "PiN")
     df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
+    df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
+    df_ipc = (df_ipc.groupby(["pcode", "t", "s", "e"], as_index=False)
+              .agg({**{f"p{ph}": "sum" for ph in ["1", "2", "3", "4", "5", "all"]}}))
+    # Per pcode: the list of available analysis periods, newest validity first.
+    ipc_lists: dict[str, list] = {}
+    for pcode, g in df_ipc.groupby("pcode"):
+        g = g.sort_values("e", ascending=False)
+        ipc_lists[pcode] = [
+            {
+                "t": r["t"],
+                "s": r["s"].strftime("%Y-%m"),
+                "label": f"{calendar.month_abbr[r['s'].month]}–"
+                         f"{calendar.month_abbr[r['e'].month]} {r['e'].year}",
+                "p": [int(r[f"p{ph}"]) for ph in ["1", "2", "3", "4", "5"]],
+                "tot": int(r["pall"]),
+            }
+            for _, r in g.iterrows()
+        ]
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
     _sum = lambda s: s.sum(min_count=1)  # noqa: E731 — all-NaN stays None, not 0
     df_pin = (df_pin.groupby(["pcode", "iso3"], as_index=False)
@@ -444,6 +503,7 @@ def main() -> None:
         ),
         "rows": [
             {k: (None if pd.isna(v) else v) for k, v in rec.items()}
+            | ({"ipc": ipc_lists[rec["pcode"]]} if rec["pcode"] in ipc_lists else {})
             for rec in merged.drop(columns=["pin_admin_level"]).to_dict("records")
         ],
     }

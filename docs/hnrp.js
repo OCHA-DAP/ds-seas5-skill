@@ -19,6 +19,9 @@
   const skillSel = document.getElementById("hnrp-skill");
   const rpSel = document.getElementById("hnrp-rp");
   const sectorSel = document.getElementById("hnrp-sector");
+  const srcSel = document.getElementById("hnrp-sev-src");
+  const ipcPeriodWrap = document.getElementById("hnrp-ipc-period-wrap");
+  const ipcPeriodSel = document.getElementById("hnrp-ipc-period");
   const countrySel = document.getElementById("hnrp-country");
   const droughtOnlyEl = document.getElementById("hnrp-drought-only");
   const issuedEl = document.getElementById("hnrp-issued");
@@ -66,6 +69,55 @@
 
   const droughtOnly = () => droughtOnlyEl.checked;
 
+  // ── Severity source: JIAF inter-sectoral 4+ (default) or IPC/CH phase N+ ─────
+  // IPC rows carry a list of analysis periods (current / projections, each with a
+  // validity window); the per-country dropdown picks which one to read. Default:
+  // the newest validity window (usually a projection — forward-looking, like the
+  // forecast). IPC and JIAF use different analysed-population bases and scopes,
+  // so shares are not comparable across the two sources.
+  const ipcMode = () => srcSel.value !== "jiaf";
+  const ipcSelByCountry = new Map(); // country -> "type|start" of the chosen period
+  function ipcComboOf(r) {
+    const list = r.ipc;
+    if (!list || !list.length) return null;
+    if (r.country && ipcSelByCountry.has(r.country)) {
+      const hit = list.find((c) => c.t + "|" + c.s === ipcSelByCountry.get(r.country));
+      if (hit) return hit;
+    }
+    return list[0]; // newest validity first (export sorts descending)
+  }
+  function sevValOf(r) {
+    if (!ipcMode()) return r.sev4;
+    const c = ipcComboOf(r);
+    if (!c) return null;
+    return c.p.slice(+srcSel.value - 1).reduce((a, b) => a + (b ?? 0), 0);
+  }
+  const sevTotOf = (r) => (ipcMode() ? (ipcComboOf(r)?.tot ?? null) : r.sev_total);
+  const sevLabel = () => (ipcMode() ? `IPC ${srcSel.value === "5" ? "5" : srcSel.value + "+"}` : "Severity 4+");
+
+  function updateIpcPeriodUI() {
+    const country = countrySel.value;
+    const show = ipcMode() && !!country;
+    ipcPeriodWrap.hidden = !show;
+    if (!show) return;
+    const combos = new Map();
+    for (const r of data.rows) {
+      if (r.country !== country || !r.ipc) continue;
+      for (const c of r.ipc) combos.set(c.t + "|" + c.s, c);
+    }
+    ipcPeriodSel.innerHTML = "";
+    const sorted = [...combos.values()].sort((a, b) => (a.s < b.s ? 1 : -1));
+    for (const c of sorted) {
+      const o = document.createElement("option");
+      o.value = c.t + "|" + c.s;
+      o.textContent = `${c.t} · ${c.label}`;
+      ipcPeriodSel.appendChild(o);
+    }
+    const sel = ipcSelByCountry.get(country);
+    if (sel && combos.has(sel)) ipcPeriodSel.value = sel;
+    else if (sorted.length) ipcSelByCountry.set(country, ipcPeriodSel.value = sorted[0].t + "|" + sorted[0].s);
+  }
+
   function passes(r) {
     if (r.rp == null) return false; // no qualifying drought slot
     if (r.rp < +rpSel.value) return false;
@@ -111,7 +163,10 @@
     if (s && s.rp != null) {
       rows = `<div>${s.label}${s.lead < 0 ? " · in season" : ""} — RP ${fmt(s.rp, 1)} yr, r ${fmt(s.r, 2)}</div>`;
     }
-    if (r.sev4 != null) rows += `<div>Severity 4+: ${fmtN(r.sev4)}</div>`;
+    if (sevValOf(r) != null) {
+      const c = ipcMode() ? ipcComboOf(r) : null;
+      rows += `<div>${sevLabel()}: ${fmtN(sevValOf(r))}${c ? ` (${c.label})` : ""}</div>`;
+    }
     if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
     const py = planYrOf(r);
     if (py) rows += `<div>Plan data: ${py}</div>`;
@@ -156,7 +211,7 @@
   const M = { l: 58, r: 16, t: 12, b: 46 };
 
   function scatterRows() {
-    return data.rows.filter((r) => r.sev_total > 0 && tgtOf(r) != null && slotOf(r) != null);
+    return data.rows.filter((r) => sevTotOf(r) > 0 && tgtOf(r) != null && slotOf(r) != null);
   }
 
   function renderScatter() {
@@ -177,11 +232,11 @@
         .textContent = "No admin-1 units match the current filters.";
       return;
     }
-    const xmax = Math.min(100, Math.max(10, ...rows.map((r) => pctOf(r.sev4, r.sev_total))) * 1.08);
-    const ymax = Math.min(100, Math.max(10, ...rows.map((r) => pctOf(tgtOf(r), r.sev_total))) * 1.08);
+    const xmax = Math.min(100, Math.max(10, ...rows.map((r) => pctOf(sevValOf(r), sevTotOf(r)))) * 1.08);
+    const ymax = Math.min(100, Math.max(10, ...rows.map((r) => pctOf(tgtOf(r), sevTotOf(r)))) * 1.08);
     const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
     const Y = (v) => H - M.b - (v / ymax) * (H - M.t - M.b);
-    const pmax = Math.max(...rows.map((r) => r.sev_total));
+    const pmax = Math.max(...rows.map((r) => sevTotOf(r)));
     const R = (p) => 4 + 22 * Math.sqrt(p / pmax);
 
     // Recessive grid + axes.
@@ -195,31 +250,32 @@
       g("text", { x: M.l - 6, y: Y(v) + 3, "text-anchor": "end", "font-size": 10, fill: "#888" }).textContent = v + "%";
     }
     g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 11, fill: "#555" })
-      .textContent = "Population in severity 4+ (% of analysed population)";
+      .textContent = `Population in ${sevLabel()} (% of analysed population)`;
     const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 11, fill: "#555" });
     yl.textContent = `Targeted${secTag()} (% of analysed population)`;
     yl.setAttribute("transform", `rotate(-90 14 ${(M.t + H - M.b) / 2})`);
 
     // Bubbles: big ones first so small ones stay hoverable; 2px surface ring.
-    const sorted = [...rows].sort((a, b) => b.sev_total - a.sev_total);
+    const sorted = [...rows].sort((a, b) => sevTotOf(b) - sevTotOf(a));
     for (const r of sorted) {
       const cat = catOf(r);
       const c = g("circle", {
-        cx: X(pctOf(r.sev4, r.sev_total)), cy: Y(pctOf(tgtOf(r), r.sev_total)),
-        r: R(r.sev_total), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
+        cx: X(pctOf(sevValOf(r), sevTotOf(r))), cy: Y(pctOf(tgtOf(r), sevTotOf(r))),
+        r: R(sevTotOf(r)), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
       });
       g("circle", {
-        cx: c.getAttribute("cx"), cy: c.getAttribute("cy"), r: R(r.sev_total),
+        cx: c.getAttribute("cx"), cy: c.getAttribute("cy"), r: R(sevTotOf(r)),
         fill: "none", stroke: STYLE[cat][1], "stroke-width": 1,
       });
       c.style.cursor = "pointer";
       c.addEventListener("mouseenter", (ev) => {
         const s = slotOf(r);
         tip.hidden = false;
+        const combo = ipcMode() ? ipcComboOf(r) : null;
         tip.innerHTML = `<strong>${r.name ?? r.pcode}</strong> — ${r.country ?? r.iso3}<br>` +
-          `Severity 4+: ${fmtN(r.sev4)} (${fmt(pctOf(r.sev4, r.sev_total), 1)}%)<br>` +
-          `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), r.sev_total), 1)}%)<br>` +
-          `Analysed population: ${fmtN(r.sev_total)}<br>` +
+          `${sevLabel()}${combo ? ` (${combo.t}, ${combo.label})` : ""}: ${fmtN(sevValOf(r))} (${fmt(pctOf(sevValOf(r), sevTotOf(r)), 1)}%)<br>` +
+          `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), sevTotOf(r)), 1)}%)<br>` +
+          `Analysed population: ${fmtN(sevTotOf(r))}<br>` +
           (s ? `${s.label}${s.lead < 0 ? " · in season" : ""}: RP ${fmt(s.rp, 1)} yr, pct ${fmt(s.pct, 1)}, r ${fmt(s.r, 2)}` : "");
       });
       c.addEventListener("mousemove", (ev) => {
@@ -233,7 +289,7 @@
     // Selective direct labels: the 6 largest analysed populations.
     for (const r of sorted.slice(0, 6)) {
       g("text", {
-        x: X(pctOf(r.sev4, r.sev_total)), y: Y(pctOf(tgtOf(r), r.sev_total)) - R(r.sev_total) - 4,
+        x: X(pctOf(sevValOf(r), sevTotOf(r))), y: Y(pctOf(tgtOf(r), sevTotOf(r))) - R(sevTotOf(r)) - 4,
         "text-anchor": "middle", "font-size": 10, fill: "#333",
       }).textContent = r.name ?? r.pcode;
     }
@@ -245,7 +301,13 @@
   // IPC/CH-convention colours — a domain-standard scale this audience reads at a
   // glance, and far more separable than a single-hue ramp.
   const SEV_COLORS = ["#cdfacd", "#fae61e", "#e67800", "#c80000", "#640000"];
-  const SEV_LABELS = ["1 — minimal", "2 — stress", "3 — severe", "4 — extreme", "5 — catastrophic"];
+  const JIAF_LABELS = ["1 — minimal", "2 — stress", "3 — severe", "4 — extreme", "5 — catastrophic"];
+  const IPC_LABELS = ["1 — minimal", "2 — stressed", "3 — crisis", "4 — emergency", "5 — catastrophe"];
+  const sevClassLabels = () => (ipcMode() ? IPC_LABELS : JIAF_LABELS);
+  // Class breakdown for the bars: JIAF classes or the selected IPC period's phases.
+  const segsOf = (r) => (ipcMode()
+    ? (ipcComboOf(r)?.p ?? null)
+    : [r.s1, r.s2, r.s3, r.s4, r.s5]);
   const barsWrap = document.getElementById("hnrp-bars-wrap");
   const barsHint = document.getElementById("hnrp-bars-hint");
   const barsSvg = document.getElementById("hnrp-bars");
@@ -254,10 +316,12 @@
   const fmtSI = (v) => (v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M"
     : v >= 1e3 ? Math.round(v / 1e3) + "k" : String(Math.round(v)));
 
-  barsLegend.innerHTML =
-    SEV_COLORS.map((c, i) => `<span><i style="background:${c}"></i> ${SEV_LABELS[i]}</span>`).join("") +
-    `<span><i class="tick"></i> targeted</span>` +
-    `<span>left swatch = forecast category</span>`;
+  function renderBarsLegend() {
+    barsLegend.innerHTML =
+      SEV_COLORS.map((c, i) => `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`).join("") +
+      `<span><i class="tick"></i> targeted</span>` +
+      `<span>left swatch = forecast category</span>`;
+  }
 
   // Sort control: severity 4+ first by default; forecast order puts droughts on top.
   const barSortSel = document.getElementById("hnrp-bar-sort");
@@ -269,24 +333,31 @@
     return i === -1 ? CAT_ORDER.length : i;
   };
   const BAR_SORTS = {
-    sev4: (a, b) => (b.sev4 ?? 0) - (a.sev4 ?? 0),
-    total: (a, b) => (b.sev_total ?? 0) - (a.sev_total ?? 0),
+    sev4: (a, b) => (sevValOf(b) ?? 0) - (sevValOf(a) ?? 0),
+    total: (a, b) => (sevTotOf(b) ?? 0) - (sevTotOf(a) ?? 0),
     targeted: (a, b) => (tgtOf(b) ?? 0) - (tgtOf(a) ?? 0),
-    forecast: (a, b) => catRank(a) - catRank(b) || (b.sev4 ?? 0) - (a.sev4 ?? 0),
+    forecast: (a, b) => catRank(a) - catRank(b) || (sevValOf(b) ?? 0) - (sevValOf(a) ?? 0),
     name: (a, b) => String(a.name ?? a.pcode).localeCompare(String(b.name ?? b.pcode)),
   };
 
   function renderBars() {
+    renderBarsLegend();
     const country = countrySel.value;
     const rows = country
-      ? data.rows.filter((r) => r.country === country && r.sev_total > 0)
+      ? data.rows.filter((r) => r.country === country && sevTotOf(r) > 0 && segsOf(r))
           .sort(BAR_SORTS[barSortSel.value] || BAR_SORTS.sev4)
       : [];
     barsWrap.hidden = rows.length === 0;
     barsHint.hidden = rows.length > 0;
     if (!rows.length) return;
-    barsTitle.textContent = `${country} — population by severity class, per admin 1 ` +
-      `(analysis year ${rows[0].sev_year ?? "–"})`;
+    if (ipcMode()) {
+      const c = ipcComboOf(rows[0]);
+      barsTitle.textContent = `${country} — population by IPC/CH phase, per admin 1` +
+        (c ? ` (${c.t}, valid ${c.label})` : "");
+    } else {
+      barsTitle.textContent = `${country} — population by JIAF severity class, per admin 1 ` +
+        `(analysis year ${rows[0].sev_year ?? "–"})`;
+    }
 
     const W = barsSvg.parentElement.clientWidth || 900;
     const ROW = 26, M = { l: 205, r: 24, t: 6, b: 34 };
@@ -300,7 +371,7 @@
       parent.appendChild(el);
       return el;
     };
-    const xmax = Math.max(...rows.map((r) => Math.max(r.sev_total ?? 0, tgtOf(r) ?? 0))) * 1.04;
+    const xmax = Math.max(...rows.map((r) => Math.max(sevTotOf(r) ?? 0, tgtOf(r) ?? 0))) * 1.04;
     const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
 
     // x grid: 4 round ticks.
@@ -324,15 +395,16 @@
       const name = (r.name ?? r.pcode).length > 24 ? (r.name ?? r.pcode).slice(0, 23) + "…" : (r.name ?? r.pcode);
       g("text", { x: M.l - 180, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" }).textContent = name;
 
-      // Stacked severity segments with a white spacer between them.
+      // Stacked class segments with a white spacer between them.
+      const segs = segsOf(r) ?? [];
       let acc = 0;
       for (let c = 0; c < 5; c++) {
-        const v = r[`s${c + 1}`] ?? 0;
+        const v = segs[c] ?? 0;
         if (v <= 0) continue;
         const seg = g("rect", { x: X(acc), y: y + 4, width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
                                 height: ROW - 9, fill: SEV_COLORS[c] });
         const title = document.createElementNS(NS, "title");
-        title.textContent = `${r.name ?? r.pcode} — severity ${c + 1}: ${fmtN(v)}`;
+        title.textContent = `${r.name ?? r.pcode} — ${ipcMode() ? "IPC phase" : "severity"} ${c + 1}: ${fmtN(v)}`;
         seg.appendChild(title);
         acc += v;
       }
@@ -367,7 +439,8 @@
     const trh = document.createElement("tr");
     for (const c of COLS) {
       const th = document.createElement("th");
-      const label = c.label + (fscOn() && (c.key === "pin" || c.key === "targeted") ? " (FSC)" : "");
+      let label = c.label + (fscOn() && (c.key === "pin" || c.key === "targeted") ? " (FSC)" : "");
+      if (c.key === "sev4") label = `${sevLabel()} pop`;
       th.textContent = label + (c.key === sortKey ? (sortDesc ? " ↓" : " ↑") : "");
       th.className = (c.num ? "num" : "") + (c.key === sortKey ? " sorted" : "");
       th.addEventListener("click", () => {
@@ -379,7 +452,8 @@
     }
     thead.appendChild(trh);
 
-    const kv = (row) => (sortKey === "_plan_yr" ? planYrOf(row) : row[colKey(sortKey)]);
+    const kv = (row) => (sortKey === "_plan_yr" ? planYrOf(row)
+      : sortKey === "sev4" ? sevValOf(row) : row[colKey(sortKey)]);
     const rs = data.rows.filter(passes).sort((a, b) => {
       const x = kv(a), y = kv(b);
       if (x == null) return 1;
@@ -396,7 +470,7 @@
         `<td>${r.country ?? r.iso3}</td>` +
         `<td>${r.name ?? r.pcode}</td>` +
         `<td class="num">${planYrOf(r) ?? "–"}</td>` +
-        `<td class="num">${fmtN(r.sev4)}</td>` +
+        `<td class="num">${fmtN(sevValOf(r))}</td>` +
         `<td class="num">${fmtN(pinOf(r))}</td>` +
         `<td class="num">${fmtN(tgtOf(r))}</td>` +
         `<td>${r.tri_label ?? "–"}${r.lead != null && r.lead < 0 ? ' <span class="in-season-tag">· in season</span>' : ""}</td>` +
@@ -420,7 +494,12 @@
   function renderAll() { renderMap(); renderScatter(); renderBars(); renderTable(); }
   for (const el of [skillSel, rpSel, sectorSel, droughtOnlyEl]) el.addEventListener("change", renderAll);
   barSortSel.addEventListener("change", renderBars);
-  countrySel.addEventListener("change", () => { renderAll(); fitCountry(); });
+  srcSel.addEventListener("change", () => { updateIpcPeriodUI(); renderAll(); });
+  ipcPeriodSel.addEventListener("change", () => {
+    if (countrySel.value) ipcSelByCountry.set(countrySel.value, ipcPeriodSel.value);
+    renderAll();
+  });
+  countrySel.addEventListener("change", () => { updateIpcPeriodUI(); renderAll(); fitCountry(); });
 
   // Hidden-panel sizing: (re)fit when the tab becomes visible.
   window.tabShown = window.tabShown || {};

@@ -222,3 +222,4 @@ footer p { margin: 4px 0; }
 #hnrp-bars-legend i.tick { width: 2px; height: 14px; background: #1d2021; border: none; vertical-align: -3px; }
 #hnrp-bars-head { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
 #hnrp-bars-head h3 { margin-right: auto; }
+#hnrp-ipc-period-wrap[hidden] { display: none; }
