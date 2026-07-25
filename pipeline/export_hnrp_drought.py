@@ -38,7 +38,8 @@ sys.path.insert(0, str(HERE))
 from src.constants import PROJECT_PREFIX, TRIMESTERS  # noqa: E402
 from src.skill import trimester_lead  # noqa: E402
 from export_static_site import (  # noqa: E402
-    THRESHOLDS, _tri_label, _tri_valid, compute_rainy_set, issued_year_for_season,
+    THRESHOLDS, _min_signed, _tri_label, _tri_valid, compute_rainy_set,
+    issued_year_for_season,
 )
 
 SKILL_BLOB = f"{PROJECT_PREFIX}/processed/skill_stats_detrended_adm1.parquet"
@@ -354,6 +355,7 @@ def main() -> None:
     df_pin = normalize_pcodes(load_pin_adm1(), poly, "PiN")
     df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
     df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
+    ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
     df_ipc = (df_ipc.groupby(["pcode", "t", "s", "e"], as_index=False)
               .agg({**{f"p{ph}": "sum" for ph in ["1", "2", "3", "4", "5", "all"]}}))
     # Per pcode: the list of available analysis periods, newest validity first.
@@ -364,6 +366,7 @@ def main() -> None:
             {
                 "t": r["t"],
                 "s": r["s"].strftime("%Y-%m"),
+                "e": r["e"].strftime("%Y-%m"),
                 "label": f"{calendar.month_abbr[r['s'].month]}–"
                          f"{calendar.month_abbr[r['e'].month]} {r['e'].year}",
                 "p": [int(r[f"p{ph}"]) for ph in ["1", "2", "3", "4", "5"]],
@@ -386,7 +389,17 @@ def main() -> None:
         df_hum[col] = df_hum[col].combine_first(df_hum[f"{col}_sev"])
     df_hum = df_hum.drop(columns=["iso3_sev", "name_sev"]).rename(columns={"name": "name_hum"})
 
-    # Restrict everything downstream to HNRP units — keeps the climatology query small.
+    # Scope: HNRP units PLUS IPC-covered units outside any plan — the tab's purpose
+    # includes surfacing severe food insecurity the HNRP does not capture. IPC-only
+    # rows carry no PiN/severity/targeted; the site shows them in IPC mode only.
+    extra = sorted(set(ipc_iso3) - set(df_hum["pcode"]))
+    if extra:
+        df_hum = pd.concat(
+            [df_hum, pd.DataFrame([{"pcode": p, "iso3": ipc_iso3[p]} for p in extra])],
+            ignore_index=True,
+        )
+        print(f"Scope: +{len(extra)} IPC-covered ADM1 units outside HNRP plans "
+              f"({len(set(ipc_iso3[p] for p in extra))} countries)")
     skill = skill[skill["pcode"].isin(set(df_hum["pcode"]))]
     if skill.empty:
         sys.exit("No overlap between ADM1 skill pcodes and HNRP PiN pcodes")
@@ -451,6 +464,22 @@ def main() -> None:
             best["pct"] = round(best["pct"], 1)
             best["r"] = round(best["r"], 3)
             row |= best
+        # Every valid trimester's forecast, for the explicit valid-season selector.
+        tris = {}
+        for _, r in g.iterrows():
+            pct, pr = r["forecast_percentile"], r["pearson_r"]
+            if pd.isna(pct):
+                continue
+            drp = r["forecast_rp"] if pct < 50 else r["flood_rp"]
+            tris[r["trimester"]] = {
+                "lead": trimester_lead(issued_month, TRIMESTERS[r["trimester"]]),
+                "pct": round(float(pct), 1),
+                "r": round(float(pr), 3) if pd.notna(pr) else None,
+                "rp": round(float(drp), 1) if pd.notna(drp) else None,
+                "rainy": (pcode, r["trimester"]) in rainy_set,
+            }
+        if tris:
+            row["tris"] = tris
         # Fallback display slot for units with no qualifying drought signal: the default
         # (lead-1) trimester, same as the Map tab's default selection. Lets the site show
         # every HNRP unit with its real forecast category (flood/normal/low-skill/
@@ -491,10 +520,15 @@ def main() -> None:
             print(f"NOTE: {len(no_geo)} unit(s) missing from the geojson (not on the map): "
                   f"{sorted(no_geo['iso3'] + ':' + no_geo['pcode'])}")
 
+    valid_tris = sorted(
+        [t for t in TRIMESTERS if _tri_valid(TRIMESTERS[t], issued_month)],
+        key=lambda t: _min_signed(TRIMESTERS[t], issued_month),
+    )
     payload = {
         "issued_label": issued_label,
         "issued_month": int(issued_month),
         "issued_year": int(global_max_iy),
+        "trimesters": valid_tris,
         "thresholds": THRESHOLDS,
         "weight_note": (
             "Humanitarian weight is population in JIAF inter-sectoral severity 4+ from the "
@@ -502,7 +536,8 @@ def main() -> None:
             "intersectoral PiN / targeted alongside. Admin-2/3 figures are summed to admin-1."
         ),
         "rows": [
-            {k: (None if pd.isna(v) else v) for k, v in rec.items()}
+            {k: (v if isinstance(v, (list, dict)) else None if pd.isna(v) else v)
+             for k, v in rec.items()}
             | ({"ipc": ipc_lists[rec["pcode"]]} if rec["pcode"] in ipc_lists else {})
             for rec in merged.drop(columns=["pin_admin_level"]).to_dict("records")
         ],

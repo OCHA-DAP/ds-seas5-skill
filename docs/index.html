@@ -148,6 +148,11 @@
           <option value="10">10 yr (severe alert)</option>
         </select>
       </label>
+      <label class="ctl">Valid season
+        <select id="hnrp-tri" class="map-select">
+          <option value="auto" selected>Worst drought (auto)</option>
+        </select>
+      </label>
       <label class="ctl">Caseload
         <select id="hnrp-sector" class="map-select">
           <option value="is" selected>Intersectoral</option>
@@ -162,8 +167,11 @@
           <option value="5">IPC 5</option>
         </select>
       </label>
-      <label class="ctl" id="hnrp-ipc-period-wrap" hidden>IPC period
-        <select id="hnrp-ipc-period" class="map-select"></select>
+      <label class="ctl" id="hnrp-ipc-period-wrap" hidden>IPC estimate
+        <select id="hnrp-ipc-period" class="map-select">
+          <option value="now" selected>Now (latest covering this month)</option>
+          <option value="fwd">Forecast window (latest projection)</option>
+        </select>
       </label>
       <label class="ctl">Country
         <select id="hnrp-country" class="map-select"><option value="">All</option></select>
@@ -241,11 +249,18 @@
       The <strong>Severity source</strong> selector switches the severity weight to
       <strong>IPC/CH acute food insecurity phases</strong> (via <a
       href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>): pick the phase
-      threshold (3+/4+/5) and — per country — the analysis period (current vs projections,
-      each with its validity window; default = the newest window, usually a forward-looking
-      projection). IPC and JIAF figures do <em>not</em> line up: they measure different
-      things (acute food insecurity vs inter-sectoral needs) over different analysed
-      populations, scopes, and periods — compare shapes, not values. Forecast data:
+      threshold (3+/4+/5) and the estimate — <em>Now</em> (the most recent analysis covering
+      the issuance month, preferring a current-type analysis) or <em>Forecast window</em>
+      (the most recent projection overlapping the 6-month forecast horizon); each unit's
+      tooltip names the analysis period used. In IPC mode the map and table also include
+      IPC-covered areas <strong>outside any HNRP</strong> (no PiN/severity/targeted) —
+      surfacing possible shocks beyond plan scope. IPC and JIAF figures do <em>not</em>
+      line up: they measure different things (acute food insecurity vs inter-sectoral
+      needs) over different analysed populations, scopes, and periods — compare shapes,
+      not values. The <strong>Valid season</strong> selector defaults to each area's worst
+      qualifying drought trimester ("auto"); picking a trimester (e.g. MJJ) shows that
+      season's forecast for every area. All shares are of the source's own
+      <em>analysed</em> population; scatter axes are fixed 0–100%. Forecast data:
       detrended, matching the Map tab's defaults.
     </p>
   </section>

@@ -68,23 +68,36 @@
   const secTag = () => (fscOn() ? " (FSC)" : "");
 
   const droughtOnly = () => droughtOnlyEl.checked;
+  // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
+  // shown only in IPC mode, where surfacing needs the plan does NOT capture is the point.
+  const inHnrp = (r) => r.sev_total > 0 || r.pin != null || r.targeted != null || r.fsc_pin != null;
 
   // ── Severity source: JIAF inter-sectoral 4+ (default) or IPC/CH phase N+ ─────
   // IPC rows carry a list of analysis periods (current / projections, each with a
-  // validity window); the per-country dropdown picks which one to read. Default:
-  // the newest validity window (usually a projection — forward-looking, like the
-  // forecast). IPC and JIAF use different analysed-population bases and scopes,
-  // so shares are not comparable across the two sources.
+  // validity window). Rather than a per-country menu of overlapping rounds, one
+  // global choice: "Now" = the most recent estimate covering the issuance month
+  // (a 'current' analysis if one covers it, else the newest projection that does);
+  // "Forecast window" = the most recent projection overlapping the 6-month
+  // forecast horizon. IPC and JIAF use different analysed-population bases and
+  // scopes, so shares are not comparable across the two sources.
   const ipcMode = () => srcSel.value !== "jiaf";
-  const ipcSelByCountry = new Map(); // country -> "type|start" of the chosen period
+  const ym = (s) => { const [y, m] = s.split("-").map(Number); return y * 12 + m - 1; };
+  const NOW_YM = data.issued_year * 12 + data.issued_month - 1; // anchor: forecast issuance
   function ipcComboOf(r) {
     const list = r.ipc;
     if (!list || !list.length) return null;
-    if (r.country && ipcSelByCountry.has(r.country)) {
-      const hit = list.find((c) => c.t + "|" + c.s === ipcSelByCountry.get(r.country));
-      if (hit) return hit;
+    const covers = (c) => ym(c.s) <= NOW_YM && ym(c.e) >= NOW_YM;
+    const newest = (arr) => arr.sort((a, b) => ym(b.s) - ym(a.s))[0];
+    if (ipcPeriodSel.value === "fwd") {
+      const proj = newest(list.filter((c) => c.t !== "current"
+        && ym(c.e) >= NOW_YM && ym(c.s) <= NOW_YM + 6));
+      if (proj) return proj;
     }
-    return list[0]; // newest validity first (export sorts descending)
+    const cur = newest(list.filter((c) => c.t === "current" && covers(c)));
+    if (cur) return cur;
+    const anyNow = newest(list.filter(covers));
+    if (anyNow) return anyNow;
+    return list.reduce((a, b) => (ym(a.e) >= ym(b.e) ? a : b)); // most recent past window
   }
   function sevValOf(r) {
     if (!ipcMode()) return r.sev4;
@@ -95,47 +108,51 @@
   const sevTotOf = (r) => (ipcMode() ? (ipcComboOf(r)?.tot ?? null) : r.sev_total);
   const sevLabel = () => (ipcMode() ? `IPC ${srcSel.value === "5" ? "5" : srcSel.value + "+"}` : "Severity 4+");
 
-  function updateIpcPeriodUI() {
-    const country = countrySel.value;
-    const show = ipcMode() && !!country;
-    ipcPeriodWrap.hidden = !show;
-    if (!show) return;
-    const combos = new Map();
-    for (const r of data.rows) {
-      if (r.country !== country || !r.ipc) continue;
-      for (const c of r.ipc) combos.set(c.t + "|" + c.s, c);
-    }
-    ipcPeriodSel.innerHTML = "";
-    const sorted = [...combos.values()].sort((a, b) => (a.s < b.s ? 1 : -1));
-    for (const c of sorted) {
-      const o = document.createElement("option");
-      o.value = c.t + "|" + c.s;
-      o.textContent = `${c.t} · ${c.label}`;
-      ipcPeriodSel.appendChild(o);
-    }
-    const sel = ipcSelByCountry.get(country);
-    if (sel && combos.has(sel)) ipcPeriodSel.value = sel;
-    else if (sorted.length) ipcSelByCountry.set(country, ipcPeriodSel.value = sorted[0].t + "|" + sorted[0].s);
-  }
+  function updateIpcPeriodUI() { ipcPeriodWrap.hidden = !ipcMode(); }
 
-  function passes(r) {
-    if (r.rp == null) return false; // no qualifying drought slot
-    if (r.rp < +rpSel.value) return false;
-    if (skillSel.value === "high" && r.r < T.r_high) return false;
-    if (countrySel.value && r.country !== countrySel.value) return false;
-    return true;
-  }
-  // A row's display slot: the worst qualifying drought slot when it passes the filters,
-  // else the default (lead-1) trimester — every HNRP unit gets its real forecast
-  // category (drought/flood/normal/low-skill/off-season) like the Map tab.
-  function slotOf(r) {
-    if (passes(r)) {
-      return { label: r.tri_label, lead: r.lead, rp: r.rp, pct: r.pct, r: r.r, rainy: true };
+  // ── Valid-season selection ───────────────────────────────────────────────────
+  // "Worst drought (auto)": each unit shows its worst qualifying drought trimester
+  // (fallback: the default lead-1 trimester). An explicit trimester shows THAT
+  // season's forecast for every unit. Slot keys are the compact trimester codes (MJJ).
+  const triSel = document.getElementById("hnrp-tri");
+  const inScope = (r) =>
+    (!countrySel.value || r.country === countrySel.value) && (ipcMode() || inHnrp(r));
+  function rawSlotOf(r) {
+    if (triSel.value === "auto") {
+      if (r.rp != null) {
+        return { key: r.tri, lead: r.lead, rp: r.rp, pct: r.pct, r: r.r, rainy: true, worst: true };
+      }
+      if (r.fb_pct == null) return null;
+      return { key: r.fb_tri, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r, rainy: !!r.fb_rainy };
     }
-    if (droughtOnly() || r.fb_pct == null) return null;
-    if (countrySel.value && r.country !== countrySel.value) return null;
-    return { label: r.fb_label, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r,
-             rainy: !!r.fb_rainy };
+    const t = r.tris && r.tris[triSel.value];
+    if (!t || t.pct == null) return null;
+    return { key: triSel.value, lead: t.lead, rp: t.rp, pct: t.pct, r: t.r, rainy: !!t.rainy };
+  }
+  // Qualifying drought signal = drought side, rainy season, skill + RP thresholds.
+  function isDrought(s) {
+    return !!s && s.pct != null && s.pct < 50 && s.rainy
+      && s.r != null && s.r >= (skillSel.value === "high" ? T.r_high : T.r_mod)
+      && s.rp != null && s.rp >= +rpSel.value;
+  }
+  function passes(r) {
+    return inScope(r) && isDrought(rawSlotOf(r));
+  }
+  // Display slot: the qualifying drought slot, else (unless drought-only) the same
+  // season's real category — flood/normal/low-skill/off-season, like the Map tab.
+  function slotOf(r) {
+    if (!inScope(r)) return null;
+    const s = rawSlotOf(r);
+    if (!s) return null;
+    if (isDrought(s)) return s;
+    if (droughtOnly()) return null;
+    if (s.worst) {
+      // auto mode: the worst-drought slot failed the filters — display the default
+      // lead-1 trimester instead (the slot shown for every non-drought unit).
+      if (r.fb_pct == null) return null;
+      return { key: r.fb_tri, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r, rainy: !!r.fb_rainy };
+    }
+    return s;
   }
   // Style for HNRP units with nothing to display (drought-only mode, or no forecast):
   // distinct from both the world background and the classified categories.
@@ -153,7 +170,7 @@
     const p = f.properties, r = byPcode.get(p.pcode);
     // No PiN/severity row = not part of the plan's admin-level analysis (e.g. Nigeria's
     // HNRP covers only Borno/Adamawa/Yobe) — context only, never labelled "in HNRP".
-    if (!r) {
+    if (!r || (!ipcMode() && !inHnrp(r))) {
       return `<div class="name">${p.name ?? p.pcode}</div>` +
         `<div class="cat" style="color:#9db1b3">Not in the HNRP admin-level analysis</div>`;
     }
@@ -161,7 +178,7 @@
     const s = slotOf(r);
     let rows = "";
     if (s && s.rp != null) {
-      rows = `<div>${s.label}${s.lead < 0 ? " · in season" : ""} — RP ${fmt(s.rp, 1)} yr, r ${fmt(s.r, 2)}</div>`;
+      rows = `<div><strong>${s.key}</strong>${s.lead < 0 ? " · in season" : ""} — RP ${fmt(s.rp, 1)} yr, r ${fmt(s.r, 2)}</div>`;
     }
     if (sevValOf(r) != null) {
       const c = ipcMode() ? ipcComboOf(r) : null;
@@ -192,8 +209,8 @@
       const el = l._path;
       if (!el) return;
       const r = byPcode.get(l.feature.properties.pcode);
-      if (!r) {
-        // Out of plan scope: blend into the world backdrop (tooltip still names it).
+      if (!r || (!ipcMode() && !inHnrp(r))) {
+        // Out of scope for the current mode: blend into the world backdrop.
         el.setAttribute("fill", "#f7f9f9");
         el.setAttribute("stroke", "#d9dedf");
         return;
@@ -232,8 +249,9 @@
         .textContent = "No admin-1 units match the current filters.";
       return;
     }
-    const xmax = Math.min(100, Math.max(10, ...rows.map((r) => pctOf(sevValOf(r), sevTotOf(r)))) * 1.08);
-    const ymax = Math.min(100, Math.max(10, ...rows.map((r) => pctOf(tgtOf(r), sevTotOf(r)))) * 1.08);
+    // Fixed 0–100% axes: shares stay visually comparable across filters and sources.
+    const xmax = 100, ymax = 100;
+    const clamp = (v) => Math.min(v ?? 0, 100);
     const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
     const Y = (v) => H - M.b - (v / ymax) * (H - M.t - M.b);
     const pmax = Math.max(...rows.map((r) => sevTotOf(r)));
@@ -260,7 +278,7 @@
     for (const r of sorted) {
       const cat = catOf(r);
       const c = g("circle", {
-        cx: X(pctOf(sevValOf(r), sevTotOf(r))), cy: Y(pctOf(tgtOf(r), sevTotOf(r))),
+        cx: X(clamp(pctOf(sevValOf(r), sevTotOf(r)))), cy: Y(clamp(pctOf(tgtOf(r), sevTotOf(r)))),
         r: R(sevTotOf(r)), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
       });
       g("circle", {
@@ -276,7 +294,7 @@
           `${sevLabel()}${combo ? ` (${combo.t}, ${combo.label})` : ""}: ${fmtN(sevValOf(r))} (${fmt(pctOf(sevValOf(r), sevTotOf(r)), 1)}%)<br>` +
           `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), sevTotOf(r)), 1)}%)<br>` +
           `Analysed population: ${fmtN(sevTotOf(r))}<br>` +
-          (s ? `${s.label}${s.lead < 0 ? " · in season" : ""}: RP ${fmt(s.rp, 1)} yr, pct ${fmt(s.pct, 1)}, r ${fmt(s.r, 2)}` : "");
+          (s ? `<strong>${s.key}</strong>${s.lead < 0 ? " · in season" : ""}: RP ${fmt(s.rp, 1)} yr, pct ${fmt(s.pct, 1)}, r ${fmt(s.r, 2)}` : "");
       });
       c.addEventListener("mousemove", (ev) => {
         const b = svg.parentElement.getBoundingClientRect();
@@ -289,7 +307,7 @@
     // Selective direct labels: the 6 largest analysed populations.
     for (const r of sorted.slice(0, 6)) {
       g("text", {
-        x: X(pctOf(sevValOf(r), sevTotOf(r))), y: Y(pctOf(tgtOf(r), sevTotOf(r))) - R(sevTotOf(r)) - 4,
+        x: X(clamp(pctOf(sevValOf(r), sevTotOf(r)))), y: Y(clamp(pctOf(tgtOf(r), sevTotOf(r)))) - R(sevTotOf(r)) - 4,
         "text-anchor": "middle", "font-size": 10, fill: "#333",
       }).textContent = r.name ?? r.pcode;
     }
@@ -452,8 +470,11 @@
     }
     thead.appendChild(trh);
 
+    const SLOT_KEYS = { tri_label: "key", rp: "rp", pct: "pct", r: "r" };
     const kv = (row) => (sortKey === "_plan_yr" ? planYrOf(row)
-      : sortKey === "sev4" ? sevValOf(row) : row[colKey(sortKey)]);
+      : sortKey === "sev4" ? sevValOf(row)
+      : sortKey in SLOT_KEYS ? slotOf(row)?.[SLOT_KEYS[sortKey]]
+      : row[colKey(sortKey)]);
     const rs = data.rows.filter(passes).sort((a, b) => {
       const x = kv(a), y = kv(b);
       if (x == null) return 1;
@@ -465,7 +486,8 @@
     emptyEl.hidden = rs.length > 0;
     for (const r of rs) {
       const tr = document.createElement("tr");
-      const skillCls = r.r >= T.r_high ? "skill-high" : "skill-mod";
+      const s = slotOf(r);
+      const skillCls = s && s.r >= T.r_high ? "skill-high" : "skill-mod";
       tr.innerHTML =
         `<td>${r.country ?? r.iso3}</td>` +
         `<td>${r.name ?? r.pcode}</td>` +
@@ -473,10 +495,10 @@
         `<td class="num">${fmtN(sevValOf(r))}</td>` +
         `<td class="num">${fmtN(pinOf(r))}</td>` +
         `<td class="num">${fmtN(tgtOf(r))}</td>` +
-        `<td>${r.tri_label ?? "–"}${r.lead != null && r.lead < 0 ? ' <span class="in-season-tag">· in season</span>' : ""}</td>` +
-        `<td class="num">${fmt(r.rp, 1)}</td>` +
-        `<td class="num">${fmt(r.pct, 1)}</td>` +
-        `<td class="num ${skillCls}">${fmt(r.r, 2)}</td>`;
+        `<td>${s ? s.key : "–"}${s && s.lead < 0 ? ' <span class="in-season-tag">· in season</span>' : ""}</td>` +
+        `<td class="num">${fmt(s?.rp, 1)}</td>` +
+        `<td class="num">${fmt(s?.pct, 1)}</td>` +
+        `<td class="num ${skillCls}">${fmt(s?.r, 2)}</td>`;
       tbody.appendChild(tr);
     }
   }
@@ -491,15 +513,20 @@
     });
     if (bounds) map.fitBounds(bounds, { padding: [10, 10] });
   }
+  // Valid-season selector options: auto + each valid trimester at this issuance.
+  for (const t of data.trimesters ?? []) {
+    const o = document.createElement("option");
+    o.value = t; o.textContent = t;
+    triSel.appendChild(o);
+  }
+
   function renderAll() { renderMap(); renderScatter(); renderBars(); renderTable(); }
-  for (const el of [skillSel, rpSel, sectorSel, droughtOnlyEl]) el.addEventListener("change", renderAll);
+  for (const el of [skillSel, rpSel, sectorSel, droughtOnlyEl, triSel, ipcPeriodSel]) {
+    el.addEventListener("change", renderAll);
+  }
   barSortSel.addEventListener("change", renderBars);
   srcSel.addEventListener("change", () => { updateIpcPeriodUI(); renderAll(); });
-  ipcPeriodSel.addEventListener("change", () => {
-    if (countrySel.value) ipcSelByCountry.set(countrySel.value, ipcPeriodSel.value);
-    renderAll();
-  });
-  countrySel.addEventListener("change", () => { updateIpcPeriodUI(); renderAll(); fitCountry(); });
+  countrySel.addEventListener("change", () => { renderAll(); fitCountry(); });
 
   // Hidden-panel sizing: (re)fit when the tab becomes visible.
   window.tabShown = window.tabShown || {};
