@@ -308,8 +308,19 @@ def load_ipc_adm1() -> pd.DataFrame:
     WHERE admin_level IN (1, 2) AND ipc_phase IN ('1', '2', '3', '4', '5', 'all')
       AND admin1_code IS NOT NULL AND reference_period_end >= '2025-06-01'
     """
+    # HAPI rows carry only the validity window; the exercise (analysis) date lives in
+    # the per-country HDX table. (country, period type, window) joins it back 1:1.
+    qd = """
+    SELECT iso3 AS location_code, period_type AS ipc_type,
+           reference_period_start, reference_period_end, MAX(analysis_date) AS analysis_date
+    FROM ipc.population GROUP BY 1, 2, 3, 4
+    """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_start", "reference_period_end"])
+        dates = pd.read_sql(qd, conn, parse_dates=[
+            "reference_period_start", "reference_period_end", "analysis_date"])
+    df = df.merge(dates, how="left", on=[
+        "location_code", "ipc_type", "reference_period_start", "reference_period_end"])
 
     rows = []
     for (loc, t, s, e), g in df.groupby(
@@ -320,9 +331,10 @@ def load_ipc_adm1() -> pd.DataFrame:
         piv = g.pivot_table(index="admin1_code", columns="ipc_phase",
                             values="population_in_phase", aggfunc="sum")
         a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
+        adate = g["analysis_date"].max()
         for pcode in piv.index:
             row = {"pcode": pcode, "iso3": loc, "name": a1names.get(pcode),
-                   "t": t, "s": s, "e": e}
+                   "t": t, "s": s, "e": e, "a": adate}
             for ph in ["1", "2", "3", "4", "5", "all"]:
                 v = piv.loc[pcode, ph] if ph in piv.columns else None
                 row[f"p{ph}"] = int(v) if pd.notna(v) else 0
@@ -357,7 +369,8 @@ def main() -> None:
     df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
     ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
     df_ipc = (df_ipc.groupby(["pcode", "t", "s", "e"], as_index=False)
-              .agg({**{f"p{ph}": "sum" for ph in ["1", "2", "3", "4", "5", "all"]}}))
+              .agg({**{f"p{ph}": "sum" for ph in ["1", "2", "3", "4", "5", "all"]},
+                    "a": "max"}))
     # Per pcode: the list of available analysis periods, newest validity first.
     ipc_lists: dict[str, list] = {}
     for pcode, g in df_ipc.groupby("pcode"):
@@ -367,6 +380,7 @@ def main() -> None:
                 "t": r["t"],
                 "s": r["s"].strftime("%Y-%m"),
                 "e": r["e"].strftime("%Y-%m"),
+                "a": r["a"].strftime("%Y-%m") if pd.notna(r["a"]) else None,
                 "label": f"{calendar.month_abbr[r['s'].month]}–"
                          f"{calendar.month_abbr[r['e'].month]} {r['e'].year}",
                 "p": [int(r[f"p{ph}"]) for ph in ["1", "2", "3", "4", "5"]],

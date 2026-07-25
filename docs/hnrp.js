@@ -80,7 +80,7 @@
   // "Forecast window" = the most recent projection overlapping the 6-month
   // forecast horizon. IPC and JIAF use different analysed-population bases and
   // scopes, so shares are not comparable across the two sources.
-  const ipcMode = () => srcSel.value !== "jiaf";
+  const ipcMode = () => !srcSel.value.startsWith("jiaf");
   const ym = (s) => { const [y, m] = s.split("-").map(Number); return y * 12 + m - 1; };
   const NOW_YM = data.issued_year * 12 + data.issued_month - 1; // anchor: forecast issuance
   function ipcComboOf(r) {
@@ -100,30 +100,72 @@
     return list.reduce((a, b) => (ym(a.e) >= ym(b.e) ? a : b)); // most recent past window
   }
   function sevValOf(r) {
-    if (!ipcMode()) return r.sev4;
+    if (srcSel.value === "jiaf") return r.sev4;
+    if (srcSel.value === "jiaf3") {
+      return r.sev_total > 0 ? (r.s3 ?? 0) + (r.s4 ?? 0) + (r.s5 ?? 0) : null;
+    }
     const c = ipcComboOf(r);
     if (!c) return null;
     return c.p.slice(+srcSel.value - 1).reduce((a, b) => a + (b ?? 0), 0);
   }
   const sevTotOf = (r) => (ipcMode() ? (ipcComboOf(r)?.tot ?? null) : r.sev_total);
-  const sevLabel = () => (ipcMode() ? `IPC ${srcSel.value === "5" ? "5" : srcSel.value + "+"}` : "Severity 4+");
+  const sevLabel = () => (srcSel.value === "jiaf" ? "JIAF 4+"
+    : srcSel.value === "jiaf3" ? "JIAF 3+"
+    : `IPC ${srcSel.value === "5" ? "5" : srcSel.value + "+"}`);
 
-  function updateIpcPeriodUI() { ipcPeriodWrap.hidden = !ipcMode(); }
+  // Exercise (analysis) month + validity window of an IPC combo — spelled out
+  // everywhere a figure from it appears, since periods differ by country.
+  const fmtYM = (s) => {
+    if (!s) return "?";
+    const [y, m] = s.split("-").map(Number);
+    return new Date(Date.UTC(y, m - 1)).toLocaleString("en", { month: "short", timeZone: "UTC" }) + " " + y;
+  };
+  const comboDesc = (c) => `${c.t}, analysed ${fmtYM(c.a)}, valid ${c.label}`;
+
+  const ipcNoteEl = document.getElementById("hnrp-ipc-note");
+  function updateIpcPeriodUI() {
+    ipcPeriodWrap.hidden = !ipcMode();
+    // Transparency note beside the selector: the exact analysis in use (per-country
+    // when one is selected; otherwise a pointer to the per-area tooltips).
+    if (!ipcMode()) { ipcNoteEl.hidden = true; return; }
+    ipcNoteEl.hidden = false;
+    const c = countrySel.value
+      ? data.rows.filter((r) => r.country === countrySel.value).map(ipcComboOf).find(Boolean)
+      : null;
+    ipcNoteEl.textContent = c
+      ? `IPC analysis used for ${countrySel.value}: ${comboDesc(c)}.`
+      : "IPC analysis periods differ by country — the one used is named in each area's tooltip.";
+  }
 
   // ── Valid-season selection ───────────────────────────────────────────────────
-  // "Worst drought (auto)": each unit shows its worst qualifying drought trimester
-  // (fallback: the default lead-1 trimester). An explicit trimester shows THAT
+  // "Worst drought" modes: each unit shows its worst qualifying drought trimester —
+  // by default among forecast seasons only (lead ≥ 0), since the worst signal is
+  // often a season already in progress; "incl. in-season" also scans leads −2/−1.
+  // (Fallback: the default lead-1 trimester.) An explicit trimester shows THAT
   // season's forecast for every unit. Slot keys are the compact trimester codes (MJJ).
   const triSel = document.getElementById("hnrp-tri");
   const inScope = (r) =>
     (!countrySel.value || r.country === countrySel.value) && (ipcMode() || inHnrp(r));
+  const fbSlot = (r) => (r.fb_pct == null ? null
+    : { key: r.fb_tri, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r, rainy: !!r.fb_rainy });
+  // Worst qualifying drought among the unit's valid trimesters, under the CURRENT
+  // skill threshold (unlike the export's precomputed slot, which is r_mod-gated).
+  function worstSlot(r, inclInSeason) {
+    const rMin = skillSel.value === "high" ? T.r_high : T.r_mod;
+    let best = null;
+    for (const [key, t] of Object.entries(r.tris ?? {})) {
+      if (!inclInSeason && t.lead < 0) continue;
+      if (t.pct == null || t.pct >= 50 || !t.rainy || t.rp == null) continue;
+      if (t.r == null || t.r < rMin) continue;
+      if (!best || t.rp > best.rp) best = { key, lead: t.lead, rp: t.rp, pct: t.pct, r: t.r, rainy: true };
+    }
+    return best;
+  }
   function rawSlotOf(r) {
-    if (triSel.value === "auto") {
-      if (r.rp != null) {
-        return { key: r.tri, lead: r.lead, rp: r.rp, pct: r.pct, r: r.r, rainy: true, worst: true };
-      }
-      if (r.fb_pct == null) return null;
-      return { key: r.fb_tri, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r, rainy: !!r.fb_rainy };
+    if (triSel.value === "auto" || triSel.value === "auto-in") {
+      const w = worstSlot(r, triSel.value === "auto-in");
+      if (w) return { ...w, worst: true };
+      return fbSlot(r);
     }
     const t = r.tris && r.tris[triSel.value];
     if (!t || t.pct == null) return null;
@@ -149,8 +191,7 @@
     if (s.worst) {
       // auto mode: the worst-drought slot failed the filters — display the default
       // lead-1 trimester instead (the slot shown for every non-drought unit).
-      if (r.fb_pct == null) return null;
-      return { key: r.fb_tri, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r, rainy: !!r.fb_rainy };
+      return fbSlot(r);
     }
     return s;
   }
@@ -182,7 +223,7 @@
     }
     if (sevValOf(r) != null) {
       const c = ipcMode() ? ipcComboOf(r) : null;
-      rows += `<div>${sevLabel()}: ${fmtN(sevValOf(r))}${c ? ` (${c.label})` : ""}</div>`;
+      rows += `<div>${sevLabel()}: ${fmtN(sevValOf(r))}${c ? ` (${comboDesc(c)})` : ""}</div>`;
     }
     if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
     const py = planYrOf(r);
@@ -228,7 +269,10 @@
   const M = { l: 58, r: 16, t: 12, b: 46 };
 
   function scatterRows() {
-    return data.rows.filter((r) => sevTotOf(r) > 0 && tgtOf(r) != null && slotOf(r) != null);
+    // No targeted figure (IPC-only areas outside any HNRP, or a plan without the
+    // selected caseload) still plots — at 0% targeted — so severe food insecurity
+    // the plans do NOT capture stays visible instead of silently dropping out.
+    return data.rows.filter((r) => sevTotOf(r) > 0 && slotOf(r) != null);
   }
 
   function renderScatter() {
@@ -291,8 +335,10 @@
         tip.hidden = false;
         const combo = ipcMode() ? ipcComboOf(r) : null;
         tip.innerHTML = `<strong>${r.name ?? r.pcode}</strong> — ${r.country ?? r.iso3}<br>` +
-          `${sevLabel()}${combo ? ` (${combo.t}, ${combo.label})` : ""}: ${fmtN(sevValOf(r))} (${fmt(pctOf(sevValOf(r), sevTotOf(r)), 1)}%)<br>` +
-          `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), sevTotOf(r)), 1)}%)<br>` +
+          `${sevLabel()}${combo ? ` (${comboDesc(combo)})` : ""}: ${fmtN(sevValOf(r))} (${fmt(pctOf(sevValOf(r), sevTotOf(r)), 1)}%)<br>` +
+          (tgtOf(r) == null
+            ? `Targeted${secTag()}: – ${inHnrp(r) ? "(no figure)" : "(not in an HNRP)"}<br>`
+            : `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), sevTotOf(r)), 1)}%)<br>`) +
           `Analysed population: ${fmtN(sevTotOf(r))}<br>` +
           (s ? `<strong>${s.key}</strong>${s.lead < 0 ? " · in season" : ""}: RP ${fmt(s.rp, 1)} yr, pct ${fmt(s.pct, 1)}, r ${fmt(s.r, 2)}` : "");
       });
@@ -331,12 +377,17 @@
   const barsSvg = document.getElementById("hnrp-bars");
   const barsTitle = document.getElementById("hnrp-bars-title");
   const barsLegend = document.getElementById("hnrp-bars-legend");
+  // Classes 1–2 dwarf 3–5 in populous areas and drown the signal — plot 3+ by
+  // default, with a checkbox to bring the full distribution back.
+  const barsFullEl = document.getElementById("hnrp-bars-full");
+  const barC0 = () => (barsFullEl.checked ? 0 : 2);
   const fmtSI = (v) => (v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M"
     : v >= 1e3 ? Math.round(v / 1e3) + "k" : String(Math.round(v)));
 
   function renderBarsLegend() {
     barsLegend.innerHTML =
-      SEV_COLORS.map((c, i) => `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`).join("") +
+      SEV_COLORS.map((c, i) => (i < barC0() ? ""
+        : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("") +
       `<span><i class="tick"></i> targeted</span>` +
       `<span>left swatch = forecast category</span>`;
   }
@@ -371,7 +422,7 @@
     if (ipcMode()) {
       const c = ipcComboOf(rows[0]);
       barsTitle.textContent = `${country} — population by IPC/CH phase, per admin 1` +
-        (c ? ` (${c.t}, valid ${c.label})` : "");
+        (c ? ` (${comboDesc(c)})` : "");
     } else {
       barsTitle.textContent = `${country} — population by JIAF severity class, per admin 1 ` +
         `(analysis year ${rows[0].sev_year ?? "–"})`;
@@ -389,7 +440,10 @@
       parent.appendChild(el);
       return el;
     };
-    const xmax = Math.max(...rows.map((r) => Math.max(sevTotOf(r) ?? 0, tgtOf(r) ?? 0))) * 1.04;
+    // Scale to what is actually plotted: the sum of the SHOWN classes (3+ by
+    // default) and the targeted tick — not the full analysed population.
+    const shownSum = (r) => (segsOf(r) ?? []).slice(barC0()).reduce((a, b) => a + (b ?? 0), 0);
+    const xmax = Math.max(...rows.map((r) => Math.max(shownSum(r), tgtOf(r) ?? 0))) * 1.04;
     const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
 
     // x grid: 4 round ticks.
@@ -401,7 +455,8 @@
         .textContent = fmtSI(v);
     }
     g("text", { x: (M.l + W - M.r) / 2, y: H - 4, "text-anchor": "middle", "font-size": 11, fill: "#555" })
-      .textContent = "People (analysed population by severity class)";
+      .textContent = barC0() ? "People (analysed population in classes 3–5)"
+        : "People (analysed population by severity class)";
 
     rows.forEach((r, i) => {
       const y = M.t + i * ROW;
@@ -416,7 +471,7 @@
       // Stacked class segments with a white spacer between them.
       const segs = segsOf(r) ?? [];
       let acc = 0;
-      for (let c = 0; c < 5; c++) {
+      for (let c = barC0(); c < 5; c++) {
         const v = segs[c] ?? 0;
         if (v <= 0) continue;
         const seg = g("rect", { x: X(acc), y: y + 4, width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
@@ -520,12 +575,18 @@
     triSel.appendChild(o);
   }
 
-  function renderAll() { renderMap(); renderScatter(); renderBars(); renderTable(); }
-  for (const el of [skillSel, rpSel, sectorSel, droughtOnlyEl, triSel, ipcPeriodSel]) {
+  // The bar-sort "Severity" option follows the severity-source selector.
+  const sortSevOpt = barSortSel.querySelector('option[value="sev4"]');
+  function renderAll() {
+    updateIpcPeriodUI();
+    sortSevOpt.textContent = `Severity (${sevLabel()})`;
+    renderMap(); renderScatter(); renderBars(); renderTable();
+  }
+  for (const el of [skillSel, rpSel, sectorSel, srcSel, droughtOnlyEl, triSel, ipcPeriodSel]) {
     el.addEventListener("change", renderAll);
   }
   barSortSel.addEventListener("change", renderBars);
-  srcSel.addEventListener("change", () => { updateIpcPeriodUI(); renderAll(); });
+  barsFullEl.addEventListener("change", renderBars);
   countrySel.addEventListener("change", () => { renderAll(); fitCountry(); });
 
   // Hidden-panel sizing: (re)fit when the tab becomes visible.
