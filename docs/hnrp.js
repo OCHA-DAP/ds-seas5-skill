@@ -73,6 +73,11 @@
   }
   const pinOf = (r) => (sectorSel.value === "is" ? r.pin : (r.sec?.[sectorSel.value]?.[0] ?? null));
   const tgtOf = (r) => (sectorSel.value === "is" ? r.targeted : (r.sec?.[sectorSel.value]?.[1] ?? null));
+  // Plan-cycle year of a targeted figure that fell back to an OLDER cycle than the
+  // unit's PiN (none published in the current one) — flagged wherever it appears.
+  const tgtYrOf = (r) => (sectorSel.value === "is" ? (r.tgt_year ?? null)
+    : (r.sec?.[sectorSel.value]?.[2] ?? null));
+  const tgtFlag = (r) => (tgtYrOf(r) ? ` (${tgtYrOf(r)} plan)` : "");
   const secTag = () => (sectorSel.value === "is" ? "" : ` (${sectorSel.value})`);
 
   const droughtOnly = () => droughtOnlyEl.checked;
@@ -281,7 +286,7 @@
       const c = ipcMode() ? ipcComboOf(r) : null;
       rows += `<div>${sevLabel()}: ${fmtN(sevValOf(r))}${c ? ` (${comboDesc(c)})` : ""}</div>`;
     }
-    if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
+    if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}${tgtFlag(r)}</div>`;
     const py = planYrOf(r);
     if (py) rows += `<div>Plan data: ${py}</div>`;
     const catLine = cat
@@ -486,7 +491,7 @@
           `${sevLabel()}${combo ? ` (${comboDesc(combo)})` : ""}: ${fmtN(sevValOf(r))} (${fmt(pctOf(sevValOf(r), popOf(r)), 1)}%)<br>` +
           (tgtOf(r) == null
             ? `Targeted${secTag()}: – ${inHnrp(r) ? "(no figure)" : "(not in an HNRP)"}<br>`
-            : `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), popOf(r)), 1)}%)<br>`) +
+            : `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), popOf(r)), 1)}%)${tgtFlag(r)}<br>`) +
           `Population base: ${fmtN(popOf(r))}${popSrcOf(r) ? ` (${popSrcOf(r)})` : ""}<br>` +
           (s ? `<strong>${s.key}</strong>${s.lead < 0 ? " · in season" : ""}: RP ${fmt(s.rp, 1)} yr, pct ${fmt(s.pct, 1)}, r ${fmt(s.r, 2)}` : "");
       });
@@ -729,7 +734,8 @@
         `<td class="num">${planYrOf(r) ?? "–"}</td>` +
         `<td class="num">${fmtN(sevValOf(r))}</td>` +
         `<td class="num">${fmtN(pinOf(r))}</td>` +
-        `<td class="num">${fmtN(tgtOf(r))}</td>` +
+        `<td class="num">${fmtN(tgtOf(r))}${tgtYrOf(r)
+          ? `<span class="stale-flag" title="targeted from the ${tgtYrOf(r)} plan cycle — none published in the current one">*</span>` : ""}</td>` +
         `<td>${s ? s.key : "–"}${s && s.lead < 0 ? ' <span class="in-season-tag">· in season</span>' : ""}</td>` +
         `<td class="num">${fmt(s?.rp, 1)}</td>` +
         `<td class="num">${fmt(s?.pct, 1)}</td>` +

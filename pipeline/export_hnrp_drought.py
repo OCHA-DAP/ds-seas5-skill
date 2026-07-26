@@ -211,22 +211,49 @@ def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
                     .set_index("sector_code")["sector_name"].to_dict())
 
     rows: dict[str, dict] = {}
+    n_stale_tgt = 0
     for (loc, sector), g in df.groupby(["location_code", "sector_code"]):
-        ref = g["reference_period_start"].max()
-        g = g[g["reference_period_start"] == ref]
-        lvl = 1 if (g["admin_level"] == 1).any() else 2
-        g = g[g["admin_level"] == lvl]
-        a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
-        agg = g.groupby(["admin1_code", "population_status"])["population"].sum().unstack()
+        # Walk reference periods newest -> oldest: each unit takes the NEWEST
+        # available PiN and targeted independently. Units (or targeted figures)
+        # missing from the current cycle fall back to the previous one — flagged:
+        # a stale targeted carries its cycle year; a whole-unit fallback shows in
+        # the row's plan year.
+        refs = sorted(g["reference_period_start"].unique(), reverse=True)
+        latest_year = int(pd.Timestamp(refs[0]).year)
+        ent: dict[str, dict] = {}
+        for ref in refs:
+            gr = g[g["reference_period_start"] == ref]
+            lvl = 1 if (gr["admin_level"] == 1).any() else 2
+            gr = gr[gr["admin_level"] == lvl]
+            a1names = gr.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
+            agg = gr.groupby(["admin1_code", "population_status"])["population"].sum().unstack()
+            yr = int(pd.Timestamp(ref).year)
+            for pcode, r in agg.iterrows():
+                e = ent.setdefault(pcode, {"name": a1names.get(pcode), "lvl": lvl})
+                if "pin" not in e and pd.notna(r.get("INN")):
+                    e["pin"], e["pin_yr"] = int(r["INN"]), yr
+                if "tgt" not in e and pd.notna(r.get("TGT")):
+                    e["tgt"], e["tgt_yr"] = int(r["TGT"]), yr
         k_inn, k_tgt = (("pin", "targeted") if sector == "Intersectoral"
                         else (f"pin__{sector}", f"tgt__{sector}"))
-        for pcode, r in agg.iterrows():
-            row = rows.setdefault(pcode, {"pcode": pcode, "iso3": loc,
-                                          "name": a1names.get(pcode)})
-            row[k_inn] = int(r["INN"]) if pd.notna(r.get("INN")) else None
-            row[k_tgt] = int(r["TGT"]) if pd.notna(r.get("TGT")) else None
-            row["ref_year"] = max(row.get("ref_year", 0), int(ref.year))
-            row["pin_admin_level"] = lvl
+        for pcode, e in ent.items():
+            row = rows.setdefault(pcode, {"pcode": pcode, "iso3": loc, "name": e["name"]})
+            row[k_inn] = e.get("pin")
+            row[k_tgt] = e.get("tgt")
+            # Plan year of the figures actually used for this unit (not the plan's
+            # newest cycle — a unit dropped from the current plan keeps its old year).
+            used_yr = max(e.get("pin_yr", 0), e.get("tgt_yr", 0)) or latest_year
+            row["ref_year"] = max(row.get("ref_year", 0), used_yr)
+            row["pin_admin_level"] = e["lvl"]
+            if e.get("tgt") is not None and e["tgt_yr"] < max(e.get("pin_yr", 0), latest_year):
+                n_stale_tgt += 1
+                if sector == "Intersectoral":
+                    row["tgt_year"] = e["tgt_yr"]
+                else:
+                    row[f"tgtyr__{sector}"] = e["tgt_yr"]
+    if n_stale_tgt:
+        print(f"  PiN: {n_stale_tgt} targeted figure(s) fall back to an older plan cycle "
+              f"(flagged per unit)")
     out = pd.DataFrame(rows.values())
     for col in ["pin", "targeted"]:
         if col not in out.columns:
@@ -396,10 +423,11 @@ def main() -> None:
         ]
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
     _sum = lambda s: s.sum(min_count=1)  # noqa: E731 — all-NaN stays None, not 0
-    sec_cols = [c for c in df_pin.columns if c.startswith(("pin__", "tgt__"))]
+    sec_cols = [c for c in df_pin.columns if c.startswith(("pin__", "tgt__", "tgtyr__"))]
     df_pin = (df_pin.groupby(["pcode", "iso3"], as_index=False)
               .agg({"name": "first", "pin": _sum, "targeted": _sum,
-                    **{c: _sum for c in sec_cols},
+                    **{c: ("max" if c.startswith("tgtyr__") else _sum) for c in sec_cols},
+                    **({"tgt_year": "max"} if "tgt_year" in df_pin.columns else {}),
                     "ref_year": "max", "pin_admin_level": "max"}))
     df_sev = (df_sev.groupby(["pcode", "iso3"], as_index=False)
               .agg({"name": "first", "sev4": "sum", "sev_total": "sum", "sev_year": "max",
@@ -548,14 +576,22 @@ def main() -> None:
     # Per-sector PiN/targeted travel the pipeline as wide numeric columns; fold them
     # into a compact per-row dict {sector: [pin, targeted]} for the payload.
     def _row(rec: dict) -> dict:
-        sec = {}
+        sec, stale = {}, {}
         for c in sec_cols:
             v = rec.pop(c, None)
             if v is not None and pd.notna(v):
                 pref, code = c.split("__", 1)
-                sec.setdefault(code, [None, None])[0 if pref == "pin" else 1] = int(v)
+                if pref == "tgtyr":
+                    stale[code] = int(v)
+                else:
+                    sec.setdefault(code, [None, None])[0 if pref == "pin" else 1] = int(v)
+        for code, yr in stale.items():
+            if code in sec and sec[code][1] is not None:
+                sec[code].append(yr)  # [pin, targeted, staleTargetedYear]
         out = {k: (v if isinstance(v, (list, dict)) else None if pd.isna(v) else v)
                for k, v in rec.items()}
+        if out.get("tgt_year") is not None:
+            out["tgt_year"] = int(out["tgt_year"])
         if sec:
             out["sec"] = sec
         if rec["pcode"] in ipc_lists:
