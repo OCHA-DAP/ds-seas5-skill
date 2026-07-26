@@ -252,6 +252,9 @@
   // ── ADM1 choropleth ──────────────────────────────────────────────────────────
   const map = L.map("hnrp-map", {
     crs: L.CRS.EPSG4326, attributionControl: false, maxZoom: 8,
+    // Fractional zoom: fitBounds otherwise rounds DOWN to a whole zoom level,
+    // leaving dead space on the E/W edges of the default (data-bounds) view.
+    zoomSnap: 0.25,
   });
   // Bottom-left: the sticky filter bar overlays the top of the viewport, and a
   // top-left zoom control slides under it as the page scrolls, eating its clicks.
@@ -315,6 +318,17 @@
     countrySel.value = "";
     countrySel.dispatchEvent(new Event("change"));
   });
+  // Country borders above the admin mosaic — without them the admins of
+  // neighbouring countries blend into one surface. Same world-layer source as
+  // the selected-country outline (edge misalignments vs the COD adm1 polygons
+  // are cosmetic).
+  const dataIsos = new Set(data.rows.map((r) => r.iso3).filter(Boolean));
+  L.geoJSON(
+    { type: "FeatureCollection",
+      features: world.features.filter((f) => dataIsos.has(f.properties.iso3)) },
+    { interactive: false,
+      style: { color: "#1d2021", weight: 1, opacity: 0.65, fill: false } },
+  ).addTo(map);
   map.fitBounds(layer.getBounds(), { animate: false });
   // Selected-country outline: admin-1 borders alone make the country edge hard to
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
@@ -331,7 +345,7 @@
     if (!f) return;
     outlineLayer = L.geoJSON(f, {
       interactive: false,
-      style: { color: "#1d2021", weight: 1.6, fill: false },
+      style: { color: "#1d2021", weight: 2.6, fill: false },
     }).addTo(map);
   }
   function renderMap() {
