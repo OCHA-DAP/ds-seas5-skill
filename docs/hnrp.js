@@ -134,7 +134,7 @@
     const [y, m] = s.split("-").map(Number);
     return new Date(Date.UTC(y, m - 1)).toLocaleString("en", { month: "short", timeZone: "UTC" }) + " " + y;
   };
-  const comboDesc = (c) => `${c.t}, analysed ${fmtYM(c.a)}, valid ${c.label}`;
+  const comboDesc = (c) => `${c.t}, exercise ${fmtYM(c.a)}, valid ${c.label}`;
 
   const ipcNoteEl = document.getElementById("hnrp-ipc-note");
   const IPC_OPT_BASE = { now: "Now", fwd: "Forecast window" };
@@ -142,22 +142,40 @@
     ipcPeriodWrap.hidden = !ipcMode();
     srcLvlWrap.hidden = pinMode(); // PiN is a headline total, no severity level
     if (!ipcMode()) { ipcNoteEl.hidden = true; return; }
-    // The dropdown options name the CONCRETE analysis each choice resolves to —
-    // exercise (analysis) month and validity window — once a country is selected;
-    // with all countries the periods differ, so the note points to the tooltips.
-    const rows = countrySel.value
-      ? data.rows.filter((r) => r.country === countrySel.value)
-      : [];
+    // The dropdown options ALWAYS state the exercise (analysis) month and validity
+    // window of the numbers each choice resolves to: the concrete analysis when a
+    // country is selected, the cross-country range otherwise (periods differ by
+    // country — the exact one per area is in its tooltip).
+    const perCountry = (mode) => {
+      const per = new Map();
+      for (const r of data.rows) {
+        if (!r.ipc || per.has(r.iso3)) continue;
+        if (countrySel.value && r.country !== countrySel.value) continue;
+        const c = ipcComboOf(r, mode);
+        if (c) per.set(r.iso3, c);
+      }
+      return [...per.values()];
+    };
     for (const opt of ipcPeriodSel.options) {
-      const c = rows.map((r) => ipcComboOf(r, opt.value)).find(Boolean);
-      opt.textContent = c
-        ? `${IPC_OPT_BASE[opt.value]} — ${c.t}, analysed ${fmtYM(c.a)}, valid ${c.label}`
-        : `${IPC_OPT_BASE[opt.value]} ${opt.value === "now" ? "(latest covering this month)" : "(latest projection)"}`;
+      const cs = perCountry(opt.value);
+      if (!cs.length) {
+        opt.textContent = IPC_OPT_BASE[opt.value];
+        continue;
+      }
+      if (countrySel.value) {
+        opt.textContent = `${IPC_OPT_BASE[opt.value]} — ${comboDesc(cs[0])}`;
+        continue;
+      }
+      // "YYYY-MM" strings compare lexicographically = chronologically.
+      const lo = (k) => cs.reduce((a, c) => (c[k] && (!a || c[k] < a) ? c[k] : a), null);
+      const hi = (k) => cs.reduce((a, c) => (c[k] && (!a || c[k] > a) ? c[k] : a), null);
+      opt.textContent = `${IPC_OPT_BASE[opt.value]} — exercises ` +
+        `${fmtYM(lo("a"))}–${fmtYM(hi("a"))}, valid ${fmtYM(lo("s"))}–${fmtYM(hi("e"))}`;
     }
     ipcNoteEl.hidden = !!countrySel.value;
     if (!countrySel.value) {
       ipcNoteEl.textContent =
-        "IPC analysis periods differ by country — select one to see them here, or hover any area.";
+        "Ranges across countries — select a country for its exact analysis, or hover any area.";
     }
   }
 
