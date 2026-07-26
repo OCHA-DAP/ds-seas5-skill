@@ -212,6 +212,17 @@ def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_start"])
+    # A country only belongs here while it HAS a current plan: newest cycle must be
+    # this year or last. Per-unit fallback to the previous cycle (flagged) is fine
+    # WITHIN such a country, but a country whose newest subnational needs are older
+    # (Ethiopia and Syria: 2024, no newer plan) must not appear with stale caseloads.
+    cutoff = pd.Timestamp(year=pd.Timestamp.now().year - 1, month=1, day=1)
+    newest = df.groupby("location_code")["reference_period_start"].transform("max")
+    stale_locs = sorted(df.loc[newest < cutoff, "location_code"].unique())
+    if stale_locs:
+        print(f"  PiN: dropped {stale_locs} — newest plan cycle predates {cutoff.year}")
+    df = df[newest >= cutoff]
+
     # 'ALL' ("Final HRP caseload") is the intersectoral-equivalent of the admin-3
     # publishers: promote it where the country has no subnational Intersectoral
     # rows (COD, SYR); drop it where it would duplicate them (BFA, MMR).
@@ -640,8 +651,15 @@ def main() -> None:
             "HNRP severity analysis (ds-hnrp-mirror, latest analysis year per country), with "
             "per-sector PiN / targeted alongside. Admin-2/3 figures are summed to admin-1."
         ),
-        "rows": [_row(rec)
-                 for rec in merged.drop(columns=["pin_admin_level"]).to_dict("records")],
+        # Prune rows with no usable humanitarian data at all (e.g. Syria 2025:
+        # severity classes published with NO population figures, needs pre-2025).
+        "rows": [
+            row for row in (
+                _row(rec)
+                for rec in merged.drop(columns=["pin_admin_level"]).to_dict("records"))
+            if row.get("pin") is not None or row.get("targeted") is not None
+            or row.get("sec") or row.get("ipc") or (row.get("sev_total") or 0) > 0
+        ],
     }
     OUT.write_text(json.dumps(payload, separators=(",", ":")))
     print(f"Wrote {OUT}  ({OUT.stat().st_size / 1024:.1f} KB)")
