@@ -357,8 +357,27 @@
       style: { color: "#1d2021", weight: 2.6, fill: false },
     }).addTo(map);
   }
+  // Per-admin trimester codes, shown as permanent centered labels when a single
+  // country is selected (readable at that zoom; the world view relies on hover).
+  const triLabels = L.layerGroup().addTo(map);
+  function renderTriLabels() {
+    triLabels.clearLayers();
+    const sel = countrySel.value;
+    if (!sel) return;
+    layer.eachLayer((l) => {
+      const r = byPcode.get(l.feature.properties.pcode);
+      if (!r || r.country !== sel) return;
+      const s = slotOf(r);
+      if (!s) return;
+      triLabels.addLayer(L.tooltip({
+        permanent: true, direction: "center", className: "tri-map-label",
+        opacity: 1, interactive: false,
+      }).setLatLng(l.getBounds().getCenter()).setContent(s.key));
+    });
+  }
   function renderMap() {
     renderOutline();
+    renderTriLabels();
     const sel = countrySel.value;
     layer.eachLayer((l) => {
       const el = l._path;
@@ -501,6 +520,16 @@
         tip.style.top = (ev.clientY - b.top + 14) + "px";
       });
       c.addEventListener("mouseleave", () => { tip.hidden = true; });
+
+      // The trimester actually used, printed inside the bubble where it fits —
+      // in auto mode different admins use different worst seasons, and that
+      // should be visible without hovering.
+      if (sl && R(popOf(r)) >= 11) {
+        const darkFill = cat && /vsev/.test(cat);
+        g("text", { x: xOf(r), y: yOf(r) + 3, "text-anchor": "middle", "font-size": 9,
+                    "font-weight": 600, fill: darkFill ? "#ffffff" : "#333",
+                    "pointer-events": "none" }).textContent = sl.key;
+      }
     }
 
     // Selective direct labels: the 6 largest population bases.
