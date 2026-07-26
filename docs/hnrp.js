@@ -83,12 +83,12 @@
   const ipcMode = () => !srcSel.value.startsWith("jiaf");
   const ym = (s) => { const [y, m] = s.split("-").map(Number); return y * 12 + m - 1; };
   const NOW_YM = data.issued_year * 12 + data.issued_month - 1; // anchor: forecast issuance
-  function ipcComboOf(r) {
+  function ipcComboOf(r, mode = ipcPeriodSel.value) {
     const list = r.ipc;
     if (!list || !list.length) return null;
     const covers = (c) => ym(c.s) <= NOW_YM && ym(c.e) >= NOW_YM;
     const newest = (arr) => arr.sort((a, b) => ym(b.s) - ym(a.s))[0];
-    if (ipcPeriodSel.value === "fwd") {
+    if (mode === "fwd") {
       const proj = newest(list.filter((c) => c.t !== "current"
         && ym(c.e) >= NOW_YM && ym(c.s) <= NOW_YM + 6));
       if (proj) return proj;
@@ -123,18 +123,27 @@
   const comboDesc = (c) => `${c.t}, analysed ${fmtYM(c.a)}, valid ${c.label}`;
 
   const ipcNoteEl = document.getElementById("hnrp-ipc-note");
+  const IPC_OPT_BASE = { now: "Now", fwd: "Forecast window" };
   function updateIpcPeriodUI() {
     ipcPeriodWrap.hidden = !ipcMode();
-    // Transparency note beside the selector: the exact analysis in use (per-country
-    // when one is selected; otherwise a pointer to the per-area tooltips).
     if (!ipcMode()) { ipcNoteEl.hidden = true; return; }
-    ipcNoteEl.hidden = false;
-    const c = countrySel.value
-      ? data.rows.filter((r) => r.country === countrySel.value).map(ipcComboOf).find(Boolean)
-      : null;
-    ipcNoteEl.textContent = c
-      ? `IPC analysis used for ${countrySel.value}: ${comboDesc(c)}.`
-      : "IPC analysis periods differ by country — the one used is named in each area's tooltip.";
+    // The dropdown options name the CONCRETE analysis each choice resolves to —
+    // exercise (analysis) month and validity window — once a country is selected;
+    // with all countries the periods differ, so the note points to the tooltips.
+    const rows = countrySel.value
+      ? data.rows.filter((r) => r.country === countrySel.value)
+      : [];
+    for (const opt of ipcPeriodSel.options) {
+      const c = rows.map((r) => ipcComboOf(r, opt.value)).find(Boolean);
+      opt.textContent = c
+        ? `${IPC_OPT_BASE[opt.value]} — ${c.t}, analysed ${fmtYM(c.a)}, valid ${c.label}`
+        : `${IPC_OPT_BASE[opt.value]} ${opt.value === "now" ? "(latest covering this month)" : "(latest projection)"}`;
+    }
+    ipcNoteEl.hidden = !!countrySel.value;
+    if (!countrySel.value) {
+      ipcNoteEl.textContent =
+        "IPC analysis periods differ by country — select one to see them here, or hover any area.";
+    }
   }
 
   // ── Valid-season selection ───────────────────────────────────────────────────
@@ -245,12 +254,38 @@
     onEachFeature: (f, l) => l.bindTooltip(() => tipHtml(f), { sticky: true }),
   }).addTo(map);
   map.fitBounds(layer.getBounds());
+  // Selected-country outline: admin-1 borders alone make the country edge hard to
+  // see. Drawn from the world layer (different source than the COD adm1 polygons,
+  // so tiny misalignments at the edge are cosmetic only).
+  let outlineLayer = null;
+  function renderOutline() {
+    if (outlineLayer) { map.removeLayer(outlineLayer); outlineLayer = null; }
+    const c = countrySel.value;
+    if (!c) return;
+    const iso3 = data.rows.find((r) => r.country === c)?.iso3;
+    const f = world.features.find((f) => f.properties.iso3 === iso3);
+    if (!f) return;
+    outlineLayer = L.geoJSON(f, {
+      interactive: false,
+      style: { color: "#1d2021", weight: 1.6, fill: false },
+    }).addTo(map);
+  }
   function renderMap() {
+    renderOutline();
+    const sel = countrySel.value;
     layer.eachLayer((l) => {
       const el = l._path;
       if (!el) return;
       const r = byPcode.get(l.feature.properties.pcode);
-      if (!r || (!ipcMode() && !inHnrp(r))) {
+      // Country filter: everything else blends into the backdrop WITHOUT a hover —
+      // "no qualifying drought signal" would be a lie about units that are merely
+      // filtered out of view.
+      const offCountry = sel && (!r || r.country !== sel);
+      if (offCountry && l.getTooltip()) l.unbindTooltip();
+      if (!offCountry && !l.getTooltip()) {
+        l.bindTooltip(() => tipHtml(l.feature), { sticky: true });
+      }
+      if (offCountry || !r || (!ipcMode() && !inHnrp(r))) {
         // Out of scope for the current mode: blend into the world backdrop.
         el.setAttribute("fill", "#f7f9f9");
         el.setAttribute("stroke", "#d9dedf");
@@ -311,18 +346,30 @@
       g("line", { x1: M.l, x2: W - M.r, y1: Y(v), y2: Y(v), stroke: "#eef1f1" });
       g("text", { x: M.l - 6, y: Y(v) + 3, "text-anchor": "end", "font-size": 10, fill: "#888" }).textContent = v + "%";
     }
-    g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 11, fill: "#555" })
-      .textContent = `Population in ${sevLabel()} (% of analysed population)`;
-    const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 11, fill: "#555" });
-    yl.textContent = `Targeted${secTag()} (% of analysed population)`;
+    // Severity on y, targeted on x. Both shares divide by the SAME analysed
+    // population, so position compares absolute headcounts too: above the 45° line
+    // = more people in the severity band than the plan targets (a coverage gap);
+    // below = targeting exceeds the severe caseload.
+    g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 13, fill: "#555" })
+      .textContent = `Targeted${secTag()} (% of analysed population)`;
+    const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 13, fill: "#555" });
+    yl.textContent = `Population in ${sevLabel()} (% of analysed population)`;
     yl.setAttribute("transform", `rotate(-90 14 ${(M.t + H - M.b) / 2})`);
+    g("line", { x1: X(0), y1: Y(0), x2: X(100), y2: Y(100),
+                stroke: "#c4d0d1", "stroke-width": 1, "stroke-dasharray": "5 4" });
+    g("text", { x: M.l + 10, y: M.t + 16, "font-size": 11, fill: "#9db1b3" })
+      .textContent = `▲ more people in ${sevLabel()} than targeted`;
+    g("text", { x: W - M.r - 8, y: H - M.b - 10, "text-anchor": "end", "font-size": 11, fill: "#9db1b3" })
+      .textContent = `▼ targeted exceeds ${sevLabel()} caseload`;
 
+    const xOf = (r) => X(clamp(pctOf(tgtOf(r), sevTotOf(r))));
+    const yOf = (r) => Y(clamp(pctOf(sevValOf(r), sevTotOf(r))));
     // Bubbles: big ones first so small ones stay hoverable; 2px surface ring.
     const sorted = [...rows].sort((a, b) => sevTotOf(b) - sevTotOf(a));
     for (const r of sorted) {
       const cat = catOf(r);
       const c = g("circle", {
-        cx: X(clamp(pctOf(sevValOf(r), sevTotOf(r)))), cy: Y(clamp(pctOf(tgtOf(r), sevTotOf(r)))),
+        cx: xOf(r), cy: yOf(r),
         r: R(sevTotOf(r)), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
       });
       g("circle", {
@@ -353,7 +400,7 @@
     // Selective direct labels: the 6 largest analysed populations.
     for (const r of sorted.slice(0, 6)) {
       g("text", {
-        x: X(clamp(pctOf(sevValOf(r), sevTotOf(r)))), y: Y(clamp(pctOf(tgtOf(r), sevTotOf(r)))) - R(sevTotOf(r)) - 4,
+        x: xOf(r), y: yOf(r) - R(sevTotOf(r)) - 4,
         "text-anchor": "middle", "font-size": 10, fill: "#333",
       }).textContent = r.name ?? r.pcode;
     }
@@ -514,6 +561,11 @@
       const th = document.createElement("th");
       let label = c.label + (fscOn() && (c.key === "pin" || c.key === "targeted") ? " (FSC)" : "");
       if (c.key === "sev4") label = `${sevLabel()} pop`;
+      if (c.key === "pin") {
+        th.title = "People in Need — the plan's total PiN for the selected caseload " +
+          "(Intersectoral or FSC). A headline planning figure, not a severity band: " +
+          "it is not broken down by JIAF class or IPC phase.";
+      }
       th.textContent = label + (c.key === sortKey ? (sortDesc ? " ↓" : " ↑") : "");
       th.className = (c.num ? "num" : "") + (c.key === sortKey ? " sorted" : "");
       th.addEventListener("click", () => {
@@ -542,6 +594,9 @@
     for (const r of rs) {
       const tr = document.createElement("tr");
       const s = slotOf(r);
+      // Pale wash of the forecast-category colour, tying rows to the map/scatter.
+      const cat = catOf(r);
+      if (cat) tr.style.background = STYLE[cat][0] + "21";
       const skillCls = s && s.r >= T.r_high ? "skill-high" : "skill-mod";
       tr.innerHTML =
         `<td>${r.country ?? r.iso3}</td>` +

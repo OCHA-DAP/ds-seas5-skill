@@ -162,9 +162,9 @@
       </label>
       <label class="ctl">Severity source
         <select id="hnrp-sev-src" class="map-select">
-          <option value="jiaf" selected>JIAF 4+</option>
+          <option value="jiaf">JIAF 4+</option>
           <option value="jiaf3">JIAF 3+</option>
-          <option value="3">IPC 3+</option>
+          <option value="3" selected>IPC 3+</option>
           <option value="4">IPC 4+</option>
           <option value="5">IPC 5</option>
         </select>
@@ -244,7 +244,9 @@
       <strong>JIAF 4+ / 3+ pop</strong> is the population in JIAF inter-sectoral severity
       classes 4–5 (or 3–5) from the HNRP severity analysis (latest analysis year per country);
       <strong>PiN / Targeted</strong> are the People in Need and targeted figures from the plan's
-      latest reference period — the <strong>Caseload</strong> selector switches them between the
+      latest reference period — PiN is the plan's headline total for the selected caseload, not a
+      severity band (it is not broken down by JIAF class or IPC phase); the
+      <strong>Caseload</strong> selector switches both between the
       Intersectoral and Food Security (FSC) cluster figures (severity classes exist only
       inter-sectorally; IPC phases are the planned food-security severity weight). Both via <a
       href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>; figures published at
@@ -253,14 +255,14 @@
       country has no newer plan (e.g. Guatemala, latest 2025), the previous cycle is shown.
       Countries whose plan publishes no subnational PiN/severity breakdown in these sources
       cannot appear at all (e.g. Ethiopia — country-level figures only).
-      The <strong>Severity source</strong> selector switches the severity weight to
-      <strong>IPC/CH acute food insecurity phases</strong> (via <a
-      href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>): pick the phase
-      threshold (3+/4+/5) and the estimate — <em>Now</em> (the most recent analysis covering
+      The <strong>Severity source</strong> selector defaults to
+      <strong>IPC/CH acute food insecurity phase 3+</strong> (via <a
+      href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>; thresholds 3+/4+/5,
+      or the JIAF weight) and the estimate — <em>Now</em> (the most recent analysis covering
       the issuance month, preferring a current-type analysis) or <em>Forecast window</em>
-      (the most recent projection overlapping the 6-month forecast horizon); the analysis
-      actually used — its exercise (analysis) month and validity window — is named beside
-      the selector and in each area's tooltip. In IPC mode the map, scatter, and table also
+      (the most recent projection overlapping the 6-month forecast horizon); once a country
+      is selected the dropdown options name the concrete analysis each resolves to — its
+      exercise (analysis) month and validity window — which also appears in every tooltip. In IPC mode the map, scatter, and table also
       include IPC-covered areas <strong>outside any HNRP</strong> (no PiN/severity/targeted;
       plotted at 0% targeted in the scatter) — surfacing possible shocks beyond plan scope.
       IPC and JIAF figures do <em>not</em> line up: they measure different things (acute
@@ -271,8 +273,12 @@
       a season underway), and picking a trimester (e.g. MJJ) shows that season's forecast
       for every area. The severity bars plot classes 3–5 by default (classes 1–2 dominate
       populous areas and drown the signal — a checkbox restores them). All shares are of
-      the source's own <em>analysed</em> population; scatter axes are fixed 0–100%.
-      Forecast data: detrended, matching the Map tab's defaults.
+      the source's own <em>analysed</em> population, and in the scatter both axes divide by
+      the <em>same</em> total — so position also compares absolute headcounts: above the
+      45° line, more people sit in the severity band than the plan targets (a possible
+      coverage gap); below it, targeting exceeds the severe caseload. Axes are fixed
+      0–100%; areas with no targeted figure plot at 0%. Forecast data: detrended,
+      matching the Map tab's defaults.
     </p>
   </section>
 

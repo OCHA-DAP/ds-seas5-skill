@@ -190,7 +190,8 @@ footer { color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--lin
 footer p { margin: 4px 0; }
 
 /* ── Forecast × HNRP tab ─────────────────────────────────────────────────── */
-#hnrp-controls { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; margin-bottom: 10px; }
+#hnrp-controls { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap;
+  margin: 20px 0 12px; padding-top: 14px; border-top: 1px solid var(--line); }
 #hnrp-controls #hnrp-issued { margin: 0 0 0 auto; }
 #hnrp-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
 #hnrp-table th, #hnrp-table td { padding: 5px 10px; border-bottom: 1px solid var(--line); text-align: left; }
