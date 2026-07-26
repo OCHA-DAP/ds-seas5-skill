@@ -198,17 +198,39 @@ def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     {sector_code: sector_name} for the site's caseload selector.
     """
     engine = stratus.get_engine("dev")
+    # Admin level 3 included: BFA/COD/ETH/MMR/SYR publish subnational needs at
+    # health-zone/township level ONLY — every row still carries admin1_code, so
+    # they roll up like admin-2 rows do. Blank sector codes are indicator noise
+    # ("Max value of indicators…"), not caseloads.
     q = """
     SELECT location_code, sector_code, sector_name, admin1_code, admin1_name,
            admin_level, population_status, population, reference_period_start
     FROM hpc.needs_admin
     WHERE category = 'total' AND population_status IN ('INN', 'TGT')
-      AND admin_level IN (1, 2)
+      AND admin_level IN (1, 2, 3) AND COALESCE(sector_code, '') <> ''
+      AND admin1_code IS NOT NULL
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_start"])
-    sector_names = (df.drop_duplicates("sector_code")
-                    .set_index("sector_code")["sector_name"].to_dict())
+    # 'ALL' ("Final HRP caseload") is the intersectoral-equivalent of the admin-3
+    # publishers: promote it where the country has no subnational Intersectoral
+    # rows (COD, SYR); drop it where it would duplicate them (BFA, MMR).
+    has_is = set(df.loc[df["sector_code"] == "Intersectoral", "location_code"])
+    is_all = df["sector_code"] == "ALL"
+    df.loc[is_all & ~df["location_code"].isin(has_is), "sector_code"] = "Intersectoral"
+    df = df[df["sector_code"] != "ALL"]
+
+    def _fix_mojibake(s: str) -> str:
+        try:  # some admin-3 sector names arrive UTF-8-as-latin1 ("SÃ©curitÃ©")
+            return s.encode("latin1").decode("utf-8") if "Ã" in s else s
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            return s
+    sector_names = {
+        code: _fix_mojibake(name)
+        for code, name in (df.sort_values("admin_level")  # prefer the clean L1/L2 names
+                           .drop_duplicates("sector_code")
+                           .set_index("sector_code")["sector_name"].items())
+    }
 
     rows: dict[str, dict] = {}
     n_stale_tgt = 0
@@ -223,7 +245,7 @@ def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
         ent: dict[str, dict] = {}
         for ref in refs:
             gr = g[g["reference_period_start"] == ref]
-            lvl = 1 if (gr["admin_level"] == 1).any() else 2
+            lvl = min(gr["admin_level"].unique())  # prefer 1, else 2, else 3
             gr = gr[gr["admin_level"] == lvl]
             a1names = gr.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
             agg = gr.groupby(["admin1_code", "population_status"])["population"].sum().unstack()
@@ -333,12 +355,15 @@ def load_ipc_adm1() -> pd.DataFrame:
     Admin-2 rows are summed to admin-1 where a country publishes deeper.
     """
     engine = stratus.get_engine("dev")
+    # No recency cutoff: dead/stalled series (ETH 2021, AGO/SLV 2022, BFA 2024-08,
+    # TLS 2024) stay in — the site names every analysis's exercise + validity
+    # window, so old data is visible as old rather than silently absent.
     q = """
     SELECT location_code, admin1_code, admin1_name, admin_level, ipc_phase, ipc_type,
            population_in_phase, reference_period_start, reference_period_end
     FROM ipc.population_admin
     WHERE admin_level IN (1, 2) AND ipc_phase IN ('1', '2', '3', '4', '5', 'all')
-      AND admin1_code IS NOT NULL AND reference_period_end >= '2025-06-01'
+      AND admin1_code IS NOT NULL
     """
     # HAPI rows carry only the validity window; the exercise (analysis) date lives in
     # the per-country HDX table. (country, period type, window) joins it back 1:1.
@@ -404,10 +429,12 @@ def main() -> None:
     df_ipc = (df_ipc.groupby(["pcode", "t", "s", "e"], as_index=False)
               .agg({**{f"p{ph}": "sum" for ph in ["1", "2", "3", "4", "5", "all"]},
                     "a": "max"}))
-    # Per pcode: the list of available analysis periods, newest validity first.
+    # Per pcode: the list of available analysis periods, newest validity first —
+    # capped at 6 (payload guard; the period logic only ever reaches recent ones
+    # plus the most-recent-past fallback).
     ipc_lists: dict[str, list] = {}
     for pcode, g in df_ipc.groupby("pcode"):
-        g = g.sort_values("e", ascending=False)
+        g = g.sort_values("e", ascending=False).head(6)
         ipc_lists[pcode] = [
             {
                 "t": r["t"],

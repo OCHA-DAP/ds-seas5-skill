@@ -278,7 +278,10 @@
       <p>
         <strong>PiN / Targeted</strong> come from each plan's latest reference period via <a
         href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>; figures
-        published at admin-2/3 are summed to admin-1. PiN is the plan's headline total for
+        published at admin-2/3 are summed to admin-1 (some plans publish subnational
+        needs only at admin-3 — DR Congo, Ethiopia, Myanmar; where such a plan reports a
+        single "Final HRP caseload" instead of Intersectoral, that is shown as the
+        Intersectoral figure). PiN is the plan's headline total for
         the selected caseload — <em>not</em> a severity band (it has no JIAF-class or
         IPC-phase breakdown). The <strong>Caseload</strong> selector switches between
         Intersectoral and any sector/cluster the plans publish (Food Security, Health,
@@ -289,8 +292,8 @@
         unit's PiN but no targeted figure (or omits a unit entirely), the newest earlier
         cycle fills the gap — a stale targeted is flagged with its year (* in the table,
         "(2024 plan)" in tooltips), and a wholly carried-over unit shows the older year in
-        its Plan column. Countries whose plan publishes no
-        subnational breakdown cannot appear at all (e.g. Ethiopia — country-level only).
+        its Plan column. A country can still be absent from a given caseload when its plan
+        never publishes that sector subnationally — the columns then show dashes.
       </p>
 
       <h4>Severity sources</h4>
@@ -305,7 +308,10 @@
         different analysed populations, scopes, and periods — compare shapes, not values.
         In IPC mode the map, scatter, and table also include IPC-covered areas
         <strong>outside any HNRP</strong> (no PiN/severity/targeted; plotted at 0% targeted)
-        — surfacing possible shocks beyond plan scope.
+        — surfacing possible shocks beyond plan scope. Every country with p-coded IPC data
+        is included regardless of recency — some series are stalled or dead (Ethiopia's
+        last subnational IPC is 2021, Angola/El Salvador 2022, Burkina Faso Aug 2024,
+        Timor-Leste 2024); their exercise and validity dates make the age plain.
       </p>
 
       <h4>IPC estimate periods</h4>
