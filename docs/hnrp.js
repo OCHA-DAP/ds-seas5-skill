@@ -228,8 +228,9 @@
   }
   // Display slot: the qualifying drought slot, else (unless drought-only) the same
   // season's real category — flood/normal/low-skill/off-season, like the Map tab.
-  function slotOf(r) {
-    if (!inScope(r)) return null;
+  // slotOfAny ignores the HNRP/IPC scope gate (the scatter plots every admin);
+  // slotOf applies it (map and table stay scoped to the selected mode).
+  function slotOfAny(r) {
     const s = rawSlotOf(r);
     if (!s) return null;
     if (isDrought(s)) return s;
@@ -240,6 +241,9 @@
       return fbSlot(r);
     }
     return s;
+  }
+  function slotOf(r) {
+    return inScope(r) ? slotOfAny(r) : null;
   }
   // Style for HNRP units with nothing to display (drought-only mode, or no forecast):
   // distinct from both the world background and the classified categories.
@@ -382,10 +386,11 @@
   const M = { l: 58, r: 16, t: 12, b: 46 };
 
   function scatterRows() {
-    // No targeted figure (IPC-only areas outside any HNRP, or a plan without the
-    // selected caseload) still plots — at 0% targeted — so severe food insecurity
-    // the plans do NOT capture stays visible instead of silently dropping out.
-    return data.rows.filter((r) => sevTotOf(r) > 0 && slotOf(r) != null);
+    // EVERY admin with a displayable forecast plots, regardless of HNRP/IPC
+    // membership or severity source — areas with no figure for an axis sit at 0%
+    // (origin if both are missing), so nothing silently drops out of view.
+    return data.rows.filter((r) =>
+      (!countrySel.value || r.country === countrySel.value) && slotOfAny(r) != null);
   }
 
   function renderScatter() {
@@ -411,8 +416,8 @@
     const clamp = (v) => Math.min(v ?? 0, 100);
     const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
     const Y = (v) => H - M.b - (v / ymax) * (H - M.t - M.b);
-    const pmax = Math.max(...rows.map((r) => sevTotOf(r)));
-    const R = (p) => 4 + 22 * Math.sqrt(p / pmax);
+    const pmax = Math.max(...rows.map((r) => sevTotOf(r) ?? 0), 1);
+    const R = (p) => 4 + 22 * Math.sqrt((p ?? 0) / pmax);
 
     // Recessive grid + axes.
     const ticks = (max) => { const s = max > 50 ? 20 : max > 20 ? 10 : 5; const o = []; for (let v = 0; v <= max; v += s) o.push(v); return o; };
@@ -425,13 +430,14 @@
       g("text", { x: M.l - 6, y: Y(v) + 3, "text-anchor": "end", "font-size": 10, fill: "#888" }).textContent = v + "%";
     }
     // Severity on y, targeted on x. Both shares divide by the SAME analysed
-    // population, so position compares absolute headcounts too: above the 45° line
-    // = more people in the severity band than the plan targets (a coverage gap);
-    // below = targeting exceeds the severe caseload.
+    // population (named in the axis labels), so position compares absolute
+    // headcounts too: above the 45° line = more people in the severity band than
+    // the plan targets (a coverage gap); below = targeting exceeds it.
+    const denom = `% of ${ipcMode() ? "IPC" : "JIAF"}-analysed population`;
     g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 13, fill: "#555" })
-      .textContent = `Targeted${secTag()} (% of analysed population)`;
+      .textContent = `Targeted${secTag()} (${denom})`;
     const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 13, fill: "#555" });
-    yl.textContent = `Population in ${sevLabel()} (% of analysed population)`;
+    yl.textContent = `Population in ${sevLabel()} (${denom})`;
     yl.setAttribute("transform", `rotate(-90 14 ${(M.t + H - M.b) / 2})`);
     g("line", { x1: X(0), y1: Y(0), x2: X(100), y2: Y(100),
                 stroke: "#c4d0d1", "stroke-width": 1, "stroke-dasharray": "5 4" });
@@ -449,9 +455,10 @@
     const xOf = (r) => X(clamp(pctOf(tgtOf(r), sevTotOf(r))));
     const yOf = (r) => Y(clamp(pctOf(sevValOf(r), sevTotOf(r))));
     // Bubbles: big ones first so small ones stay hoverable; 2px surface ring.
-    const sorted = [...rows].sort((a, b) => sevTotOf(b) - sevTotOf(a));
+    const sorted = [...rows].sort((a, b) => (sevTotOf(b) ?? 0) - (sevTotOf(a) ?? 0));
     for (const r of sorted) {
-      const cat = catOf(r);
+      const sl = slotOfAny(r);
+      const cat = sl ? classify({ pct: sl.pct, r: sl.r, rainy: sl.rainy }, false) : null;
       const c = g("circle", {
         cx: xOf(r), cy: yOf(r),
         r: R(sevTotOf(r)), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
@@ -462,7 +469,7 @@
       });
       c.style.cursor = "pointer";
       c.addEventListener("mouseenter", (ev) => {
-        const s = slotOf(r);
+        const s = slotOfAny(r);
         tip.hidden = false;
         const combo = ipcMode() ? ipcComboOf(r) : null;
         tip.innerHTML = `<strong>${r.name ?? r.pcode}</strong> — ${r.country ?? r.iso3}<br>` +
