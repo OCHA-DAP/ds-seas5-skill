@@ -355,15 +355,14 @@ def load_ipc_adm1() -> pd.DataFrame:
     Admin-2 rows are summed to admin-1 where a country publishes deeper.
     """
     engine = stratus.get_engine("dev")
-    # No recency cutoff: dead/stalled series (ETH 2021, AGO/SLV 2022, BFA 2024-08,
-    # TLS 2024) stay in — the site names every analysis's exercise + validity
-    # window, so old data is visible as old rather than silently absent.
+    # Recency: analyses valid in 2025 or later. Dead/stalled series (ETH 2021,
+    # AGO/SLV 2022, BFA 2024-08, TLS 2024-09) are excluded as too old to act on.
     q = """
     SELECT location_code, admin1_code, admin1_name, admin_level, ipc_phase, ipc_type,
            population_in_phase, reference_period_start, reference_period_end
     FROM ipc.population_admin
     WHERE admin_level IN (1, 2) AND ipc_phase IN ('1', '2', '3', '4', '5', 'all')
-      AND admin1_code IS NOT NULL
+      AND admin1_code IS NOT NULL AND reference_period_end >= '2025-01-01'
     """
     # HAPI rows carry only the validity window; the exercise (analysis) date lives in
     # the per-country HDX table. (country, period type, window) joins it back 1:1.

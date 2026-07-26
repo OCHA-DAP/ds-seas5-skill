@@ -289,9 +289,15 @@
     if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}${tgtFlag(r)}</div>`;
     const py = planYrOf(r);
     if (py) rows += `<div>Plan data: ${py}</div>`;
+    // Membership must be per-unit, never assumed from scope: in IPC mode most of a
+    // country's states can be in view yet outside its HNRP (Nigeria covers only
+    // Borno/Adamawa/Yobe).
+    const member = inHnrp(r);
+    if (!member) rows += `<div style="color:#9db1b3">Not in an HNRP</div>`;
     const catLine = cat
       ? `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>`
-      : `<div class="cat" style="color:#9db1b3">In HNRP — ${droughtOnly() ? "no qualifying drought signal" : "no forecast data"}</div>`;
+      : `<div class="cat" style="color:#9db1b3">${member ? "In HNRP" : "IPC-covered, not in an HNRP"}` +
+        ` — ${droughtOnly() ? "no qualifying drought signal" : "no forecast data"}</div>`;
     return `<div class="name">${p.name ?? p.pcode}</div>` + catLine + rows;
   };
   // World countries beneath as context (non-interactive, like the Map tab's backdrop).
