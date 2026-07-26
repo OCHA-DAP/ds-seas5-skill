@@ -315,7 +315,7 @@
     countrySel.value = "";
     countrySel.dispatchEvent(new Event("change"));
   });
-  map.fitBounds(layer.getBounds());
+  map.fitBounds(layer.getBounds(), { animate: false });
   // Selected-country outline: admin-1 borders alone make the country edge hard to
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
   // so tiny misalignments at the edge are cosmetic only).
@@ -427,8 +427,8 @@
       g("text", { x: lx, y: ly, "text-anchor": "middle", "font-size": 11, fill: "#9db1b3",
                   transform: `rotate(${ang} ${lx} ${ly})` }).textContent = txt;
     };
-    diagLabel(62, -8, `↑ more people in ${sevLabel()} than targeted`);
-    diagLabel(62, 16, `↓ targeted exceeds ${sevLabel()} caseload`);
+    diagLabel(80, -8, `↑ more people in ${sevLabel()} than targeted`);
+    diagLabel(80, 16, `↓ more people targeted than in ${sevLabel()}`);
 
     const xOf = (r) => X(clamp(pctOf(tgtOf(r), sevTotOf(r))));
     const yOf = (r) => Y(clamp(pctOf(sevValOf(r), sevTotOf(r))));
@@ -713,7 +713,10 @@
       if (c && (!r || r.country !== c)) return;
       bounds = bounds ? bounds.extend(l.getBounds()) : L.latLngBounds(l.getBounds());
     });
-    if (bounds) map.fitBounds(bounds, { padding: [10, 10] });
+    // animate:false — an animated fit interrupted mid-flight (re-click, layer churn
+    // from renderOutline) wedges Leaflet's zoom animation and every later fit
+    // silently no-ops (observed: Afghanistan "not zooming").
+    if (bounds) { map.stop(); map.fitBounds(bounds, { padding: [10, 10], animate: false }); }
   }
   // Valid-season selector options: auto + each valid trimester at this issuance.
   for (const t of data.trimesters ?? []) {
@@ -741,7 +744,7 @@
   window.tabShown = window.tabShown || {};
   window.tabShown.hnrp = () => {
     map.invalidateSize();
-    map.fitBounds(layer.getBounds());
+    fitCountry(); // country view if one is selected, world otherwise (non-animated)
     renderAll(); // paths may mount after the panel becomes visible — restyle then
   };
   renderAll();
