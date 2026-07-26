@@ -135,55 +135,71 @@
 
   <section id="tab-hnrp" class="tab-panel" hidden>
     <div id="hnrp-controls">
-      <label class="ctl">Skill
-        <select id="hnrp-skill" class="map-select">
-          <option value="mod" selected>Moderate or high (r ≥ 0.30)</option>
-          <option value="high">High only (r ≥ 0.50)</option>
-        </select>
-      </label>
-      <label class="ctl">Return period ≥
-        <select id="hnrp-rp" class="map-select">
-          <option value="1">any</option>
-          <option value="3" selected>3 yr (alert)</option>
-          <option value="10">10 yr (severe alert)</option>
-        </select>
-      </label>
-      <label class="ctl">Valid season
-        <select id="hnrp-tri" class="map-select">
-          <option value="auto" selected>Worst drought — forecast seasons</option>
-          <option value="auto-in">Worst drought — incl. in-season</option>
-        </select>
-      </label>
-      <label class="ctl">Caseload
-        <select id="hnrp-sector" class="map-select">
-          <option value="is" selected>Intersectoral</option>
-          <option value="fsc">Food Security</option>
-        </select>
-      </label>
-      <label class="ctl">Severity source
-        <select id="hnrp-sev-src" class="map-select">
-          <option value="jiaf">JIAF 4+</option>
-          <option value="jiaf3">JIAF 3+</option>
-          <option value="3" selected>IPC 3+</option>
-          <option value="4">IPC 4+</option>
-          <option value="5">IPC 5</option>
-        </select>
-      </label>
-      <label class="ctl" id="hnrp-ipc-period-wrap" hidden>IPC estimate
-        <select id="hnrp-ipc-period" class="map-select">
-          <option value="now" selected>Now (latest covering this month)</option>
-          <option value="fwd">Forecast window (latest projection)</option>
-        </select>
-      </label>
-      <span id="hnrp-ipc-note" class="lock-note" hidden></span>
-      <label class="ctl">Country
-        <select id="hnrp-country" class="map-select"><option value="">All</option></select>
-      </label>
-      <label class="toggle">
-        <input type="checkbox" id="hnrp-drought-only" checked />
-        Drought signals only
-      </label>
-      <span id="hnrp-issued" class="lock-note"></span>
+      <div class="ctl-row">
+        <span class="row-tag">Forecast</span>
+        <label class="ctl">Skill
+          <select id="hnrp-skill" class="map-select">
+            <option value="mod" selected>Moderate or high (r ≥ 0.30)</option>
+            <option value="high">High only (r ≥ 0.50)</option>
+          </select>
+        </label>
+        <label class="ctl">Return period ≥
+          <select id="hnrp-rp" class="map-select">
+            <option value="1">any</option>
+            <option value="3" selected>3 yr (alert)</option>
+            <option value="10">10 yr (severe alert)</option>
+          </select>
+        </label>
+        <label class="ctl">Valid season
+          <select id="hnrp-tri" class="map-select">
+            <option value="auto" selected>Worst drought — forecast seasons</option>
+            <option value="auto-in">Worst drought — incl. in-season</option>
+          </select>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="hnrp-drought-only" checked />
+          Drought signals only
+        </label>
+      </div>
+      <div class="ctl-row">
+        <span class="row-tag">Caseload</span>
+        <label class="ctl">Sector
+          <select id="hnrp-sector" class="map-select">
+            <option value="is" selected>Intersectoral</option>
+          </select>
+        </label>
+      </div>
+      <div class="ctl-row">
+        <span class="row-tag">Severity</span>
+        <label class="ctl">Source
+          <select id="hnrp-sev-type" class="map-select">
+            <option value="ipc" selected>IPC/CH phases</option>
+            <option value="jiaf">JIAF severity</option>
+            <option value="pin">PiN (no severity)</option>
+          </select>
+        </label>
+        <label class="ctl" id="hnrp-sev-lvl-wrap">Level
+          <select id="hnrp-sev-lvl" class="map-select">
+            <option value="3" selected>3+</option>
+            <option value="4">4+</option>
+            <option value="5">5</option>
+          </select>
+        </label>
+        <label class="ctl" id="hnrp-ipc-period-wrap" hidden>IPC estimate
+          <select id="hnrp-ipc-period" class="map-select">
+            <option value="now" selected>Now (latest covering this month)</option>
+            <option value="fwd">Forecast window (latest projection)</option>
+          </select>
+        </label>
+        <span id="hnrp-ipc-note" class="lock-note" hidden></span>
+      </div>
+      <div class="ctl-row">
+        <span class="row-tag">Country</span>
+        <label class="ctl">
+          <select id="hnrp-country" class="map-select"><option value="">All</option></select>
+        </label>
+        <span id="hnrp-issued" class="lock-note"></span>
+      </div>
     </div>
 
     <div id="hnrp-map"></div>
@@ -246,19 +262,21 @@
       <strong>PiN / Targeted</strong> are the People in Need and targeted figures from the plan's
       latest reference period — PiN is the plan's headline total for the selected caseload, not a
       severity band (it is not broken down by JIAF class or IPC phase); the
-      <strong>Caseload</strong> selector switches both between the
-      Intersectoral and Food Security (FSC) cluster figures (severity classes exist only
-      inter-sectorally; IPC phases are the planned food-security severity weight). Both via <a
+      <strong>Caseload</strong> selector switches both between Intersectoral and any
+      sector/cluster the plans publish (Food Security, Health, Protection, …; not every
+      plan publishes every sector — missing ones show a dash). Both via <a
       href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>; figures published at
       admin-2/3 are summed to admin-1. Each country shows its <strong>latest plan cycle</strong> —
       the year appears in the country selector, the table's Plan column, and map tooltips; where a
       country has no newer plan (e.g. Guatemala, latest 2025), the previous cycle is shown.
       Countries whose plan publishes no subnational PiN/severity breakdown in these sources
       cannot appear at all (e.g. Ethiopia — country-level figures only).
-      The <strong>Severity source</strong> selector defaults to
-      <strong>IPC/CH acute food insecurity phase 3+</strong> (via <a
-      href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>; thresholds 3+/4+/5,
-      or the JIAF weight) and the estimate — <em>Now</em> (the most recent analysis covering
+      The <strong>Severity</strong> row picks the source — <strong>IPC/CH acute food
+      insecurity phases</strong> (default, via <a
+      href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>), JIAF severity, or
+      the plan's PiN itself (no severity level; shares then divide by the plan's JIAF
+      analysed population) — and the level (3+/4+/5), plus for IPC the estimate —
+      <em>Now</em> (the most recent analysis covering
       the issuance month, preferring a current-type analysis) or <em>Forecast window</em>
       (the most recent projection overlapping the 6-month forecast horizon); once a country
       is selected the dropdown options name the concrete analysis each resolves to — its

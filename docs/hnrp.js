@@ -19,7 +19,9 @@
   const skillSel = document.getElementById("hnrp-skill");
   const rpSel = document.getElementById("hnrp-rp");
   const sectorSel = document.getElementById("hnrp-sector");
-  const srcSel = document.getElementById("hnrp-sev-src");
+  const srcTypeSel = document.getElementById("hnrp-sev-type");
+  const srcLvlSel = document.getElementById("hnrp-sev-lvl");
+  const srcLvlWrap = document.getElementById("hnrp-sev-lvl-wrap");
   const ipcPeriodWrap = document.getElementById("hnrp-ipc-period-wrap");
   const ipcPeriodSel = document.getElementById("hnrp-ipc-period");
   const countrySel = document.getElementById("hnrp-country");
@@ -61,16 +63,22 @@
   const fmtN = (v) => (v == null ? "–" : Math.round(v).toLocaleString("en-US"));
   const fmt = (v, d) => (v == null ? "–" : Number(v).toFixed(d));
   const pctOf = (num, den) => (num == null || !den ? null : (100 * num) / den);
-  // Caseload selector: PiN/targeted come from Intersectoral or Food Security (FSC).
-  const fscOn = () => sectorSel.value === "fsc";
-  const pinOf = (r) => (fscOn() ? r.fsc_pin : r.pin);
-  const tgtOf = (r) => (fscOn() ? r.fsc_targeted : r.targeted);
-  const secTag = () => (fscOn() ? " (FSC)" : "");
+  // Caseload selector: Intersectoral, or any sector the plans publish (from the
+  // payload's sectors list; per-row figures live in r.sec = {code: [pin, targeted]}).
+  for (const [code, name] of data.sectors ?? []) {
+    const o = document.createElement("option");
+    o.value = code;
+    o.textContent = name;
+    sectorSel.appendChild(o);
+  }
+  const pinOf = (r) => (sectorSel.value === "is" ? r.pin : (r.sec?.[sectorSel.value]?.[0] ?? null));
+  const tgtOf = (r) => (sectorSel.value === "is" ? r.targeted : (r.sec?.[sectorSel.value]?.[1] ?? null));
+  const secTag = () => (sectorSel.value === "is" ? "" : ` (${sectorSel.value})`);
 
   const droughtOnly = () => droughtOnlyEl.checked;
   // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
   // shown only in IPC mode, where surfacing needs the plan does NOT capture is the point.
-  const inHnrp = (r) => r.sev_total > 0 || r.pin != null || r.targeted != null || r.fsc_pin != null;
+  const inHnrp = (r) => r.sev_total > 0 || r.pin != null || r.targeted != null || r.sec != null;
 
   // ── Severity source: JIAF inter-sectoral 4+ (default) or IPC/CH phase N+ ─────
   // IPC rows carry a list of analysis periods (current / projections, each with a
@@ -80,7 +88,9 @@
   // "Forecast window" = the most recent projection overlapping the 6-month
   // forecast horizon. IPC and JIAF use different analysed-population bases and
   // scopes, so shares are not comparable across the two sources.
-  const ipcMode = () => !srcSel.value.startsWith("jiaf");
+  const ipcMode = () => srcTypeSel.value === "ipc";
+  const pinMode = () => srcTypeSel.value === "pin";
+  const lvl = () => +srcLvlSel.value;
   const ym = (s) => { const [y, m] = s.split("-").map(Number); return y * 12 + m - 1; };
   const NOW_YM = data.issued_year * 12 + data.issued_month - 1; // anchor: forecast issuance
   function ipcComboOf(r, mode = ipcPeriodSel.value) {
@@ -100,18 +110,22 @@
     return list.reduce((a, b) => (ym(a.e) >= ym(b.e) ? a : b)); // most recent past window
   }
   function sevValOf(r) {
-    if (srcSel.value === "jiaf") return r.sev4;
-    if (srcSel.value === "jiaf3") {
-      return r.sev_total > 0 ? (r.s3 ?? 0) + (r.s4 ?? 0) + (r.s5 ?? 0) : null;
+    if (pinMode()) return pinOf(r);
+    if (srcTypeSel.value === "jiaf") {
+      if (!(r.sev_total > 0)) return null;
+      return [r.s1, r.s2, r.s3, r.s4, r.s5].slice(lvl() - 1).reduce((a, b) => a + (b ?? 0), 0);
     }
     const c = ipcComboOf(r);
     if (!c) return null;
-    return c.p.slice(+srcSel.value - 1).reduce((a, b) => a + (b ?? 0), 0);
+    return c.p.slice(lvl() - 1).reduce((a, b) => a + (b ?? 0), 0);
   }
+  // Denominator: each source's own analysed population. PiN has none of its own —
+  // shares use the plan's JIAF analysed population (same plan, same admin unit).
   const sevTotOf = (r) => (ipcMode() ? (ipcComboOf(r)?.tot ?? null) : r.sev_total);
-  const sevLabel = () => (srcSel.value === "jiaf" ? "JIAF 4+"
-    : srcSel.value === "jiaf3" ? "JIAF 3+"
-    : `IPC ${srcSel.value === "5" ? "5" : srcSel.value + "+"}`);
+  const lvlTag = () => (lvl() === 5 ? "5" : lvl() + "+");
+  const sevLabel = () => (pinMode() ? `PiN${secTag()}`
+    : srcTypeSel.value === "jiaf" ? `JIAF ${lvlTag()}`
+    : `IPC ${lvlTag()}`);
 
   // Exercise (analysis) month + validity window of an IPC combo — spelled out
   // everywhere a figure from it appears, since periods differ by country.
@@ -126,6 +140,7 @@
   const IPC_OPT_BASE = { now: "Now", fwd: "Forecast window" };
   function updateIpcPeriodUI() {
     ipcPeriodWrap.hidden = !ipcMode();
+    srcLvlWrap.hidden = pinMode(); // PiN is a headline total, no severity level
     if (!ipcMode()) { ipcNoteEl.hidden = true; return; }
     // The dropdown options name the CONCRETE analysis each choice resolves to —
     // exercise (analysis) month and validity window — once a country is selected;
@@ -357,10 +372,16 @@
     yl.setAttribute("transform", `rotate(-90 14 ${(M.t + H - M.b) / 2})`);
     g("line", { x1: X(0), y1: Y(0), x2: X(100), y2: Y(100),
                 stroke: "#c4d0d1", "stroke-width": 1, "stroke-dasharray": "5 4" });
-    g("text", { x: M.l + 10, y: M.t + 16, "font-size": 11, fill: "#9db1b3" })
-      .textContent = `▲ more people in ${sevLabel()} than targeted`;
-    g("text", { x: W - M.r - 8, y: H - M.b - 10, "text-anchor": "end", "font-size": 11, fill: "#9db1b3" })
-      .textContent = `▼ targeted exceeds ${sevLabel()} caseload`;
+    // Half-plane labels sit ON the diagonal, rotated along it; the arrow glyphs
+    // rotate with the text, so they point perpendicularly away from the line.
+    const ang = Math.atan2(Y(100) - Y(0), X(100) - X(0)) * 180 / Math.PI;
+    const diagLabel = (v, dy, txt) => {
+      const lx = X(v), ly = Y(v) + dy;
+      g("text", { x: lx, y: ly, "text-anchor": "middle", "font-size": 11, fill: "#9db1b3",
+                  transform: `rotate(${ang} ${lx} ${ly})` }).textContent = txt;
+    };
+    diagLabel(62, -8, `↑ more people in ${sevLabel()} than targeted`);
+    diagLabel(62, 16, `↓ targeted exceeds ${sevLabel()} caseload`);
 
     const xOf = (r) => X(clamp(pctOf(tgtOf(r), sevTotOf(r))));
     const yOf = (r) => Y(clamp(pctOf(sevValOf(r), sevTotOf(r))));
@@ -416,8 +437,10 @@
   const IPC_LABELS = ["1 — minimal", "2 — stressed", "3 — crisis", "4 — emergency", "5 — catastrophe"];
   const sevClassLabels = () => (ipcMode() ? IPC_LABELS : JIAF_LABELS);
   // Class breakdown for the bars: JIAF classes or the selected IPC period's phases.
-  const segsOf = (r) => (ipcMode()
-    ? (ipcComboOf(r)?.p ?? null)
+  // PiN has no class breakdown — bars fall back to a single neutral segment.
+  const PIN_COLOR = "#9db1b3";
+  const segsOf = (r) => (pinMode() ? null
+    : ipcMode() ? (ipcComboOf(r)?.p ?? null)
     : [r.s1, r.s2, r.s3, r.s4, r.s5]);
   const barsWrap = document.getElementById("hnrp-bars-wrap");
   const barsHint = document.getElementById("hnrp-bars-hint");
@@ -433,8 +456,10 @@
 
   function renderBarsLegend() {
     barsLegend.innerHTML =
-      SEV_COLORS.map((c, i) => (i < barC0() ? ""
-        : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("") +
+      (pinMode()
+        ? `<span><i style="background:${PIN_COLOR}"></i> PiN${secTag()}</span>`
+        : SEV_COLORS.map((c, i) => (i < barC0() ? ""
+            : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("")) +
       `<span><i class="tick"></i> targeted</span>` +
       `<span>left swatch = forecast category</span>`;
   }
@@ -458,15 +483,20 @@
 
   function renderBars() {
     renderBarsLegend();
+    barsFullEl.closest("label").style.display = pinMode() ? "none" : "";
     const country = countrySel.value;
     const rows = country
-      ? data.rows.filter((r) => r.country === country && sevTotOf(r) > 0 && segsOf(r))
+      ? data.rows.filter((r) => r.country === country
+            && (pinMode() ? sevValOf(r) != null : sevTotOf(r) > 0 && segsOf(r)))
           .sort(BAR_SORTS[barSortSel.value] || BAR_SORTS.sev4)
       : [];
     barsWrap.hidden = rows.length === 0;
     barsHint.hidden = rows.length > 0;
     if (!rows.length) return;
-    if (ipcMode()) {
+    if (pinMode()) {
+      barsTitle.textContent = `${country} — PiN${secTag()} per admin 1` +
+        ` (plan data ${planYrOf(rows[0]) ?? "–"})`;
+    } else if (ipcMode()) {
       const c = ipcComboOf(rows[0]);
       barsTitle.textContent = `${country} — population by IPC/CH phase, per admin 1` +
         (c ? ` (${comboDesc(c)})` : "");
@@ -488,8 +518,9 @@
       return el;
     };
     // Scale to what is actually plotted: the sum of the SHOWN classes (3+ by
-    // default) and the targeted tick — not the full analysed population.
-    const shownSum = (r) => (segsOf(r) ?? []).slice(barC0()).reduce((a, b) => a + (b ?? 0), 0);
+    // default; the PiN total in PiN mode) and the targeted tick.
+    const shownSum = (r) => (pinMode() ? (sevValOf(r) ?? 0)
+      : (segsOf(r) ?? []).slice(barC0()).reduce((a, b) => a + (b ?? 0), 0));
     const xmax = Math.max(...rows.map((r) => Math.max(shownSum(r), tgtOf(r) ?? 0))) * 1.04;
     const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
 
@@ -502,7 +533,8 @@
         .textContent = fmtSI(v);
     }
     g("text", { x: (M.l + W - M.r) / 2, y: H - 4, "text-anchor": "middle", "font-size": 11, fill: "#555" })
-      .textContent = barC0() ? "People (analysed population in classes 3–5)"
+      .textContent = pinMode() ? `People in Need${secTag()}`
+        : barC0() ? "People (analysed population in classes 3–5)"
         : "People (analysed population by severity class)";
 
     rows.forEach((r, i) => {
@@ -515,18 +547,30 @@
       const name = (r.name ?? r.pcode).length > 24 ? (r.name ?? r.pcode).slice(0, 23) + "…" : (r.name ?? r.pcode);
       g("text", { x: M.l - 180, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" }).textContent = name;
 
-      // Stacked class segments with a white spacer between them.
-      const segs = segsOf(r) ?? [];
-      let acc = 0;
-      for (let c = barC0(); c < 5; c++) {
-        const v = segs[c] ?? 0;
-        if (v <= 0) continue;
-        const seg = g("rect", { x: X(acc), y: y + 4, width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
-                                height: ROW - 9, fill: SEV_COLORS[c] });
-        const title = document.createElementNS(NS, "title");
-        title.textContent = `${r.name ?? r.pcode} — ${ipcMode() ? "IPC phase" : "severity"} ${c + 1}: ${fmtN(v)}`;
-        seg.appendChild(title);
-        acc += v;
+      // Stacked class segments with a white spacer between them (single PiN
+      // segment in PiN mode — no class breakdown exists).
+      if (pinMode()) {
+        const v = sevValOf(r) ?? 0;
+        if (v > 0) {
+          const seg = g("rect", { x: X(0), y: y + 4, width: Math.max(X(v) - X(0), 0.5),
+                                  height: ROW - 9, fill: PIN_COLOR });
+          const title = document.createElementNS(NS, "title");
+          title.textContent = `${r.name ?? r.pcode} — PiN${secTag()}: ${fmtN(v)}`;
+          seg.appendChild(title);
+        }
+      } else {
+        const segs = segsOf(r) ?? [];
+        let acc = 0;
+        for (let c = barC0(); c < 5; c++) {
+          const v = segs[c] ?? 0;
+          if (v <= 0) continue;
+          const seg = g("rect", { x: X(acc), y: y + 4, width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
+                                  height: ROW - 9, fill: SEV_COLORS[c] });
+          const title = document.createElementNS(NS, "title");
+          title.textContent = `${r.name ?? r.pcode} — ${ipcMode() ? "IPC phase" : "severity"} ${c + 1}: ${fmtN(v)}`;
+          seg.appendChild(title);
+          acc += v;
+        }
       }
       // Targeted tick (dark vertical line).
       const tgt = tgtOf(r);
@@ -551,15 +595,14 @@
     { key: "r", label: "Skill (r)", num: true },
   ];
   let sortKey = "sev4", sortDesc = true;
-  // PiN/Targeted columns follow the caseload selector.
-  const colKey = (k) => (fscOn() && (k === "pin" || k === "targeted") ? "fsc_" + k : k);
 
   function renderTable() {
     thead.innerHTML = "";
     const trh = document.createElement("tr");
     for (const c of COLS) {
       const th = document.createElement("th");
-      let label = c.label + (fscOn() && (c.key === "pin" || c.key === "targeted") ? " (FSC)" : "");
+      // PiN/Targeted columns follow the caseload selector.
+      let label = c.label + ((c.key === "pin" || c.key === "targeted") ? secTag() : "");
       if (c.key === "sev4") label = `${sevLabel()} pop`;
       if (c.key === "pin") {
         th.title = "People in Need — the plan's total PiN for the selected caseload " +
@@ -580,8 +623,10 @@
     const SLOT_KEYS = { tri_label: "key", rp: "rp", pct: "pct", r: "r" };
     const kv = (row) => (sortKey === "_plan_yr" ? planYrOf(row)
       : sortKey === "sev4" ? sevValOf(row)
+      : sortKey === "pin" ? pinOf(row)
+      : sortKey === "targeted" ? tgtOf(row)
       : sortKey in SLOT_KEYS ? slotOf(row)?.[SLOT_KEYS[sortKey]]
-      : row[colKey(sortKey)]);
+      : row[sortKey]);
     const rs = data.rows.filter(passes).sort((a, b) => {
       const x = kv(a), y = kv(b);
       if (x == null) return 1;
@@ -637,7 +682,8 @@
     sortSevOpt.textContent = `Severity (${sevLabel()})`;
     renderMap(); renderScatter(); renderBars(); renderTable();
   }
-  for (const el of [skillSel, rpSel, sectorSel, srcSel, droughtOnlyEl, triSel, ipcPeriodSel]) {
+  for (const el of [skillSel, rpSel, sectorSel, srcTypeSel, srcLvlSel,
+                    droughtOnlyEl, triSel, ipcPeriodSel]) {
     el.addEventListener("change", renderAll);
   }
   barSortSel.addEventListener("change", renderBars);

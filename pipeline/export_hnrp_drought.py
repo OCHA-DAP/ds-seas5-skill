@@ -187,25 +187,29 @@ def normalize_pcodes(df: pd.DataFrame, poly: pd.DataFrame, label: str) -> pd.Dat
     return out
 
 
-def load_pin_adm1() -> pd.DataFrame:
-    """PiN + targeted per ADM1 pcode: Intersectoral and Food Security (FSC) side by side.
+def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
+    """PiN + targeted per ADM1 pcode, EVERY sector the plans publish.
 
     Per (country, sector): the latest reference period; rows published at admin-1
-    preferred, else admin-2 summed per admin1_code. FSC lands in fsc_pin/fsc_targeted
-    (the site's caseload selector); Intersectoral keeps the unprefixed columns.
+    preferred, else admin-2 summed per admin1_code. Intersectoral keeps the
+    unprefixed pin/targeted columns; every other sector lands in wide
+    pin__{code}/tgt__{code} columns (numeric, so pcode-merge aggregation still
+    works) that serialization folds into a per-row "sec" dict. Also returns
+    {sector_code: sector_name} for the site's caseload selector.
     """
     engine = stratus.get_engine("dev")
     q = """
-    SELECT location_code, sector_code, admin1_code, admin1_name, admin_level,
-           population_status, population, reference_period_start
+    SELECT location_code, sector_code, sector_name, admin1_code, admin1_name,
+           admin_level, population_status, population, reference_period_start
     FROM hpc.needs_admin
-    WHERE sector_code IN ('Intersectoral', 'FSC') AND category = 'total'
-      AND population_status IN ('INN', 'TGT') AND admin_level IN (1, 2)
+    WHERE category = 'total' AND population_status IN ('INN', 'TGT')
+      AND admin_level IN (1, 2)
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_start"])
+    sector_names = (df.drop_duplicates("sector_code")
+                    .set_index("sector_code")["sector_name"].to_dict())
 
-    KEYS = {"Intersectoral": ("pin", "targeted"), "FSC": ("fsc_pin", "fsc_targeted")}
     rows: dict[str, dict] = {}
     for (loc, sector), g in df.groupby(["location_code", "sector_code"]):
         ref = g["reference_period_start"].max()
@@ -214,7 +218,8 @@ def load_pin_adm1() -> pd.DataFrame:
         g = g[g["admin_level"] == lvl]
         a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
         agg = g.groupby(["admin1_code", "population_status"])["population"].sum().unstack()
-        k_inn, k_tgt = KEYS[sector]
+        k_inn, k_tgt = (("pin", "targeted") if sector == "Intersectoral"
+                        else (f"pin__{sector}", f"tgt__{sector}"))
         for pcode, r in agg.iterrows():
             row = rows.setdefault(pcode, {"pcode": pcode, "iso3": loc,
                                           "name": a1names.get(pcode)})
@@ -223,12 +228,12 @@ def load_pin_adm1() -> pd.DataFrame:
             row["ref_year"] = max(row.get("ref_year", 0), int(ref.year))
             row["pin_admin_level"] = lvl
     out = pd.DataFrame(rows.values())
-    for col in ["pin", "targeted", "fsc_pin", "fsc_targeted"]:
+    for col in ["pin", "targeted"]:
         if col not in out.columns:
             out[col] = None
-    print(f"PiN: {out['iso3'].nunique()} countries, {len(out)} ADM1 units "
-          f"(intersectoral: {out['pin'].notna().sum()}, FSC: {out['fsc_pin'].notna().sum()})")
-    return out
+    print(f"PiN: {out['iso3'].nunique()} countries, {len(out)} ADM1 units, "
+          f"{len(sector_names)} sectors (intersectoral: {out['pin'].notna().sum()})")
+    return out, sector_names
 
 
 def load_severity_adm1() -> pd.DataFrame:
@@ -364,7 +369,8 @@ def main() -> None:
     names = poly.set_index("pcode")["name"].to_dict()
 
     print("Reconciling humanitarian pcodes to the COD vintage...")
-    df_pin = normalize_pcodes(load_pin_adm1(), poly, "PiN")
+    df_pin_raw, sector_names = load_pin_adm1()
+    df_pin = normalize_pcodes(df_pin_raw, poly, "PiN")
     df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
     df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
     ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
@@ -390,9 +396,10 @@ def main() -> None:
         ]
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
     _sum = lambda s: s.sum(min_count=1)  # noqa: E731 — all-NaN stays None, not 0
+    sec_cols = [c for c in df_pin.columns if c.startswith(("pin__", "tgt__"))]
     df_pin = (df_pin.groupby(["pcode", "iso3"], as_index=False)
               .agg({"name": "first", "pin": _sum, "targeted": _sum,
-                    "fsc_pin": _sum, "fsc_targeted": _sum,
+                    **{c: _sum for c in sec_cols},
                     "ref_year": "max", "pin_admin_level": "max"}))
     df_sev = (df_sev.groupby(["pcode", "iso3"], as_index=False)
               .agg({"name": "first", "sev4": "sum", "sev_total": "sum", "sev_year": "max",
@@ -538,23 +545,41 @@ def main() -> None:
         [t for t in TRIMESTERS if _tri_valid(TRIMESTERS[t], issued_month)],
         key=lambda t: _min_signed(TRIMESTERS[t], issued_month),
     )
+    # Per-sector PiN/targeted travel the pipeline as wide numeric columns; fold them
+    # into a compact per-row dict {sector: [pin, targeted]} for the payload.
+    def _row(rec: dict) -> dict:
+        sec = {}
+        for c in sec_cols:
+            v = rec.pop(c, None)
+            if v is not None and pd.notna(v):
+                pref, code = c.split("__", 1)
+                sec.setdefault(code, [None, None])[0 if pref == "pin" else 1] = int(v)
+        out = {k: (v if isinstance(v, (list, dict)) else None if pd.isna(v) else v)
+               for k, v in rec.items()}
+        if sec:
+            out["sec"] = sec
+        if rec["pcode"] in ipc_lists:
+            out["ipc"] = ipc_lists[rec["pcode"]]
+        return out
+
     payload = {
         "issued_label": issued_label,
         "issued_month": int(issued_month),
         "issued_year": int(global_max_iy),
         "trimesters": valid_tris,
         "thresholds": THRESHOLDS,
+        # Selector order: FSC first (the tab's theme is food security), then by name.
+        "sectors": sorted(
+            ([c, n] for c, n in sector_names.items() if c != "Intersectoral"),
+            key=lambda cn: (cn[0] != "FSC", cn[1]),
+        ),
         "weight_note": (
             "Humanitarian weight is population in JIAF inter-sectoral severity 4+ from the "
             "HNRP severity analysis (ds-hnrp-mirror, latest analysis year per country), with "
-            "intersectoral PiN / targeted alongside. Admin-2/3 figures are summed to admin-1."
+            "per-sector PiN / targeted alongside. Admin-2/3 figures are summed to admin-1."
         ),
-        "rows": [
-            {k: (v if isinstance(v, (list, dict)) else None if pd.isna(v) else v)
-             for k, v in rec.items()}
-            | ({"ipc": ipc_lists[rec["pcode"]]} if rec["pcode"] in ipc_lists else {})
-            for rec in merged.drop(columns=["pin_admin_level"]).to_dict("records")
-        ],
+        "rows": [_row(rec)
+                 for rec in merged.drop(columns=["pin_admin_level"]).to_dict("records")],
     }
     OUT.write_text(json.dumps(payload, separators=(",", ":")))
     print(f"Wrote {OUT}  ({OUT.stat().st_size / 1024:.1f} KB)")
