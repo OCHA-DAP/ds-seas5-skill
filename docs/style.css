@@ -200,6 +200,10 @@ footer p { margin: 4px 0; }
   color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 #hnrp-controls #hnrp-issued { margin: 0 0 0 auto; }
 #hnrp-sev-lvl-wrap[hidden] { display: none; }
+/* Chrome draws a focus ring (blue box) around a clicked SVG path / the map itself;
+   selection feedback is the country outline + zoom, so the ring is just noise. */
+.leaflet-container path.leaflet-interactive:focus,
+.leaflet-container:focus { outline: none; }
 .hnrp-h { margin: 28px 0 8px; font-size: 1rem; }
 #hnrp-note { margin-top: 6px; }
 #hnrp-note summary { cursor: pointer; font-weight: 600; color: var(--hdx-neutral-8);
