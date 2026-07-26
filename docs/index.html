@@ -191,7 +191,6 @@
             <option value="fwd">Forecast window (latest projection)</option>
           </select>
         </label>
-        <span id="hnrp-ipc-note" class="lock-note" hidden></span>
       </div>
       <div class="ctl-row">
         <span class="row-tag">Country</span>
@@ -204,6 +203,7 @@
 
     <div id="hnrp-map"></div>
 
+    <h3 class="hnrp-h">Severity vs targeted, per admin 1</h3>
     <div id="hnrp-scatter-wrap">
       <svg id="hnrp-scatter"></svg>
       <div id="hnrp-tip" hidden></div>
@@ -243,61 +243,86 @@
       severity breakdown (population in each JIAF severity class, targeted population, and
       the forecast category).</p>
 
+    <h3 class="hnrp-h">Matching areas, ranked</h3>
     <table id="hnrp-table">
       <thead></thead>
       <tbody></tbody>
     </table>
     <p id="hnrp-empty" class="lock-note" hidden>No admin-1 units match the current filters.</p>
 
-    <p class="note" id="hnrp-note">
-      Admin-1 areas of current HNRP countries where the latest SEAS5 seasonal forecast points to
-      drought, ranked so the largest humanitarian caseloads with the worst forecasts rise to the
-      top. For each area the single <strong>worst</strong> qualifying slot is shown: rainy-season
-      trimesters within the forecast horizon (including in-season ones), drought side only
-      (forecast percentile &lt; 50), with at least moderate skill (r&nbsp;≥&nbsp;0.30). The
-      <strong>return period</strong> is directional: a 10-yr value means a forecast this dry
-      occurs about once a decade in the 1981–present hindcast for that area and season.
-      <strong>JIAF 4+ / 3+ pop</strong> is the population in JIAF inter-sectoral severity
-      classes 4–5 (or 3–5) from the HNRP severity analysis (latest analysis year per country);
-      <strong>PiN / Targeted</strong> are the People in Need and targeted figures from the plan's
-      latest reference period — PiN is the plan's headline total for the selected caseload, not a
-      severity band (it is not broken down by JIAF class or IPC phase); the
-      <strong>Caseload</strong> selector switches both between Intersectoral and any
-      sector/cluster the plans publish (Food Security, Health, Protection, …; not every
-      plan publishes every sector — missing ones show a dash). Both via <a
-      href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>; figures published at
-      admin-2/3 are summed to admin-1. Each country shows its <strong>latest plan cycle</strong> —
-      the year appears in the country selector, the table's Plan column, and map tooltips; where a
-      country has no newer plan (e.g. Guatemala, latest 2025), the previous cycle is shown.
-      Countries whose plan publishes no subnational PiN/severity breakdown in these sources
-      cannot appear at all (e.g. Ethiopia — country-level figures only).
-      The <strong>Severity</strong> row picks the source — <strong>IPC/CH acute food
-      insecurity phases</strong> (default, via <a
-      href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>), JIAF severity, or
-      the plan's PiN itself (no severity level; shares then divide by the plan's JIAF
-      analysed population) — and the level (3+/4+/5), plus for IPC the estimate —
-      <em>Now</em> (the most recent analysis covering
-      the issuance month, preferring a current-type analysis) or <em>Forecast window</em>
-      (the most recent projection overlapping the 6-month forecast horizon); once a country
-      is selected the dropdown options name the concrete analysis each resolves to — its
-      exercise (analysis) month and validity window — which also appears in every tooltip. In IPC mode the map, scatter, and table also
-      include IPC-covered areas <strong>outside any HNRP</strong> (no PiN/severity/targeted;
-      plotted at 0% targeted in the scatter) — surfacing possible shocks beyond plan scope.
-      IPC and JIAF figures do <em>not</em> line up: they measure different things (acute
-      food insecurity vs inter-sectoral needs) over different analysed populations, scopes,
-      and periods — compare shapes, not values. The <strong>Valid season</strong> selector
-      defaults to each area's worst qualifying drought trimester among forecast seasons;
-      "incl. in-season" also scans trimesters already in progress (the worst signal is often
-      a season underway), and picking a trimester (e.g. MJJ) shows that season's forecast
-      for every area. The severity bars plot classes 3–5 by default (classes 1–2 dominate
-      populous areas and drown the signal — a checkbox restores them). All shares are of
-      the source's own <em>analysed</em> population, and in the scatter both axes divide by
-      the <em>same</em> total — so position also compares absolute headcounts: above the
-      45° line, more people sit in the severity band than the plan targets (a possible
-      coverage gap); below it, targeting exceeds the severe caseload. Axes are fixed
-      0–100%; areas with no targeted figure plot at 0%. Forecast data: detrended,
-      matching the Map tab's defaults.
+    <p class="note">
+      Admin-1 areas where the latest SEAS5 seasonal forecast points to drought, weighted by
+      food-insecurity severity and HNRP caseloads — so the largest at-risk populations with
+      the worst forecasts rise to the top.
     </p>
+    <details id="hnrp-note" class="note">
+      <summary>Methodology &amp; data notes</summary>
+
+      <h4>Forecast signal</h4>
+      <p>
+        For each area the single <strong>worst</strong> qualifying slot is shown: rainy-season
+        trimesters within the forecast horizon, drought side only (forecast percentile
+        &lt; 50), with at least moderate skill (r&nbsp;≥&nbsp;0.30). The
+        <strong>return period</strong> is directional: a 10-yr value means a forecast this
+        dry occurs about once a decade in the 1981–present hindcast for that area and season.
+        The <strong>Valid season</strong> selector defaults to the worst drought among
+        forecast seasons; "incl. in-season" also scans trimesters already in progress (the
+        worst signal is often a season underway), and picking a trimester (e.g. MJJ) shows
+        that season's forecast for every area. Forecast data are detrended, matching the Map
+        tab's defaults.
+      </p>
+
+      <h4>Caseloads (PiN / targeted)</h4>
+      <p>
+        <strong>PiN / Targeted</strong> come from each plan's latest reference period via <a
+        href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>; figures
+        published at admin-2/3 are summed to admin-1. PiN is the plan's headline total for
+        the selected caseload — <em>not</em> a severity band (it has no JIAF-class or
+        IPC-phase breakdown). The <strong>Caseload</strong> selector switches between
+        Intersectoral and any sector/cluster the plans publish (Food Security, Health,
+        Protection, …); not every plan publishes every sector — missing ones show a dash.
+        Each country shows its <strong>latest plan cycle</strong> (year in the country
+        selector, the Plan column, and tooltips); where no newer plan exists the previous
+        cycle is shown (e.g. Guatemala, latest 2025). Countries whose plan publishes no
+        subnational breakdown cannot appear at all (e.g. Ethiopia — country-level only).
+      </p>
+
+      <h4>Severity sources</h4>
+      <p>
+        The <strong>Severity</strong> row picks the source and level. <strong>IPC/CH acute
+        food insecurity phases</strong> (default, via <a
+        href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>), <strong>JIAF
+        severity</strong> from the HNRP severity analysis (latest analysis year per country),
+        or the plan's <strong>PiN</strong> itself (no severity level; shares then divide by
+        the plan's JIAF analysed population). IPC and JIAF figures do <em>not</em> line up:
+        they measure different things (acute food insecurity vs inter-sectoral needs) over
+        different analysed populations, scopes, and periods — compare shapes, not values.
+        In IPC mode the map, scatter, and table also include IPC-covered areas
+        <strong>outside any HNRP</strong> (no PiN/severity/targeted; plotted at 0% targeted)
+        — surfacing possible shocks beyond plan scope.
+      </p>
+
+      <h4>IPC estimate periods</h4>
+      <p>
+        <em>Now</em> uses the most recent analysis covering the forecast issuance month
+        (preferring a current-type analysis); <em>Forecast window</em> uses the most recent
+        projection overlapping the 6-month horizon — and is offered only where it differs
+        from <em>Now</em>. The dropdown states each choice's exercise (analysis) month and
+        validity window — exactly, once a country is selected; as a cross-country range
+        otherwise — and every tooltip names the analysis used for that area.
+      </p>
+
+      <h4>Reading the scatter</h4>
+      <p>
+        All shares are of the source's own <em>analysed</em> population, and both axes
+        divide by the <em>same</em> total — so position also compares absolute headcounts:
+        above the 45° line, more people sit in the severity band than the plan targets (a
+        possible coverage gap); below it, targeting exceeds the severe caseload. Axes are
+        fixed 0–100%; areas with no targeted figure plot at 0%. The severity bars plot
+        classes 3–5 by default (classes 1–2 dominate populous areas and drown the signal —
+        a checkbox restores them).
+      </p>
+    </details>
   </section>
 
   <section id="tab-methods" class="tab-panel" hidden>
@@ -422,7 +447,12 @@
   </section>
 
   <footer>
-    <p>Data: ECMWF SEAS5 (forecast) &amp; ERA5 (climatology). OCHA Centre for Humanitarian Data.</p>
+    <p>Data: ECMWF SEAS5 (forecast) &amp; ERA5 (climatology) · OCHA HPC HNRP caseloads &amp;
+      JIAF severity (<a href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>) ·
+      IPC/CH acute food insecurity (<a
+      href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>; IPC,
+      CC&nbsp;BY-NC-SA&nbsp;3.0&nbsp;IGO) · COD administrative boundaries.
+      OCHA Centre for Humanitarian Data.</p>
   </footer>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

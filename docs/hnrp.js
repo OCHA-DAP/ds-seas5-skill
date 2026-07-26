@@ -136,12 +136,11 @@
   };
   const comboDesc = (c) => `${c.t}, exercise ${fmtYM(c.a)}, valid ${c.label}`;
 
-  const ipcNoteEl = document.getElementById("hnrp-ipc-note");
   const IPC_OPT_BASE = { now: "Now", fwd: "Forecast window" };
   function updateIpcPeriodUI() {
     ipcPeriodWrap.hidden = !ipcMode();
     srcLvlWrap.hidden = pinMode(); // PiN is a headline total, no severity level
-    if (!ipcMode()) { ipcNoteEl.hidden = true; return; }
+    if (!ipcMode()) return;
     // The dropdown options ALWAYS state the exercise (analysis) month and validity
     // window of the numbers each choice resolves to: the concrete analysis when a
     // country is selected, the cross-country range otherwise (periods differ by
@@ -181,11 +180,6 @@
       if (fwdOpt.hidden && ipcPeriodSel.value === "fwd") ipcPeriodSel.value = "now";
     } else {
       fwdOpt.hidden = false;
-    }
-    ipcNoteEl.hidden = !!countrySel.value;
-    if (!countrySel.value) {
-      ipcNoteEl.textContent =
-        "Ranges across countries — select a country for its exact analysis, or hover any area.";
     }
   }
 
@@ -259,6 +253,9 @@
   const map = L.map("hnrp-map", {
     crs: L.CRS.EPSG4326, attributionControl: false, maxZoom: 8,
   });
+  // Bottom-left: the sticky filter bar overlays the top of the viewport, and a
+  // top-left zoom control slides under it as the page scrolls, eating its clicks.
+  map.zoomControl.setPosition("bottomleft");
   const tipHtml = (f) => {
     const p = f.properties, r = byPcode.get(p.pcode);
     // No PiN/severity row = not part of the plan's admin-level analysis (e.g. Nigeria's
