@@ -120,15 +120,21 @@ REFORM_XWALK = {
 }
 
 
-def normalize_pcodes(df: pd.DataFrame, poly: pd.DataFrame, label: str) -> pd.DataFrame:
+def normalize_pcodes(
+    df: pd.DataFrame, poly: pd.DataFrame, label: str, xxx_name_match: bool = False
+) -> pd.DataFrame:
     """Reconcile humanitarian admin-1 pcodes to the COD vintage the skill data uses.
 
     Two mechanical mismatch classes are fixed by re-deriving each country's code style
     from our polygon table instead of hardcoding: prefix style (HPC/HAPI often use an
     ISO3 prefix where the COD uses ISO2 — NER001→NE001, TCD01→TD01) and zero-padding
     (CO5→CO05). A cautious name fallback (unique accent-folded exact match within the
-    country) catches renumberings like GT23 'Quiché'. Unattributable placeholders
-    (*-XXX 'UNSPECIFIED') are dropped. Genuinely new admin units (e.g. Mali's 2023
+    country) catches renumberings like GT23 'Quiché'. Placeholder codes (*-XXX) are
+    dropped by default (plan-wide 'UNSPECIFIED' buckets, country-aggregate rows whose
+    names collide with capital regions — 'Djibouti'); xxx_name_match=True name-matches
+    them instead, for sources like the population baseline where HAPI ships whole
+    un-p-coded countries that way (all of Madagascar's regions).
+    Genuinely new admin units (e.g. Mali's 2023
     regions, Burkina's new provinces) have no COD polygon or forecast in our vintage —
     they stay unmatched and are reported so drift is visible on every run.
     """
@@ -151,11 +157,18 @@ def normalize_pcodes(df: pd.DataFrame, poly: pd.DataFrame, label: str) -> pd.Dat
             continue
         if code in ref:
             continue
-        # Non-geographic placeholders: plan-wide caseloads not attributed to any admin
-        # unit ("-XXX" codes, Mali's "PDI land" IDP bucket) — droppable, but loudly.
+        # Placeholder codes: real units HAPI could not p-code (name-matchable, only
+        # where the caller opts in) or plan-wide caseloads not attributed to any
+        # admin unit ("PDI land", "UNSPECIFIED") — droppable, but loudly.
         if code.upper().endswith("-XXX") or _fold(row.get("name") or "") in {"pdi land", "unspecified"}:
-            dropped.append(f"{code} ({row.get('name')})")
-            out.loc[i, "pcode"] = None
+            cand = (name_ix.get(iso3, {}).get(_fold(row.get("name") or ""))
+                    if xxx_name_match else None)
+            if cand is not None:
+                fixed.append(f"{code}→{cand} (name)")
+                out.loc[i, "pcode"] = cand
+            else:
+                dropped.append(f"{code} ({row.get('name')})")
+                out.loc[i, "pcode"] = None
             continue
         new = None
         m = re.fullmatch(r"([A-Za-z]+)[-_]?(\d+)", code)
@@ -412,6 +425,35 @@ def load_ipc_adm1() -> pd.DataFrame:
     return out
 
 
+def load_population_adm1() -> pd.DataFrame:
+    """Total population per ADM1 unit from pop.population_admin
+    (ds-population-mirror: HDX HAPI baseline population, UNFPA COD-PS derived).
+
+    Latest reference period per unit, totals only. P-codes arrive raw from the
+    mirror; normalize_pcodes reconciles them to our COD vintage (including
+    name-matching units HAPI ships with *-XXX placeholder codes).
+    """
+    engine = stratus.get_engine("dev")
+    q = """
+    SELECT location_code AS iso3, admin1_code AS pcode, admin1_name AS name,
+           population, reference_period_end
+    FROM pop.population_admin
+    WHERE admin_level = 1 AND admin1_code IS NOT NULL
+    """
+    with engine.connect() as conn:
+        df = pd.read_sql(q, conn, parse_dates=["reference_period_end"])
+    dup = df.duplicated(["iso3", "pcode", "name", "reference_period_end"], keep=False)
+    if dup.any():
+        print(f"  population: {int(dup.sum())} duplicate unit row(s) upstream (kept "
+              f"last): {sorted(set(df.loc[dup, 'iso3'] + ':' + df.loc[dup, 'pcode']))}")
+    df = (df.sort_values("reference_period_end")
+            .groupby(["iso3", "pcode", "name"], as_index=False).last())
+    df["pop_year"] = df["reference_period_end"].dt.year
+    print(f"Population baseline: {df['iso3'].nunique()} countries, "
+          f"{len(df)} ADM1 units")
+    return df.drop(columns=["reference_period_end"])
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rebuild-geometry", action="store_true",
@@ -435,6 +477,12 @@ def main() -> None:
     df_pin = normalize_pcodes(df_pin_raw, poly, "PiN")
     df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
     df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
+    df_pop = normalize_pcodes(load_population_adm1(), poly, "population",
+                              xxx_name_match=True)
+    # Normalization can merge units (reforms, renumberings) — sum to one per pcode.
+    df_pop = (df_pop.groupby("pcode", as_index=False)
+              .agg({"population": "sum", "pop_year": "max"})
+              .rename(columns={"population": "pop"}))
     ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
     df_ipc = (df_ipc.groupby(["pcode", "t", "s", "e"], as_index=False)
               .agg({**{f"p{ph}": "sum" for ph in ["1", "2", "3", "4", "5", "all"]},
@@ -587,6 +635,28 @@ def main() -> None:
 
     df_fc = pd.DataFrame(records)
     merged = df_hum.merge(df_fc, on="pcode", how="left")
+    merged = merged.merge(df_pop, on="pcode", how="left")
+    # Distrust the baseline where it can't be right. An analysed base slightly
+    # above the total is expected (analyses use current population estimates,
+    # the COD-PS baseline can be an old census — PAK 2017, MDG 2018), so allow
+    # 1.3x headroom for vintage growth; beyond that one side is mis-assigned.
+    # PAK is excluded outright: HAPI mis-p-codes its COD-PS rows (duplicate PK7,
+    # figures shifted one unit over — verified against the 2017 census).
+    ipc_max = {p: max((c["tot"] for c in lst), default=0) for p, lst in ipc_lists.items()}
+    analysed = pd.concat(
+        [merged["pcode"].map(ipc_max), merged["sev_total"]], axis=1
+    ).max(axis=1).fillna(0)
+    bad = merged["pop"].notna() & (
+        merged["iso3"].isin({"PAK"}) | (analysed > 1.3 * merged["pop"])
+    )
+    if bad.any():
+        print(f"Baseline distrusted for {int(bad.sum())} unit(s) (upstream "
+              f"mis-coding or analysed > 1.3x total): "
+              f"{sorted(set(merged.loc[bad, 'iso3'] + ':' + merged.loc[bad, 'pcode']))}")
+        merged.loc[bad, ["pop", "pop_year"]] = float("nan")
+    n_pop = merged["pop"].notna().sum()
+    print(f"Population baseline covers {n_pop}/{len(merged)} units "
+          f"(the rest fall back to the analysed-population proxy)")
     # COD name where we have the polygon; the plan's own name for unmatched units.
     merged["name"] = merged["name"].combine_first(merged["name_hum"])
     merged = merged.drop(columns=["name_hum"])
@@ -629,6 +699,9 @@ def main() -> None:
                for k, v in rec.items()}
         if out.get("tgt_year") is not None:
             out["tgt_year"] = int(out["tgt_year"])
+        for k in ("pop", "pop_year"):
+            if out.get(k) is not None:
+                out[k] = int(out[k])
         if sec:
             out["sec"] = sec
         if rec["pcode"] in ipc_lists:
