@@ -319,10 +319,12 @@
   // Selected-country outline: admin-1 borders alone make the country edge hard to
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
   // so tiny misalignments at the edge are cosmetic only).
-  let outlineLayer = null;
+  let outlineLayer = null, outlineFor = null;
   function renderOutline() {
-    if (outlineLayer) { map.removeLayer(outlineLayer); outlineLayer = null; }
     const c = countrySel.value;
+    if (c === outlineFor) return; // no layer churn unless the selection changed —
+    outlineFor = c;               // add/remove mid-zoom-animation can wedge Leaflet
+    if (outlineLayer) { map.removeLayer(outlineLayer); outlineLayer = null; }
     if (!c) return;
     const iso3 = data.rows.find((r) => r.country === c)?.iso3;
     const f = world.features.find((f) => f.properties.iso3 === iso3);
@@ -705,7 +707,7 @@
     }
   }
 
-  function fitCountry() {
+  function fitCountry(animate = true) {
     const c = countrySel.value;
     let bounds = null;
     layer.eachLayer((l) => {
@@ -713,10 +715,11 @@
       if (c && (!r || r.country !== c)) return;
       bounds = bounds ? bounds.extend(l.getBounds()) : L.latLngBounds(l.getBounds());
     });
-    // animate:false — an animated fit interrupted mid-flight (re-click, layer churn
-    // from renderOutline) wedges Leaflet's zoom animation and every later fit
-    // silently no-ops (observed: Afghanistan "not zooming").
-    if (bounds) { map.stop(); map.fitBounds(bounds, { padding: [10, 10], animate: false }); }
+    // map.stop() first: an animated fit interrupted mid-flight wedges Leaflet's
+    // zoom animation and every later fit silently no-ops (observed: Afghanistan
+    // "not zooming"). Stopping any in-flight animation before starting the next
+    // keeps the smooth zoom safe.
+    if (bounds) { map.stop(); map.fitBounds(bounds, { padding: [10, 10], animate }); }
   }
   // Valid-season selector options: auto + each valid trimester at this issuance.
   for (const t of data.trimesters ?? []) {
@@ -744,7 +747,7 @@
   window.tabShown = window.tabShown || {};
   window.tabShown.hnrp = () => {
     map.invalidateSize();
-    fitCountry(); // country view if one is selected, world otherwise (non-animated)
+    fitCountry(false); // instant on reveal — the panel just appeared, nothing to glide from
     renderAll(); // paths may mount after the panel becomes visible — restyle then
   };
   renderAll();
