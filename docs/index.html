@@ -320,13 +320,13 @@
 
       <h4>Reading the scatter</h4>
       <p>
-        Both axes divide by the <em>same</em> population base: the closest available proxy
-        for the admin's total population — the larger of the IPC analysed base and the
-        plan's JIAF analysed base; the tooltip names which one. Most IPC/CH analyses cover
-        ~the full population, but several cover only part of the country or of an admin
-        (e.g. Pakistan ~21%, Benin ~21%, Yemen ~30%, Uganda ~32%, Bangladesh ~59% of the
-        national population in the latest round) — there, shares overstate against the
-        true total. A shared denominator makes position compare absolute headcounts: above
+        Both axes divide by the <em>same</em> population base: the admin's total
+        population (UNFPA COD-PS baseline via HDX HAPI; the tooltip shows the reference
+        year, which varies by country's census/projection vintage). Where the baseline is
+        missing (e.g. Yemen), the fallback is the larger of the IPC analysed base and the
+        plan's JIAF analysed base — the tooltip names it — and shares there can overstate
+        against the true total where the analysis covers only part of the population.
+        A shared denominator makes position compare absolute headcounts: above
         the 45° line, more people sit in the severity band than the plan targets (a
         possible coverage gap); below it, targeting exceeds it — and the base does not
         change when the severity source switches. Axes are fixed 0–100%. Every admin with

@@ -1,7 +1,7 @@
 // Forecast × HNRP tab: ADM1 drought forecast vs HNRP severity/targeted caseloads.
 // Three linked views — an ADM1 choropleth (same classification as the Map tab), a
-// scatter (x = % of analysed population in severity 4+, y = targeted as % of analysed
-// population, bubble area = analysed population, fill/hatch = forecast category ×
+// scatter (x = % of total population in severity 4+, y = targeted as % of total
+// population, bubble area = total population, fill/hatch = forecast category ×
 // skill), and the ranked table. Reuses app.js globals: STYLE, classify, catBase,
 // CAT_LABEL, T, buildPatterns.
 (async function () {
@@ -422,13 +422,16 @@
     return data.rows.filter((r) =>
       (!countrySel.value || r.country === countrySel.value) && slotOfAny(r) != null);
   }
-  // Scatter denominator: the closest available proxy for the admin's TOTAL
-  // population — the larger of the IPC analysed base (typically the full admin
-  // population) and the plan's JIAF analysed base. The SAME value divides both
-  // axes, so above/below the 45° line compares absolute headcounts correctly,
-  // and it does not change when the severity source switches.
-  const popOf = (r) => Math.max(ipcComboOf(r)?.tot ?? 0, r.sev_total ?? 0) || null;
+  // Scatter denominator: the admin's TOTAL population (COD-PS baseline via
+  // ds-population-mirror; r.pop, with its reference year in r.pop_year). Units
+  // the baseline misses (e.g. Yemen) fall back to the old proxy — the larger of
+  // the IPC analysed base and the plan's JIAF analysed base. The SAME value
+  // divides both axes, so above/below the 45° line compares absolute headcounts
+  // correctly, and it does not change when the severity source switches.
+  const popOf = (r) =>
+    r.pop ?? (Math.max(ipcComboOf(r)?.tot ?? 0, r.sev_total ?? 0) || null);
   const popSrcOf = (r) => {
+    if (r.pop) return `total population${r.pop_year ? ` ${r.pop_year}` : ""}`;
     const ipc = ipcComboOf(r)?.tot ?? 0, jiaf = r.sev_total ?? 0;
     return !ipc && !jiaf ? null : ipc >= jiaf ? "IPC analysed" : "JIAF analysed";
   };
@@ -469,11 +472,11 @@
       g("line", { x1: M.l, x2: W - M.r, y1: Y(v), y2: Y(v), stroke: "#eef1f1" });
       g("text", { x: M.l - 6, y: Y(v) + 3, "text-anchor": "end", "font-size": 10, fill: "#888" }).textContent = v + "%";
     }
-    // Severity on y, targeted on x. Both shares divide by the SAME analysed
-    // population (named in the axis labels), so position compares absolute
+    // Severity on y, targeted on x. Both shares divide by the SAME population
+    // base (named in the axis labels), so position compares absolute
     // headcounts too: above the 45° line = more people in the severity band than
     // the plan targets (a coverage gap); below = targeting exceeds it.
-    const denom = "% of admin population";
+    const denom = "% of total population";
     g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 13, fill: "#555" })
       .textContent = `Targeted${secTag()} (${denom})`;
     const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 13, fill: "#555" });
