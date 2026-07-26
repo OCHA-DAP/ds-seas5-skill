@@ -190,7 +190,11 @@ footer { color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--lin
 footer p { margin: 4px 0; }
 
 /* ── Forecast × HNRP tab ─────────────────────────────────────────────────── */
-#hnrp-controls { display: flex; flex-direction: column; gap: 9px; margin: 22px 0 14px; }
+#hnrp-controls { display: flex; flex-direction: column; gap: 9px; margin: 22px 0 14px;
+  /* Pinned while scrolling so filters stay reachable from any view. z-index must
+     clear Leaflet's in-map controls (~1000). */
+  position: sticky; top: 0; z-index: 1200; background: var(--hdx-neutral-0);
+  padding: 10px 0 12px; border-bottom: 1px solid var(--hdx-neutral-15); }
 #hnrp-controls .ctl-row { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
 #hnrp-controls .row-tag { min-width: 72px; font-size: 0.72rem; font-weight: 600;
   color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }

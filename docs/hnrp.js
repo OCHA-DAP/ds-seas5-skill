@@ -172,6 +172,16 @@
       opt.textContent = `${IPC_OPT_BASE[opt.value]} — exercises ` +
         `${fmtYM(lo("a"))}–${fmtYM(hi("a"))}, valid ${fmtYM(lo("s"))}–${fmtYM(hi("e"))}`;
     }
+    // A projection that is ALSO the latest estimate for now makes the two choices
+    // identical — offering both would imply different data, so hide the redundant one.
+    const fwdOpt = ipcPeriodSel.querySelector('option[value="fwd"]');
+    if (countrySel.value) {
+      const [cn] = perCountry("now"), [cf] = perCountry("fwd");
+      fwdOpt.hidden = !!(cn && cf && cn.t === cf.t && cn.s === cf.s && cn.e === cf.e);
+      if (fwdOpt.hidden && ipcPeriodSel.value === "fwd") ipcPeriodSel.value = "now";
+    } else {
+      fwdOpt.hidden = false;
+    }
     ipcNoteEl.hidden = !!countrySel.value;
     if (!countrySel.value) {
       ipcNoteEl.textContent =
@@ -284,8 +294,30 @@
     filter: (f) => /Polygon/.test(f.geometry.type),
     // Neutral initial style so nothing flashes Leaflet-blue before renderMap runs.
     style: () => ({ weight: 0.6, fillOpacity: 1, color: "#e2e8e8", fillColor: "#f5f7f7" }),
-    onEachFeature: (f, l) => l.bindTooltip(() => tipHtml(f), { sticky: true }),
+    onEachFeature: (f, l) => {
+      l.bindTooltip(() => tipHtml(f), { sticky: true });
+      // Click-to-focus: clicking a unit selects its country; once one is selected,
+      // clicking anywhere outside it (another country, open sea) returns to the
+      // global view — the map click handler below, unless this stops the event.
+      l.on("click", (e) => {
+        const c = byPcode.get(f.properties.pcode)?.country;
+        if (!countrySel.value && c) {
+          L.DomEvent.stopPropagation(e);
+          countrySel.value = c;
+          countrySel.dispatchEvent(new Event("change"));
+        } else if (c && c === countrySel.value) {
+          L.DomEvent.stopPropagation(e); // clicks inside the focus country keep it
+        }
+        // Focused + clicked another (whited-out) country: fall through — it reads
+        // as backdrop, so the map handler returns to the global view.
+      });
+    },
   }).addTo(map);
+  map.on("click", () => {
+    if (!countrySel.value) return;
+    countrySel.value = "";
+    countrySel.dispatchEvent(new Event("change"));
+  });
   map.fitBounds(layer.getBounds());
   // Selected-country outline: admin-1 borders alone make the country edge hard to
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
