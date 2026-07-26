@@ -216,7 +216,7 @@
       <span><i style="background:#134ead"></i> Strongly above</span>
       <span><i style="background:#b1c1c2"></i> Outside rainy season</span>
       <span><i class="hatched"></i> hatched = moderate skill (solid = high)</span>
-      <span>bubble area = analysed population</span>
+      <span>bubble area = admin population (largest analysed base)</span>
     </div>
 
     <div id="hnrp-bars-wrap" hidden>
@@ -314,16 +314,17 @@
 
       <h4>Reading the scatter</h4>
       <p>
-        Both axes divide by the <em>same</em> total — the severity source's analysed
-        population, named in the axis labels (not the admin's total population; IPC
-        analyses usually cover the full population, but not always) — so position also
-        compares absolute headcounts: above the 45° line, more people sit in the severity
-        band than the plan targets (a possible coverage gap); below it, targeting exceeds
-        it. Axes are fixed 0–100%. Every admin with a displayable forecast plots,
-        regardless of HNRP or IPC membership — areas with no figure for an axis sit at 0%,
-        at the origin if they have neither. The severity bars plot classes 3–5 by default
-        (classes 1–2 dominate populous areas and drown the signal — a checkbox restores
-        them).
+        Both axes divide by the <em>same</em> population base: the closest available proxy
+        for the admin's total population — the larger of the IPC analysed base (typically
+        the full admin population) and the plan's JIAF analysed base; the tooltip names
+        which one. A shared denominator makes position compare absolute headcounts: above
+        the 45° line, more people sit in the severity band than the plan targets (a
+        possible coverage gap); below it, targeting exceeds it — and the base does not
+        change when the severity source switches. Axes are fixed 0–100%. Every admin with
+        a displayable forecast plots, regardless of HNRP or IPC membership — areas with no
+        figure for an axis sit at 0%, at the origin if they have neither. The severity
+        bars plot classes 3–5 by default (classes 1–2 dominate populous areas and drown
+        the signal — a checkbox restores them).
       </p>
     </details>
   </section>

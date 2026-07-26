@@ -392,6 +392,16 @@
     return data.rows.filter((r) =>
       (!countrySel.value || r.country === countrySel.value) && slotOfAny(r) != null);
   }
+  // Scatter denominator: the closest available proxy for the admin's TOTAL
+  // population — the larger of the IPC analysed base (typically the full admin
+  // population) and the plan's JIAF analysed base. The SAME value divides both
+  // axes, so above/below the 45° line compares absolute headcounts correctly,
+  // and it does not change when the severity source switches.
+  const popOf = (r) => Math.max(ipcComboOf(r)?.tot ?? 0, r.sev_total ?? 0) || null;
+  const popSrcOf = (r) => {
+    const ipc = ipcComboOf(r)?.tot ?? 0, jiaf = r.sev_total ?? 0;
+    return !ipc && !jiaf ? null : ipc >= jiaf ? "IPC analysed" : "JIAF analysed";
+  };
 
   function renderScatter() {
     // Square: both axes are population shares, so equal visual weight per axis.
@@ -416,7 +426,7 @@
     const clamp = (v) => Math.min(v ?? 0, 100);
     const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
     const Y = (v) => H - M.b - (v / ymax) * (H - M.t - M.b);
-    const pmax = Math.max(...rows.map((r) => sevTotOf(r) ?? 0), 1);
+    const pmax = Math.max(...rows.map((r) => popOf(r) ?? 0), 1);
     const R = (p) => 4 + 22 * Math.sqrt((p ?? 0) / pmax);
 
     // Recessive grid + axes.
@@ -433,7 +443,7 @@
     // population (named in the axis labels), so position compares absolute
     // headcounts too: above the 45° line = more people in the severity band than
     // the plan targets (a coverage gap); below = targeting exceeds it.
-    const denom = `% of ${ipcMode() ? "IPC" : "JIAF"}-analysed population`;
+    const denom = "% of admin population";
     g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 13, fill: "#555" })
       .textContent = `Targeted${secTag()} (${denom})`;
     const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 13, fill: "#555" });
@@ -452,19 +462,19 @@
     diagLabel(80, -8, `↑ more people in ${sevLabel()} than targeted`);
     diagLabel(80, 16, `↓ more people targeted than in ${sevLabel()}`);
 
-    const xOf = (r) => X(clamp(pctOf(tgtOf(r), sevTotOf(r))));
-    const yOf = (r) => Y(clamp(pctOf(sevValOf(r), sevTotOf(r))));
+    const xOf = (r) => X(clamp(pctOf(tgtOf(r), popOf(r))));
+    const yOf = (r) => Y(clamp(pctOf(sevValOf(r), popOf(r))));
     // Bubbles: big ones first so small ones stay hoverable; 2px surface ring.
-    const sorted = [...rows].sort((a, b) => (sevTotOf(b) ?? 0) - (sevTotOf(a) ?? 0));
+    const sorted = [...rows].sort((a, b) => (popOf(b) ?? 0) - (popOf(a) ?? 0));
     for (const r of sorted) {
       const sl = slotOfAny(r);
       const cat = sl ? classify({ pct: sl.pct, r: sl.r, rainy: sl.rainy }, false) : null;
       const c = g("circle", {
         cx: xOf(r), cy: yOf(r),
-        r: R(sevTotOf(r)), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
+        r: R(popOf(r)), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
       });
       g("circle", {
-        cx: c.getAttribute("cx"), cy: c.getAttribute("cy"), r: R(sevTotOf(r)),
+        cx: c.getAttribute("cx"), cy: c.getAttribute("cy"), r: R(popOf(r)),
         fill: "none", stroke: STYLE[cat][1], "stroke-width": 1,
       });
       c.style.cursor = "pointer";
@@ -473,11 +483,11 @@
         tip.hidden = false;
         const combo = ipcMode() ? ipcComboOf(r) : null;
         tip.innerHTML = `<strong>${r.name ?? r.pcode}</strong> — ${r.country ?? r.iso3}<br>` +
-          `${sevLabel()}${combo ? ` (${comboDesc(combo)})` : ""}: ${fmtN(sevValOf(r))} (${fmt(pctOf(sevValOf(r), sevTotOf(r)), 1)}%)<br>` +
+          `${sevLabel()}${combo ? ` (${comboDesc(combo)})` : ""}: ${fmtN(sevValOf(r))} (${fmt(pctOf(sevValOf(r), popOf(r)), 1)}%)<br>` +
           (tgtOf(r) == null
             ? `Targeted${secTag()}: – ${inHnrp(r) ? "(no figure)" : "(not in an HNRP)"}<br>`
-            : `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), sevTotOf(r)), 1)}%)<br>`) +
-          `Analysed population: ${fmtN(sevTotOf(r))}<br>` +
+            : `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), popOf(r)), 1)}%)<br>`) +
+          `Population base: ${fmtN(popOf(r))}${popSrcOf(r) ? ` (${popSrcOf(r)})` : ""}<br>` +
           (s ? `<strong>${s.key}</strong>${s.lead < 0 ? " · in season" : ""}: RP ${fmt(s.rp, 1)} yr, pct ${fmt(s.pct, 1)}, r ${fmt(s.r, 2)}` : "");
       });
       c.addEventListener("mousemove", (ev) => {
@@ -488,10 +498,10 @@
       c.addEventListener("mouseleave", () => { tip.hidden = true; });
     }
 
-    // Selective direct labels: the 6 largest analysed populations.
+    // Selective direct labels: the 6 largest population bases.
     for (const r of sorted.slice(0, 6)) {
       g("text", {
-        x: xOf(r), y: yOf(r) - R(sevTotOf(r)) - 4,
+        x: xOf(r), y: yOf(r) - R(popOf(r)) - 4,
         "text-anchor": "middle", "font-size": 10, fill: "#333",
       }).textContent = r.name ?? r.pcode;
     }
