@@ -207,11 +207,11 @@ footer p { margin: 4px 0; }
 .hnrp-h { margin: 28px 0 8px; font-size: 1rem; }
 .stale-flag { color: var(--hdx-primary-5); cursor: help; font-weight: 700; }
 /* Per-admin trimester codes on the map (selected-country view): bare text with a
-   white halo, no tooltip chrome. */
-.tri-map-label { background: transparent; border: none; box-shadow: none; padding: 0;
-  font-size: 10px; font-weight: 700; color: #1d2021;
+   white halo, centred on the anchor point (the divIcon anchors top-left). */
+.tri-map-label-wrap { background: none; border: none; }
+.tri-map-label { display: inline-block; transform: translate(-50%, -50%);
+  white-space: nowrap; font-size: 10px; font-weight: 700; color: #1d2021;
   text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
-.tri-map-label::before { display: none; }
 #hnrp-note { margin-top: 6px; }
 #hnrp-note summary { cursor: pointer; font-weight: 600; color: var(--hdx-neutral-8);
   font-size: 0.85rem; }

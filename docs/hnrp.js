@@ -369,10 +369,16 @@
       if (!r || r.country !== sel) return;
       const s = slotOf(r);
       if (!s) return;
-      triLabels.addLayer(L.tooltip({
-        permanent: true, direction: "center", className: "tri-map-label",
-        opacity: 1, interactive: false,
-      }).setLatLng(l.getBounds().getCenter()).setContent(s.key));
+      // Markers, not standalone tooltips: DivOverlay tooltips mis-anchor after
+      // interrupted/fractional zoom animations (labels drifting west, wedged
+      // zooms); markers track the view exactly.
+      triLabels.addLayer(L.marker(l.getBounds().getCenter(), {
+        interactive: false, keyboard: false,
+        icon: L.divIcon({
+          className: "tri-map-label-wrap", iconSize: null,
+          html: `<span class="tri-map-label">${s.key}</span>`,
+        }),
+      }));
     });
   }
   function renderMap() {
@@ -807,7 +813,10 @@
   }
   barSortSel.addEventListener("change", renderBars);
   barsFullEl.addEventListener("change", renderBars);
-  countrySel.addEventListener("change", () => { renderAll(); fitCountry(); });
+  // finally: whatever happens during re-render, the zoom step must still run.
+  countrySel.addEventListener("change", () => {
+    try { renderAll(); } finally { fitCountry(); }
+  });
 
   // Hidden-panel sizing: (re)fit when the tab becomes visible.
   window.tabShown = window.tabShown || {};
