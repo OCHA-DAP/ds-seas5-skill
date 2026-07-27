@@ -428,16 +428,20 @@
     return data.rows.filter((r) =>
       (!countrySel.value || r.country === countrySel.value) && slotOfAny(r) != null);
   }
-  // Scatter denominator: the admin's TOTAL population (COD-PS baseline via
-  // ds-population-mirror; r.pop, with its reference year in r.pop_year). Units
-  // the baseline misses (e.g. Yemen) fall back to the old proxy — the larger of
+  // Scatter denominator, layered per unit: (1) COD-PS total-population baseline
+  // (ds-population-mirror), (2) the plan's own HNO/JIAF baseline total where
+  // COD-PS is missing or distrusted (r.pop_src says which; e.g. all of Yemen is
+  // HNO — no COD-PS in HAPI), (3) the analysed-population proxy — the larger of
   // the IPC analysed base and the plan's JIAF analysed base. The SAME value
   // divides both axes, so above/below the 45° line compares absolute headcounts
   // correctly, and it does not change when the severity source switches.
   const popOf = (r) =>
     r.pop ?? (Math.max(ipcComboOf(r)?.tot ?? 0, r.sev_total ?? 0) || null);
   const popSrcOf = (r) => {
-    if (r.pop) return `total population${r.pop_year ? ` ${r.pop_year}` : ""}`;
+    if (r.pop) {
+      return `total population, ${r.pop_src === "HNO" ? "HNO baseline" : "COD-PS"}` +
+        (r.pop_year ? ` ${r.pop_year}` : "");
+    }
     const ipc = ipcComboOf(r)?.tot ?? 0, jiaf = r.sev_total ?? 0;
     return !ipc && !jiaf ? null : ipc >= jiaf ? "IPC analysed" : "JIAF analysed";
   };

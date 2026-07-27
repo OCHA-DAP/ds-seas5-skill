@@ -454,6 +454,46 @@ def load_population_adm1() -> pd.DataFrame:
     return df.drop(columns=["reference_period_end"])
 
 
+def load_hno_pop_adm1() -> pd.DataFrame:
+    """Total population per ADM1 unit from the HNO/JIAF baseline (hpc.needs_admin,
+    population_status='all'): each plan's own population base, self-consistent with
+    the PiN/targeted figures on the axes. Second fallback layer for the scatter
+    denominator — covers the countries the COD-PS baseline misses (YEM has no
+    COD-PS in HAPI at all) or where its census vintage is distrusted (MLI, SDN…).
+    """
+    engine = stratus.get_engine("dev")
+    q = """
+    SELECT location_code AS iso3, admin1_code, admin1_name AS name, admin2_code,
+           admin_level, population, reference_period_start
+    FROM hpc.needs_admin
+    WHERE population_status = 'all' AND lower(COALESCE(category, '')) IN ('total', '')
+      AND admin_level >= 1 AND admin1_code IS NOT NULL
+    """
+    with engine.connect() as conn:
+        df = pd.read_sql(q, conn, parse_dates=["reference_period_start"])
+    rows = []
+    for iso3, g in df.groupby("iso3"):
+        ref = g["reference_period_start"].max()
+        g = g[g["reference_period_start"] == ref]
+        lvl = min(g["admin_level"].unique())  # prefer admin-1 rows, else sum admin-2+
+        g = g[g["admin_level"] == lvl]
+        # One row per finest unit, or the sum double-counts (dup check, not assumed).
+        key = ["admin1_code"] if lvl == 1 else ["admin1_code", "admin2_code"]
+        dup = g.duplicated(key, keep=False)
+        if dup.any():
+            print(f"  hno-pop: {iso3} has {int(dup.sum())} duplicated unit row(s) "
+                  f"at level {lvl} — kept first per unit")
+            g = g.drop_duplicates(key)
+        a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["name"]
+        tot = g.groupby("admin1_code")["population"].sum()
+        rows += [{"pcode": p, "iso3": iso3, "name": a1names.get(p),
+                  "hno_pop": int(v), "hno_year": int(ref.year)}
+                 for p, v in tot.items() if pd.notna(v)]
+    out = pd.DataFrame(rows)
+    print(f"HNO baseline: {out['iso3'].nunique()} countries, {len(out)} ADM1 units")
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rebuild-geometry", action="store_true",
@@ -483,6 +523,9 @@ def main() -> None:
     df_pop = (df_pop.groupby("pcode", as_index=False)
               .agg({"population": "sum", "pop_year": "max"})
               .rename(columns={"population": "pop"}))
+    df_hno = normalize_pcodes(load_hno_pop_adm1(), poly, "hno-pop")
+    df_hno = (df_hno.groupby("pcode", as_index=False)
+              .agg({"hno_pop": "sum", "hno_year": "max"}))
     ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
     df_ipc = (df_ipc.groupby(["pcode", "t", "s", "e"], as_index=False)
               .agg({**{f"p{ph}": "sum" for ph in ["1", "2", "3", "4", "5", "all"]},
@@ -654,9 +697,30 @@ def main() -> None:
               f"mis-coding or analysed > 1.3x total): "
               f"{sorted(set(merged.loc[bad, 'iso3'] + ':' + merged.loc[bad, 'pcode']))}")
         merged.loc[bad, ["pop", "pop_year"]] = float("nan")
+    merged["pop_src"] = None
+    merged.loc[merged["pop"].notna(), "pop_src"] = "COD-PS"
+    # Layer 2: the HNO/JIAF baseline fills units the COD-PS layer left empty
+    # (missing upstream or distrust-nulled). An HNO total clearly below the
+    # analysed population can't be a valid denominator either — logged and
+    # skipped. 5% headroom: the same plan's severity analysis often uses a
+    # slightly newer population estimate (YEM 2026 JIAF runs 99–104% of the
+    # 2025 HNO 'all' base) — vintage jitter, not a broken denominator.
+    merged = merged.merge(df_hno, on="pcode", how="left")
+    hno_low = (merged["pop"].isna() & merged["hno_pop"].notna()
+               & (analysed > 1.05 * merged["hno_pop"]))
+    if hno_low.any():
+        print(f"  hno-pop: {int(hno_low.sum())} unit(s) have HNO total < analysed "
+              f"population, skipped: "
+              f"{sorted(set(merged.loc[hno_low, 'iso3'] + ':' + merged.loc[hno_low, 'pcode']))}")
+    use_hno = merged["pop"].isna() & merged["hno_pop"].notna() & ~hno_low
+    merged.loc[use_hno, "pop"] = merged.loc[use_hno, "hno_pop"]
+    merged.loc[use_hno, "pop_year"] = merged.loc[use_hno, "hno_year"]
+    merged.loc[use_hno, "pop_src"] = "HNO"
+    merged = merged.drop(columns=["hno_pop", "hno_year"])
     n_pop = merged["pop"].notna().sum()
     print(f"Population baseline covers {n_pop}/{len(merged)} units "
-          f"(the rest fall back to the analysed-population proxy)")
+          f"(COD-PS {int((merged['pop_src'] == 'COD-PS').sum())}, "
+          f"HNO {int(use_hno.sum())}; the rest fall back to the analysed proxy)")
     # COD name where we have the polygon; the plan's own name for unmatched units.
     merged["name"] = merged["name"].combine_first(merged["name_hum"])
     merged = merged.drop(columns=["name_hum"])

@@ -330,11 +330,13 @@
       <h4>Reading the scatter</h4>
       <p>
         Both axes divide by the <em>same</em> population base: the admin's total
-        population (UNFPA COD-PS baseline via HDX HAPI; the tooltip shows the reference
-        year, which varies by country's census/projection vintage). Where the baseline is
-        missing (e.g. Yemen), the fallback is the larger of the IPC analysed base and the
-        plan's JIAF analysed base — the tooltip names it — and shares there can overstate
-        against the true total where the analysis covers only part of the population.
+        population — the UNFPA COD-PS baseline via HDX HAPI where present and trusted,
+        else the plan's own HNO/JIAF baseline total (self-consistent with the
+        PiN/targeted figures; e.g. all of Yemen, which has no COD-PS in HAPI). The
+        tooltip names the source and reference year. Where neither exists, the fallback
+        is the larger of the IPC analysed base and the plan's JIAF analysed base — and
+        shares there can overstate against the true total where the analysis covers only
+        part of the population.
         A shared denominator makes position compare absolute headcounts: above
         the 45° line, more people sit in the severity band than the plan targets (a
         possible coverage gap); below it, targeting exceeds it — and the base does not
