@@ -197,6 +197,12 @@
         <label class="ctl">
           <select id="hnrp-country" class="map-select"><option value="">All</option></select>
         </label>
+        <label class="ctl">Admin level
+          <select id="hnrp-adm" class="map-select">
+            <option value="1" selected>Admin 1</option>
+            <option value="2">Admin 2</option>
+          </select>
+        </label>
         <span id="hnrp-issued" class="lock-note"></span>
       </div>
     </div>
@@ -321,6 +327,20 @@
         later are included; countries whose series stalled earlier (Ethiopia 2021,
         Angola/El Salvador 2022, Burkina Faso Aug 2024, Timor-Leste 2024) carry no IPC
         here.
+      </p>
+
+      <h4>Admin levels</h4>
+      <p>
+        The <strong>Admin level</strong> selector switches the whole tab between admin-1
+        (all 45 countries) and admin-2 (~5,000 units across the 22 in-scope countries
+        that have admin-2 boundaries and zonal statistics in our database: AFG, BFA,
+        CAF, CMR, COD, COL, GTM, HND, HTI, MLI, MMR, MOZ, NER, NGA, SDN, SLV, SOM,
+        SSD, TCD, UKR, VEN, YEM — the rest lack admin-2 polygons on our side and are
+        excluded on that basis). Figures published only at admin-1 cannot be downscaled
+        and show dashes at admin-2. Forecast skill at admin-2 is computed identically,
+        per unit; smaller units are noisier, so treat marginal signals with extra
+        caution. The table shows at most 500 rows at a time; admin-2 unit names carry
+        their admin-1 parent in parentheses.
       </p>
 
       <h4>IPC estimate periods</h4>

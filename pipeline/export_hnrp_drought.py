@@ -47,6 +47,24 @@ OUT = HERE.parent / "docs" / "data" / "hnrp_drought.json"
 GEO_OUT = HERE.parent / "docs" / "data" / "hnrp_adm1.geojson"
 SIMPLIFY_TOLERANCE = 0.02  # per-country topology-preserving simplify (adm1 scale)
 
+# Admin level of the whole export (--level). Level 2 swaps the grouping key, the
+# skill stats blob, output filenames, and a coarser simplify (5k+ polygons); the
+# scope self-restricts to countries with adm2 polygons/zonal stats (22 of 45 —
+# the rest have no adm2 in public.polygon and are excluded on that basis).
+LEVEL = 1
+ACODE, ANAME = "admin1_code", "admin1_name"
+
+
+def _set_level(level: int) -> None:
+    global LEVEL, ACODE, ANAME, SKILL_BLOB, OUT, GEO_OUT, SIMPLIFY_TOLERANCE
+    LEVEL = level
+    if level == 2:
+        ACODE, ANAME = "admin2_code", "admin2_name"
+        SKILL_BLOB = f"{PROJECT_PREFIX}/processed/skill_stats_detrended_adm2.parquet"
+        OUT = HERE.parent / "docs" / "data" / "hnrp_drought_adm2.json"
+        GEO_OUT = HERE.parent / "docs" / "data" / "hnrp_adm2.geojson"
+        SIMPLIFY_TOLERANCE = 0.03
+
 
 def export_geometry(isos: list[str], names: dict[str, str]) -> None:
     """ADM1 boundaries for the HNRP countries -> one simplified geojson.
@@ -60,13 +78,14 @@ def export_geometry(isos: list[str], names: dict[str, str]) -> None:
     for iso3 in isos:
         try:
             g = stratus.load_shp_from_blob(
-                f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm1.shp",
+                f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm{LEVEL}.shp",
                 stage="prod", container_name="polygon",
             )
         except Exception as e:  # noqa: BLE001 — a missing country shouldn't kill the export
             print(f"  {iso3}: boundary load failed ({type(e).__name__}), skipped")
             continue
-        pcol = next((c for c in g.columns if c.lower() in ("adm1_pcode", "pcode")), None)
+        pcol = next((c for c in g.columns
+                     if c.lower() in (f"adm{LEVEL}_pcode", "pcode")), None)
         if pcol is None:
             print(f"  {iso3}: no pcode column, skipped")
             continue
@@ -215,16 +234,18 @@ def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     # health-zone/township level ONLY — every row still carries admin1_code, so
     # they roll up like admin-2 rows do. Blank sector codes are indicator noise
     # ("Max value of indicators…"), not caseloads.
-    q = """
+    q = f"""
     SELECT location_code, sector_code, sector_name, admin1_code, admin1_name,
+           admin2_code, admin2_name,
            admin_level, population_status, population, reference_period_start
     FROM hpc.needs_admin
     WHERE category = 'total' AND population_status IN ('INN', 'TGT')
-      AND admin_level IN (1, 2, 3) AND COALESCE(sector_code, '') <> ''
-      AND admin1_code IS NOT NULL
+      AND admin_level IN ({LEVEL}, 2, 3) AND COALESCE(sector_code, '') <> ''
+      AND {ACODE} IS NOT NULL
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_start"])
+    df = df[df["admin_level"] >= LEVEL]  # coarser rows can't be downscaled
     # A country only belongs here while it HAS a current plan: newest cycle must be
     # this year or last. Per-unit fallback to the previous cycle (flagged) is fine
     # WITHIN such a country, but a country whose newest subnational needs are older
@@ -269,10 +290,10 @@ def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
         ent: dict[str, dict] = {}
         for ref in refs:
             gr = g[g["reference_period_start"] == ref]
-            lvl = min(gr["admin_level"].unique())  # prefer 1, else 2, else 3
+            lvl = min(gr["admin_level"].unique())  # prefer the coarsest at/below LEVEL
             gr = gr[gr["admin_level"] == lvl]
-            a1names = gr.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
-            agg = gr.groupby(["admin1_code", "population_status"])["population"].sum().unstack()
+            a1names = gr.drop_duplicates(ACODE).set_index(ACODE)[ANAME]
+            agg = gr.groupby([ACODE, "population_status"])["population"].sum().unstack()
             yr = int(pd.Timestamp(ref).year)
             for pcode, r in agg.iterrows():
                 e = ent.setdefault(pcode, {"name": a1names.get(pcode), "lvl": lvl})
@@ -320,11 +341,13 @@ def load_severity_adm1() -> pd.DataFrame:
     """
     engine = stratus.get_engine("dev")
     q = """
-    SELECT iso3, year, admin1_code, admin1_name, population_group, final_severity, population
+    SELECT iso3, year, admin1_code, admin1_name, admin2_code, admin2_name,
+           population_group, final_severity, population
     FROM hpc.severity_admin
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn)
+    df = df[df[ACODE].notna()]
     df = df[df["year"] == df.groupby("iso3")["year"].transform("max")]
     df["population_group"] = df["population_group"].fillna("")
 
@@ -336,8 +359,8 @@ def load_severity_adm1() -> pd.DataFrame:
         # only the most inclusive one may be used; or disjoint displacement categories
         # (Mali: PDI / Rapatries / Communauté Hôte / …) which partition the analysed
         # population and must be summed.
-        units = g.groupby("population_group")["admin1_code"].nunique()
-        n_units = g["admin1_code"].nunique()
+        units = g.groupby("population_group")[ACODE].nunique()
+        n_units = g[ACODE].nunique()
         if units.get("", 0) >= 0.5 * n_units:
             g = g[g["population_group"] == ""]
         elif "Global_Population" in units.index:
@@ -346,12 +369,12 @@ def load_severity_adm1() -> pd.DataFrame:
             top = g.groupby("population_group")["population"].sum().idxmax()
             g = g[g["population_group"] == top]
         # else: disjoint categories — keep all rows and let the sums add them up.
-        a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
-        sev4 = g[g["final_severity"] >= 4].groupby("admin1_code")["population"].sum()
-        total = g.groupby("admin1_code")["population"].sum()
+        a1names = g.drop_duplicates(ACODE).set_index(ACODE)[ANAME]
+        sev4 = g[g["final_severity"] >= 4].groupby(ACODE)["population"].sum()
+        total = g.groupby(ACODE)["population"].sum()
         # Full class breakdown (each source row carries ONE final_severity 1-5 for its
         # population; an admin-1's distribution comes from its sub-units' classes).
-        by_class = g.pivot_table(index="admin1_code", columns="final_severity",
+        by_class = g.pivot_table(index=ACODE, columns="final_severity",
                                  values="population", aggfunc="sum")
         for pcode, tot in total.items():
             row = {
@@ -381,12 +404,13 @@ def load_ipc_adm1() -> pd.DataFrame:
     engine = stratus.get_engine("dev")
     # Recency: analyses valid in 2025 or later. Dead/stalled series (ETH 2021,
     # AGO/SLV 2022, BFA 2024-08, TLS 2024-09) are excluded as too old to act on.
-    q = """
-    SELECT location_code, admin1_code, admin1_name, admin_level, ipc_phase, ipc_type,
+    q = f"""
+    SELECT location_code, admin1_code, admin1_name, admin2_code, admin2_name,
+           admin_level, ipc_phase, ipc_type,
            population_in_phase, reference_period_start, reference_period_end
     FROM ipc.population_admin
-    WHERE admin_level IN (1, 2) AND ipc_phase IN ('1', '2', '3', '4', '5', 'all')
-      AND admin1_code IS NOT NULL AND reference_period_end >= '2025-01-01'
+    WHERE admin_level IN ({LEVEL}, 2) AND ipc_phase IN ('1', '2', '3', '4', '5', 'all')
+      AND {ACODE} IS NOT NULL AND reference_period_end >= '2025-01-01'
     """
     # HAPI rows carry only the validity window; the exercise (analysis) date lives in
     # the per-country HDX table. (country, period type, window) joins it back 1:1.
@@ -406,11 +430,11 @@ def load_ipc_adm1() -> pd.DataFrame:
     for (loc, t, s, e), g in df.groupby(
         ["location_code", "ipc_type", "reference_period_start", "reference_period_end"]
     ):
-        lvl = 1 if (g["admin_level"] == 1).any() else 2
+        lvl = min(g["admin_level"].unique())  # coarsest at/below LEVEL
         g = g[g["admin_level"] == lvl]
-        piv = g.pivot_table(index="admin1_code", columns="ipc_phase",
+        piv = g.pivot_table(index=ACODE, columns="ipc_phase",
                             values="population_in_phase", aggfunc="sum")
-        a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
+        a1names = g.drop_duplicates(ACODE).set_index(ACODE)[ANAME]
         adate = g["analysis_date"].max()
         for pcode in piv.index:
             row = {"pcode": pcode, "iso3": loc, "name": a1names.get(pcode),
@@ -434,11 +458,11 @@ def load_population_adm1() -> pd.DataFrame:
     name-matching units HAPI ships with *-XXX placeholder codes).
     """
     engine = stratus.get_engine("dev")
-    q = """
-    SELECT location_code AS iso3, admin1_code AS pcode, admin1_name AS name,
+    q = f"""
+    SELECT location_code AS iso3, {ACODE} AS pcode, {ANAME} AS name,
            population, reference_period_end
     FROM pop.population_admin
-    WHERE admin_level = 1 AND admin1_code IS NOT NULL
+    WHERE admin_level = {LEVEL} AND {ACODE} IS NOT NULL
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_end"])
@@ -462,12 +486,12 @@ def load_hno_pop_adm1() -> pd.DataFrame:
     COD-PS in HAPI at all) or where its census vintage is distrusted (MLI, SDN…).
     """
     engine = stratus.get_engine("dev")
-    q = """
-    SELECT location_code AS iso3, admin1_code, admin1_name AS name, admin2_code,
-           admin_level, population, reference_period_start
+    q = f"""
+    SELECT location_code AS iso3, admin1_code, {ANAME} AS name, admin2_code,
+           admin3_code, admin_level, population, reference_period_start
     FROM hpc.needs_admin
     WHERE population_status = 'all' AND lower(COALESCE(category, '')) IN ('total', '')
-      AND admin_level >= 1 AND admin1_code IS NOT NULL
+      AND admin_level >= {LEVEL} AND {ACODE} IS NOT NULL
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_start"])
@@ -475,17 +499,17 @@ def load_hno_pop_adm1() -> pd.DataFrame:
     for iso3, g in df.groupby("iso3"):
         ref = g["reference_period_start"].max()
         g = g[g["reference_period_start"] == ref]
-        lvl = min(g["admin_level"].unique())  # prefer admin-1 rows, else sum admin-2+
+        lvl = min(g["admin_level"].unique())  # prefer the coarsest at/below LEVEL
         g = g[g["admin_level"] == lvl]
         # One row per finest unit, or the sum double-counts (dup check, not assumed).
-        key = ["admin1_code"] if lvl == 1 else ["admin1_code", "admin2_code"]
+        key = ["admin1_code", "admin2_code", "admin3_code"][:max(lvl, LEVEL)]
         dup = g.duplicated(key, keep=False)
         if dup.any():
             print(f"  hno-pop: {iso3} has {int(dup.sum())} duplicated unit row(s) "
                   f"at level {lvl} — kept first per unit")
             g = g.drop_duplicates(key)
-        a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["name"]
-        tot = g.groupby("admin1_code")["population"].sum()
+        a1names = g.drop_duplicates(ACODE).set_index(ACODE)["name"]
+        tot = g.groupby(ACODE)["population"].sum()
         rows += [{"pcode": p, "iso3": iso3, "name": a1names.get(p),
                   "hno_pop": int(v), "hno_year": int(ref.year)}
                  for p, v in tot.items() if pd.notna(v)]
@@ -497,19 +521,37 @@ def load_hno_pop_adm1() -> pd.DataFrame:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rebuild-geometry", action="store_true",
-                    help="Rewrite the adm1 geojson even if it already exists (it is "
+                    help="Rewrite the geojson even if it already exists (it is "
                          "stable between runs; the default skips it when present).")
+    ap.add_argument("--level", type=int, choices=(1, 2), default=1,
+                    help="Admin level of the export (2 writes *_adm2 outputs)")
     args = ap.parse_args()
+    _set_level(args.level)
 
-    print(f"Loading ADM1 skill stats: {SKILL_BLOB}")
+    print(f"Loading ADM{LEVEL} skill stats: {SKILL_BLOB}")
     skill = stratus.load_parquet_from_blob(SKILL_BLOB, stage="dev")
 
     engine = stratus.get_engine("prod")
     with engine.connect() as conn:
-        poly = pd.read_sql("SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=1", conn)
+        poly = pd.read_sql(
+            f"SELECT pcode, iso3, name FROM public.polygon WHERE adm_level={LEVEL}", conn)
         country_names = pd.read_sql(
             "SELECT iso3, name FROM public.polygon WHERE adm_level=0", conn,
         ).set_index("iso3")["name"].to_dict()
+        # Parent admin-1 names for level-2 rows (tooltips/table): no parent column
+        # exists, but COD adm2 pcodes extend their adm1 parent's pcode.
+        parent_names: dict[str, str] = {}
+        if LEVEL == 2:
+            p1 = pd.read_sql(
+                "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=1", conn)
+            a1_by_iso = {i: sorted(g_["pcode"], key=len, reverse=True)
+                         for i, g_ in p1.groupby("iso3")}
+            a1_names = p1.set_index("pcode")["name"].to_dict()
+            for _, r in poly.iterrows():
+                par = next((c for c in a1_by_iso.get(r["iso3"], [])
+                            if str(r["pcode"]).startswith(c)), None)
+                if par:
+                    parent_names[r["pcode"]] = a1_names[par]
     names = poly.set_index("pcode")["name"].to_dict()
 
     print("Reconciling humanitarian pcodes to the COD vintage...")
@@ -725,6 +767,8 @@ def main() -> None:
     merged["name"] = merged["name"].combine_first(merged["name_hum"])
     merged = merged.drop(columns=["name_hum"])
     merged["country"] = merged["iso3"].map(country_names)
+    if LEVEL == 2:
+        merged["parent"] = merged["pcode"].map(parent_names)
     n_signal = merged["rp"].notna().sum()
     print(f"{len(merged)} HNRP ADM1 units; {n_signal} with a qualifying drought signal")
 
@@ -773,6 +817,7 @@ def main() -> None:
         return out
 
     payload = {
+        "adm_level": LEVEL,
         "issued_label": issued_label,
         "issued_month": int(issued_month),
         "issued_year": int(global_max_iy),

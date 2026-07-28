@@ -5,16 +5,41 @@
 // skill), and the ranked table. Reuses app.js globals: STYLE, classify, catBase,
 // CAT_LABEL, T, buildPatterns.
 (async function () {
+  // Admin level via ?adm=2: switching reloads the page with the adm2 payload —
+  // the whole tab is data-driven, so a reload is the simplest correct switch.
+  let ADM = new URLSearchParams(location.search).get("adm") === "2" ? 2 : 1;
+  const files = (lvl) => [
+    lvl === 2 ? "data/hnrp_drought_adm2.json" : "data/hnrp_drought.json",
+    lvl === 2 ? "data/hnrp_adm2.geojson" : "data/hnrp_adm1.geojson",
+  ];
   let data, geo, world;
   try {
-    [data, geo, world] = await Promise.all([
-      fetch("data/hnrp_drought.json").then((r) => r.json()),
-      fetch("data/hnrp_adm1.geojson").then((r) => r.json()),
-      fetch("data/countries.geojson").then((r) => r.json()),
-    ]);
+    world = await fetch("data/countries.geojson").then((r) => r.json());
+    try {
+      [data, geo] = await Promise.all(
+        files(ADM).map((f) => fetch(f).then((r) => (r.ok ? r.json() : Promise.reject(r)))));
+    } catch {
+      if (ADM === 2) { // adm2 payload not built yet — fall back rather than a blank tab
+        ADM = 1;
+        [data, geo] = await Promise.all(
+          files(1).map((f) => fetch(f).then((r) => r.json())));
+      } else { throw new Error("no data"); }
+    }
   } catch {
     return; // data files not built yet — leave the tab empty
   }
+  const admSel = document.getElementById("hnrp-adm");
+  admSel.value = String(ADM);
+  document.querySelector(".hnrp-h").textContent = `Severity vs targeted, per admin ${ADM}`;
+  // Parent admin-1 name qualifies adm2 units (district names repeat across regions).
+  const dispName = (r) => (r.parent ? `${r.name ?? r.pcode} (${r.parent})` : (r.name ?? r.pcode));
+  admSel.addEventListener("change", () => {
+    const u = new URL(location.href);
+    if (admSel.value === "2") u.searchParams.set("adm", "2");
+    else u.searchParams.delete("adm");
+    u.hash = "hnrp";
+    location.href = u.toString();
+  });
 
   const skillSel = document.getElementById("hnrp-skill");
   const rpSel = document.getElementById("hnrp-rp");
@@ -302,7 +327,7 @@
       ? `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>`
       : `<div class="cat" style="color:#9db1b3">${member ? "In HNRP" : "IPC-covered, not in an HNRP"}` +
         ` — ${droughtOnly() ? "no qualifying drought signal" : "no forecast data"}</div>`;
-    return `<div class="name">${p.name ?? p.pcode}</div>` + catLine + rows;
+    return `<div class="name">${dispName(r)}</div>` + catLine + rows;
   };
   // World countries beneath as context (non-interactive, like the Map tab's backdrop).
   L.geoJSON(world, {
@@ -374,6 +399,9 @@
     triLabels.clearLayers();
     const sel = countrySel.value;
     if (!sel) return;
+    // At adm2 a country can have 1,000+ units (Colombia) — label soup. Cap it.
+    const nShown = data.rows.filter((r) => r.country === sel && slotOf(r)).length;
+    if (nShown > 150) return;
     layer.eachLayer((l) => {
       const r = byPcode.get(l.feature.properties.pcode);
       if (!r || r.country !== sel) return;
@@ -529,7 +557,7 @@
         const s = slotOfAny(r);
         tip.hidden = false;
         const combo = ipcMode() ? ipcComboOf(r) : null;
-        tip.innerHTML = `<strong>${r.name ?? r.pcode}</strong> — ${r.country ?? r.iso3}<br>` +
+        tip.innerHTML = `<strong>${dispName(r)}</strong> — ${r.country ?? r.iso3}<br>` +
           `${sevLabel()}${combo ? ` (${comboDesc(combo)})` : ""}: ${fmtN(sevValOf(r))} (${fmt(pctOf(sevValOf(r), popOf(r)), 1)}%)<br>` +
           (tgtOf(r) == null
             ? `Targeted${secTag()}: – ${inHnrp(r) ? "(no figure)" : "(not in an HNRP)"}<br>`
@@ -631,15 +659,15 @@
     barsHint.hidden = rows.length > 0;
     if (!rows.length) return;
     if (pinMode()) {
-      barsTitle.textContent = `${country} — PiN${secTag()} per admin 1` +
+      barsTitle.textContent = `${country} — PiN${secTag()} per admin ${ADM}` +
         ` (plan data ${planYrOf(rows[0]) ?? "–"})`;
     } else if (ipcMode()) {
       const c = ipcComboOf(rows[0]);
-      barsTitle.textContent = `${country} — population by IPC/CH phase, per admin 1` +
+      barsTitle.textContent = `${country} — population by IPC/CH phase, per admin ${ADM}` +
         (c ? ` (${comboDesc(c)})` : "");
     } else {
       barsTitle.textContent = `${country} — population living in areas at each JIAF class, ` +
-        `per admin 1 (analysis year ${rows[0].sev_year ?? "–"})`;
+        `per admin ${ADM} (analysis year ${rows[0].sev_year ?? "–"})`;
     }
 
     const W = barsSvg.parentElement.clientWidth || 900;
@@ -722,7 +750,7 @@
   // ── Table ────────────────────────────────────────────────────────────────────
   const COLS = [
     { key: "country", label: "Country", num: false },
-    { key: "name", label: "Admin 1", num: false },
+    { key: "name", label: `Admin ${ADM}`, num: false },
     { key: "_plan_yr", label: "Plan", num: true },
     { key: "sev4", label: "Severity 4+ pop", num: true },
     { key: "pin", label: "PiN", num: true },
@@ -774,7 +802,10 @@
     });
     tbody.innerHTML = "";
     emptyEl.hidden = rs.length > 0;
-    for (const r of rs) {
+    // DOM guard for adm2 (potentially thousands of qualifying rows): render the
+    // top 500 under the current sort, and say so.
+    const capped = rs.length > 500;
+    for (const r of rs.slice(0, 500)) {
       const tr = document.createElement("tr");
       const s = slotOf(r);
       // Pale wash of the forecast-category colour, tying rows to the map/scatter.
@@ -783,7 +814,7 @@
       const skillCls = s && s.r >= T.r_high ? "skill-high" : "skill-mod";
       tr.innerHTML =
         `<td>${r.country ?? r.iso3}</td>` +
-        `<td>${r.name ?? r.pcode}</td>` +
+        `<td>${dispName(r)}</td>` +
         `<td class="num">${planYrOf(r) ?? "–"}</td>` +
         `<td class="num">${fmtN(sevValOf(r))}</td>` +
         `<td class="num">${fmtN(pinOf(r))}</td>` +
@@ -793,6 +824,13 @@
         `<td class="num">${fmt(s?.rp, 1)}</td>` +
         `<td class="num">${fmt(s?.pct, 1)}</td>` +
         `<td class="num ${skillCls}">${fmt(s?.r, 2)}</td>`;
+      tbody.appendChild(tr);
+    }
+    if (capped) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td colspan="${COLS.length}" style="color:var(--muted);font-style:italic">` +
+        `Showing the top 500 of ${rs.length.toLocaleString("en-US")} matching areas — ` +
+        `narrow with the filters or sort to bring others into view.</td>`;
       tbody.appendChild(tr);
     }
   }
