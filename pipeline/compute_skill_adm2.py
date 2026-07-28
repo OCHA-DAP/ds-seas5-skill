@@ -46,7 +46,7 @@ PARTIALS = {
     "skill_dt":  CHECKPOINT_DIR / "skill_dt_partial.parquet",
     "paired_dt": CHECKPOINT_DIR / "paired_dt_partial.parquet",
 }
-SAVE_EVERY = 100  # checkpoint after this many ADM2 units
+SAVE_EVERY = 25  # checkpoint often — background runs keep getting killed externally
 
 
 def _load_checkpoint():

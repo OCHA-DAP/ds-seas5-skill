@@ -77,6 +77,10 @@ jobs:
       - name: Export Forecast × HNRP tab data (hnrp_drought.json)
         run: uv run python pipeline/export_hnrp_drought.py
 
+      # Same manual-prerequisite caveat: compute_skill_adm2.py after each issuance.
+      - name: Export Forecast × HNRP admin-2 data (hnrp_drought_adm2.json)
+        run: uv run python pipeline/export_hnrp_drought.py --level 2
+
       - name: Commit updated data
         run: |
           git config user.name "github-actions[bot]"

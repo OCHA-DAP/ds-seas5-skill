@@ -769,6 +769,15 @@ def main() -> None:
     merged["country"] = merged["iso3"].map(country_names)
     if LEVEL == 2:
         merged["parent"] = merged["pcode"].map(parent_names)
+    # A row whose pcode has no polygon at this level can never display — no map
+    # geometry and no forecast series behind it (at level 2, mostly IPC codes from
+    # countries outside the adm2 scope, plus unreconciled reform codes). Prune.
+    in_poly = merged["pcode"].isin(set(poly["pcode"]))
+    if (~in_poly).any():
+        gone = sorted(set(merged.loc[~in_poly, "iso3"].dropna()))
+        print(f"Pruned {int((~in_poly).sum())} unit(s) with no adm{LEVEL} polygon "
+              f"({len(gone)} countries: {', '.join(gone[:14])}{'…' if len(gone) > 14 else ''})")
+        merged = merged[in_poly]
     n_signal = merged["rp"].notna().sum()
     print(f"{len(merged)} HNRP ADM1 units; {n_signal} with a qualifying drought signal")
 
