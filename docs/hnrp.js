@@ -128,8 +128,12 @@
   // shares use the plan's JIAF analysed population (same plan, same admin unit).
   const sevTotOf = (r) => (ipcMode() ? (ipcComboOf(r)?.tot ?? null) : r.sev_total);
   const lvlTag = () => (lvl() === 5 ? "5" : lvl() + "+");
+  // JIAF assigns each area (x population group) ONE intersectoral severity class —
+  // there is no people-per-class breakdown (unlike IPC's population_in_phase). Our
+  // JIAF sums are therefore populations of AREAS classified at each level, and the
+  // labels must say so.
   const sevLabel = () => (pinMode() ? `PiN${secTag()}`
-    : srcTypeSel.value === "jiaf" ? `JIAF ${lvlTag()}`
+    : srcTypeSel.value === "jiaf" ? `JIAF ${lvlTag()} areas`
     : `IPC ${lvlTag()}`);
 
   // Exercise (analysis) month + validity window of an IPC combo — spelled out
@@ -634,8 +638,8 @@
       barsTitle.textContent = `${country} — population by IPC/CH phase, per admin 1` +
         (c ? ` (${comboDesc(c)})` : "");
     } else {
-      barsTitle.textContent = `${country} — population by JIAF severity class, per admin 1 ` +
-        `(analysis year ${rows[0].sev_year ?? "–"})`;
+      barsTitle.textContent = `${country} — population living in areas at each JIAF class, ` +
+        `per admin 1 (analysis year ${rows[0].sev_year ?? "–"})`;
     }
 
     const W = barsSvg.parentElement.clientWidth || 900;
@@ -700,7 +704,8 @@
           const seg = g("rect", { x: X(acc), y: y + 4, width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
                                   height: ROW - 9, fill: SEV_COLORS[c] });
           const title = document.createElementNS(NS, "title");
-          title.textContent = `${r.name ?? r.pcode} — ${ipcMode() ? "IPC phase" : "severity"} ${c + 1}: ${fmtN(v)}`;
+          title.textContent = `${r.name ?? r.pcode} — ${ipcMode()
+            ? `IPC phase ${c + 1}` : `in class-${c + 1} areas`}: ${fmtN(v)}`;
           seg.appendChild(title);
           acc += v;
         }

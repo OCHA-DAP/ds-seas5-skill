@@ -240,8 +240,8 @@
       <div id="hnrp-bars-legend"></div>
     </div>
     <p id="hnrp-bars-hint" class="lock-note">Select a country above to see its per-admin
-      severity breakdown (population in each JIAF severity class, targeted population, and
-      the forecast category).</p>
+      severity breakdown (population of areas at each severity class or IPC phase, targeted
+      population, and the forecast category).</p>
 
     <h3 class="hnrp-h">Matching areas, ranked</h3>
     <table id="hnrp-table">
@@ -306,7 +306,13 @@
         href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>), <strong>JIAF
         severity</strong> from the HNRP severity analysis (latest analysis year per country),
         or the plan's <strong>PiN</strong> itself (no severity level; shares then divide by
-        the plan's JIAF analysed population). IPC and JIAF figures do <em>not</em> line up:
+        the plan's JIAF analysed population). A structural difference matters here:
+        <strong>IPC counts people</strong> (population in each phase, per area), while
+        <strong>JIAF classifies areas</strong> — each area (× population group) carries one
+        intersectoral severity class and one population figure, with no per-class people
+        breakdown. JIAF figures on this page are therefore the <em>population of areas
+        classified</em> at each level ("JIAF 4+ areas"), not headcounts of people in that
+        condition. IPC and JIAF figures also do <em>not</em> line up:
         they measure different things (acute food insecurity vs inter-sectoral needs) over
         different analysed populations, scopes, and periods — compare shapes, not values.
         In IPC mode the map, scatter, and table also include IPC-covered areas
