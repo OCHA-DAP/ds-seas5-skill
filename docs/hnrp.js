@@ -157,9 +157,9 @@
   const sevTotOf = (r) => (ipcMode() ? (ipcComboOf(r)?.tot ?? null) : r.sev_total);
   const lvlTag = () => (lvl() === 5 ? "5" : lvl() + "+");
   // JIAF figures are now people-level: PiN per severity class from the plan's
-  // PiN-by-Severity distribution — no "areas" qualifier needed anymore.
+  // PiN-by-Severity distribution — labelled plainly as "PiN N+".
   const sevLabel = () => (pinMode() ? `PiN${secTag()}`
-    : srcTypeSel.value === "jiaf" ? `JIAF PiN ${lvlTag()}`
+    : srcTypeSel.value === "jiaf" ? `PiN ${lvlTag()}`
     : `IPC ${lvlTag()}`);
 
   // Exercise (analysis) month + validity window of an IPC combo — spelled out
@@ -523,7 +523,9 @@
     g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 13, fill: "#555" })
       .textContent = `Targeted${secTag()} (${denom})`;
     const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 13, fill: "#555" });
-    yl.textContent = `Population in ${sevLabel()} (${denom})`;
+    // "Population in IPC 3+" reads well; "Population in PiN 3+" doesn't — PiN is
+    // already a population.
+    yl.textContent = `${ipcMode() ? `Population in ${sevLabel()}` : sevLabel()} (${denom})`;
     yl.setAttribute("transform", `rotate(-90 14 ${(M.t + H - M.b) / 2})`);
     g("line", { x1: X(0), y1: Y(0), x2: X(100), y2: Y(100),
                 stroke: "#c4d0d1", "stroke-width": 1, "stroke-dasharray": "5 4" });
@@ -848,8 +850,22 @@
     // map.stop() first: an animated fit interrupted mid-flight wedges Leaflet's
     // zoom animation and every later fit silently no-ops (observed: Afghanistan
     // "not zooming"). Stopping any in-flight animation before starting the next
-    // keeps the smooth zoom safe.
-    if (bounds) { map.stop(); map.fitBounds(bounds, { padding: [10, 10], animate }); }
+    // keeps the smooth zoom safe — and because the wedge keeps finding new ways
+    // to happen, self-heal: if the view hasn't arrived once the animation should
+    // have finished, force the fit without animation.
+    if (!bounds) return;
+    map.stop();
+    map.fitBounds(bounds, { padding: [10, 10], animate });
+    if (animate) {
+      const want = bounds;
+      setTimeout(() => {
+        if (countrySel.value !== c) return; // selection moved on — don't fight it
+        if (!map.getBounds().contains(want.getCenter())) {
+          map.stop();
+          map.fitBounds(want, { padding: [10, 10], animate: false });
+        }
+      }, 700);
+    }
   }
   // Valid-season selector options: auto + each valid trimester at this issuance.
   for (const t of data.trimesters ?? []) {
