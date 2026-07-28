@@ -542,6 +542,60 @@ def load_ipc_adm1() -> pd.DataFrame:
     return out
 
 
+def load_pbs_adm1() -> pd.DataFrame:
+    """Intersectoral PiN BY SEVERITY CLASS per unit (hpc.pin_admin — the JIAF 2.0
+    PiN-by-Severity workstream, mirrored from country workbooks), latest year per
+    country. This is people-level: final_pin per (unit × group × severity class) —
+    the per-class headcounts the area classification cannot give. Some plans
+    publish PiN without classes (GTM/SLV/VEN: severity NULL) — total only.
+
+    Group logic mirrors load_severity_adm1: a blank group covering ≥50% of units
+    is the overall figure (BFA) — use it alone; otherwise sum the named disjoint
+    groups (spelling variants like CAF's 'IDP_FA'/'IDP FA' cover disjoint units —
+    verified — so a plain sum is safe).
+    """
+    engine = stratus.get_engine("dev")
+    q = f"""
+    SELECT iso3, year, admin1_code, admin2_code, admin3_code,
+           COALESCE(admin2_name, admin1_name) AS name, population_group,
+           severity, final_pin
+    FROM hpc.pin_admin WHERE {ACODE} IS NOT NULL AND final_pin IS NOT NULL
+    """
+    with engine.connect() as conn:
+        df = pd.read_sql(q, conn)
+    df = df[df["year"] == df.groupby("iso3")["year"].transform("max")]
+    df["population_group"] = df["population_group"].fillna("")
+
+    rows = []
+    for iso3, g in df.groupby("iso3"):
+        units = g.groupby("population_group")[ACODE].nunique()
+        n_units = g[ACODE].nunique()
+        if units.get("", 0) >= 0.5 * n_units:
+            # Blank group is the overall figure (BFA) — named groups are subsets.
+            g = g[g["population_group"] == ""]
+        elif (units.index != "").any():
+            # Named disjoint groups partition the caseload — sum them; a stray
+            # sub-dominant blank row (MLI: 1 unit) would double-count, drop it.
+            g = g[g["population_group"] != ""]
+        by_class = g[g["severity"].notna()].pivot_table(
+            index=ACODE, columns="severity", values="final_pin", aggfunc="sum")
+        total = g.groupby(ACODE)["final_pin"].sum()
+        a1names = g.drop_duplicates(ACODE).set_index(ACODE)["name"]
+        for pcode, tot in total.items():
+            row = {"pcode": pcode, "iso3": iso3, "name": a1names.get(pcode),
+                   "pbs_tot": int(tot), "pbs_yr": int(g["year"].iloc[0])}
+            for cls in range(1, 6):
+                v = by_class.loc[pcode, cls] if (pcode in by_class.index
+                                                 and cls in by_class.columns) else None
+                row[f"pb{cls}"] = int(v) if pd.notna(v) else 0
+            row["pbs_classed"] = int(g.loc[g[ACODE] == pcode, "severity"].notna().any())
+            rows.append(row)
+    out = pd.DataFrame(rows)
+    print(f"PiN-by-severity: {out['iso3'].nunique()} countries, {len(out)} units "
+          f"({int(out['pbs_classed'].sum())} with class breakdown)")
+    return out
+
+
 def load_population_adm1() -> pd.DataFrame:
     """Total population per ADM1 unit from pop.population_admin
     (ds-population-mirror: HDX HAPI baseline population, UNFPA COD-PS derived).
@@ -682,6 +736,11 @@ def main() -> None:
     df_pin_raw, sector_names = load_pin_adm1(sub_parent)
     df_pin = normalize_pcodes(df_pin_raw, poly, "PiN")
     df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
+    df_pbs = normalize_pcodes(load_pbs_adm1(), poly, "pbs")
+    df_pbs = (df_pbs.groupby("pcode", as_index=False)
+              .agg({"iso3": "first", "name": "first",
+                    **{f"pb{c}": "sum" for c in range(1, 6)},
+                    "pbs_tot": "sum", "pbs_yr": "max", "pbs_classed": "max"}))
     df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
     df_pop = normalize_pcodes(load_population_adm1(), poly, "population",
                               xxx_name_match=True)
@@ -730,7 +789,12 @@ def main() -> None:
     df_hum = df_pin.merge(df_sev, on="pcode", how="outer", suffixes=("", "_sev"))
     for col in ["iso3", "name"]:
         df_hum[col] = df_hum[col].combine_first(df_hum[f"{col}_sev"])
-    df_hum = df_hum.drop(columns=["iso3_sev", "name_sev"]).rename(columns={"name": "name_hum"})
+    df_hum = df_hum.drop(columns=["iso3_sev", "name_sev"])
+    df_hum = df_hum.merge(df_pbs, on="pcode", how="outer", suffixes=("", "_pbs"))
+    for col in ["iso3", "name"]:
+        df_hum[col] = df_hum[col].combine_first(df_hum[f"{col}_pbs"])
+    df_hum = (df_hum.drop(columns=["iso3_pbs", "name_pbs"])
+              .rename(columns={"name": "name_hum"}))
 
     # Scope: HNRP units PLUS IPC-covered units outside any plan — the tab's purpose
     # includes surfacing severe food insecurity the HNRP does not capture. IPC-only
@@ -936,8 +1000,19 @@ def main() -> None:
         for code, yr in stale.items():
             if code in sec and sec[code][1] is not None:
                 sec[code].append(yr)  # [pin, targeted, staleTargetedYear]
+        # PiN-by-severity travels as wide pb1..pb5 columns; fold into "pb": [c1..c5]
+        # (only when the plan publishes a class breakdown — else pbs_tot alone).
+        pbs_tot = rec.pop("pbs_tot", None)
+        pbs_classed = rec.pop("pbs_classed", None)
+        pbs = [rec.pop(f"pb{c}", None) for c in range(1, 6)]
         out = {k: (v if isinstance(v, (list, dict)) else None if pd.isna(v) else v)
                for k, v in rec.items()}
+        if pbs_tot is not None and pd.notna(pbs_tot):
+            out["pbs_tot"] = int(pbs_tot)
+            if pbs_classed:
+                out["pb"] = [int(v) if pd.notna(v) else 0 for v in pbs]
+        if out.get("pbs_yr") is not None:
+            out["pbs_yr"] = int(out["pbs_yr"])
         if out.get("tgt_year") is not None:
             out["tgt_year"] = int(out["tgt_year"])
         for k in ("pop", "pop_year"):
@@ -974,6 +1049,7 @@ def main() -> None:
                 for rec in merged.drop(columns=["pin_admin_level"]).to_dict("records"))
             if row.get("pin") is not None or row.get("targeted") is not None
             or row.get("sec") or row.get("ipc") or (row.get("sev_total") or 0) > 0
+            or row.get("pbs_tot") is not None
         ],
     }
     OUT.write_text(json.dumps(payload, separators=(",", ":")))

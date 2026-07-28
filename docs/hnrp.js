@@ -65,7 +65,7 @@
   // Plan cycle varies by country (e.g. Guatemala's latest is the 2025 HNRP) — surface
   // the year everywhere caseload figures appear.
   const planYrOf = (r) => {
-    const ys = [r.ref_year, r.sev_year].filter((y) => y != null);
+    const ys = [r.ref_year, r.sev_year, r.pbs_yr].filter((y) => y != null);
     return ys.length ? Math.max(...ys) : null;
   };
   const planYrByCountry = new Map();
@@ -108,7 +108,8 @@
   const droughtOnly = () => droughtOnlyEl.checked;
   // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
   // shown only in IPC mode, where surfacing needs the plan does NOT capture is the point.
-  const inHnrp = (r) => r.sev_total > 0 || r.pin != null || r.targeted != null || r.sec != null;
+  const inHnrp = (r) => r.sev_total > 0 || r.pin != null || r.targeted != null
+    || r.sec != null || r.pbs_tot != null;
 
   // ── Severity source: JIAF inter-sectoral 4+ (default) or IPC/CH phase N+ ─────
   // IPC rows carry a list of analysis periods (current / projections, each with a
@@ -142,8 +143,10 @@
   function sevValOf(r) {
     if (pinMode()) return pinOf(r);
     if (srcTypeSel.value === "jiaf") {
-      if (!(r.sev_total > 0)) return null;
-      return [r.s1, r.s2, r.s3, r.s4, r.s5].slice(lvl() - 1).reduce((a, b) => a + (b ?? 0), 0);
+      // People-level: the plan's PiN-by-severity distribution (JIAF 2.0 PbS,
+      // hpc.pin_admin). Plans without a class breakdown (GTM/SLV/VEN) show dashes.
+      if (!r.pb) return null;
+      return r.pb.slice(lvl() - 1).reduce((a, b) => a + (b ?? 0), 0);
     }
     const c = ipcComboOf(r);
     if (!c) return null;
@@ -153,12 +156,10 @@
   // shares use the plan's JIAF analysed population (same plan, same admin unit).
   const sevTotOf = (r) => (ipcMode() ? (ipcComboOf(r)?.tot ?? null) : r.sev_total);
   const lvlTag = () => (lvl() === 5 ? "5" : lvl() + "+");
-  // JIAF assigns each area (x population group) ONE intersectoral severity class —
-  // there is no people-per-class breakdown (unlike IPC's population_in_phase). Our
-  // JIAF sums are therefore populations of AREAS classified at each level, and the
-  // labels must say so.
+  // JIAF figures are now people-level: PiN per severity class from the plan's
+  // PiN-by-Severity distribution — no "areas" qualifier needed anymore.
   const sevLabel = () => (pinMode() ? `PiN${secTag()}`
-    : srcTypeSel.value === "jiaf" ? `JIAF ${lvlTag()} areas`
+    : srcTypeSel.value === "jiaf" ? `JIAF PiN ${lvlTag()}`
     : `IPC ${lvlTag()}`);
 
   // Exercise (analysis) month + validity window of an IPC combo — spelled out
@@ -606,7 +607,7 @@
   const PIN_COLOR = "#9db1b3";
   const segsOf = (r) => (pinMode() ? null
     : ipcMode() ? (ipcComboOf(r)?.p ?? null)
-    : [r.s1, r.s2, r.s3, r.s4, r.s5]);
+    : (r.pb ?? null));
   const barsWrap = document.getElementById("hnrp-bars-wrap");
   const barsHint = document.getElementById("hnrp-bars-hint");
   const barsSvg = document.getElementById("hnrp-bars");
@@ -652,7 +653,8 @@
     const country = countrySel.value;
     const rows = country
       ? data.rows.filter((r) => r.country === country
-            && (pinMode() ? sevValOf(r) != null : sevTotOf(r) > 0 && segsOf(r)))
+            && (pinMode() ? sevValOf(r) != null
+              : ipcMode() ? sevTotOf(r) > 0 && segsOf(r) : !!segsOf(r)))
           .sort(BAR_SORTS[barSortSel.value] || BAR_SORTS.sev4)
       : [];
     barsWrap.hidden = rows.length === 0;
@@ -666,8 +668,8 @@
       barsTitle.textContent = `${country} — population by IPC/CH phase, per admin ${ADM}` +
         (c ? ` (${comboDesc(c)})` : "");
     } else {
-      barsTitle.textContent = `${country} — population living in areas at each JIAF class, ` +
-        `per admin ${ADM} (analysis year ${rows[0].sev_year ?? "–"})`;
+      barsTitle.textContent = `${country} — PiN by JIAF severity class, ` +
+        `per admin ${ADM} (${rows[0].pbs_yr ?? "–"} analysis)`;
     }
 
     const W = barsSvg.parentElement.clientWidth || 900;
@@ -733,7 +735,7 @@
                                   height: ROW - 9, fill: SEV_COLORS[c] });
           const title = document.createElementNS(NS, "title");
           title.textContent = `${r.name ?? r.pcode} — ${ipcMode()
-            ? `IPC phase ${c + 1}` : `in class-${c + 1} areas`}: ${fmtN(v)}`;
+            ? `IPC phase ${c + 1}` : `PiN at severity ${c + 1}`}: ${fmtN(v)}`;
           seg.appendChild(title);
           acc += v;
         }
