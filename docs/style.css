@@ -188,3 +188,65 @@ h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 
 footer { color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 10px; }
 footer p { margin: 4px 0; }
+
+/* ── Forecast × HNRP tab ─────────────────────────────────────────────────── */
+#hnrp-controls { display: flex; flex-direction: column; gap: 9px; margin: 22px 0 14px;
+  /* Pinned while scrolling so filters stay reachable from any view. z-index must
+     clear Leaflet's in-map controls (~1000). */
+  position: sticky; top: 0; z-index: 1200; background: var(--hdx-neutral-0);
+  padding: 8px 0 10px; border-bottom: 1px solid var(--hdx-neutral-15); }
+#hnrp-controls .ctl-row { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
+#hnrp-controls .row-tag { min-width: 72px; font-size: 0.72rem; font-weight: 600;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+#hnrp-controls #hnrp-issued { margin: 0 0 0 auto; }
+#hnrp-sev-lvl-wrap[hidden] { display: none; }
+/* Chrome draws a focus ring (blue box) around a clicked SVG path / the map itself;
+   selection feedback is the country outline + zoom, so the ring is just noise. */
+.leaflet-container path.leaflet-interactive:focus,
+.leaflet-container:focus { outline: none; }
+.hnrp-h { margin: 28px 0 8px; font-size: 1rem; }
+.stale-flag { color: var(--hdx-primary-5); cursor: help; font-weight: 700; }
+/* Per-admin trimester codes on the map (selected-country view): bare text with a
+   white halo, centred on the anchor point (the divIcon anchors top-left). */
+.tri-map-label-wrap { background: none; border: none; }
+.tri-map-label { display: inline-block; transform: translate(-50%, -50%);
+  white-space: nowrap; font-size: 10px; font-weight: 700; color: #1d2021;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
+#hnrp-note { margin-top: 6px; }
+#hnrp-note summary { cursor: pointer; font-weight: 600; color: var(--hdx-neutral-8);
+  font-size: 0.85rem; }
+#hnrp-note summary:hover { color: var(--ink); }
+#hnrp-note h4 { margin: 14px 0 4px; font-size: 0.74rem; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--hdx-neutral-7); }
+#hnrp-note p { margin: 4px 0 10px; max-width: 72rem; }
+#hnrp-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+#hnrp-table th, #hnrp-table td { padding: 5px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+#hnrp-table th { cursor: pointer; user-select: none; font-weight: 600; color: var(--muted);
+  border-bottom: 2px solid var(--line); white-space: nowrap; }
+#hnrp-table th.sorted { color: var(--ink); }
+#hnrp-table th.num, #hnrp-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+#hnrp-table tbody tr:hover { background: var(--hdx-neutral-01); }
+#hnrp-table td.skill-high { font-weight: 700; }
+#hnrp-table .in-season-tag { color: var(--hdx-neutral-5); font-weight: 600; font-size: 0.75rem; }
+#hnrp-map { height: 430px; border: 1px solid var(--line); border-radius: var(--hdx-radius-md); margin-bottom: 18px; background: #fff; }
+#hnrp-scatter-wrap { position: relative; margin-bottom: 6px; }
+#hnrp-scatter { width: 100%; height: 460px; display: block; }
+#hnrp-tip { position: absolute; pointer-events: none; background: #fff; border: 1px solid var(--line);
+  border-radius: var(--hdx-radius-sm); box-shadow: var(--hdx-shadow-sm); padding: 7px 10px;
+  font-size: 0.78rem; line-height: 1.45; max-width: 240px; z-index: 10; }
+#hnrp-scatter-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted); margin-bottom: 18px; }
+#hnrp-scatter-legend i { display: inline-block; width: 12px; height: 12px; border: 1px solid rgba(0,0,0,0.15); vertical-align: -2px; margin-right: 4px; }
+#hnrp-scatter-legend i.hatched { background: repeating-linear-gradient(45deg, #7f5619 0 2px, rgba(255,255,255,0.7) 2px 4px); }
+
+/* HNRP scatter is square (both axes are population shares); bars section below it. */
+#hnrp-scatter-wrap { max-width: 640px; }
+#hnrp-scatter { height: auto; }
+#hnrp-bars-wrap { margin: 6px 0 14px; }
+#hnrp-bars-wrap h3 { font-size: 0.95rem; margin: 10px 0 6px; }
+#hnrp-bars { width: 100%; display: block; }
+#hnrp-bars-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+#hnrp-bars-legend i { display: inline-block; width: 12px; height: 12px; border: 1px solid rgba(0,0,0,0.12); vertical-align: -2px; margin-right: 4px; }
+#hnrp-bars-legend i.tick { width: 2px; height: 14px; background: #1d2021; border: none; vertical-align: -3px; }
+#hnrp-bars-head { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+#hnrp-bars-head h3 { margin-right: auto; }
+#hnrp-ipc-period-wrap[hidden] { display: none; }

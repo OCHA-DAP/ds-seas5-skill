@@ -8,7 +8,8 @@ Skill is leadtime-based, not tied to one issuance: for each trimester and leadti
 (months from the issue month to the trimester's first month) we select the matching
 issued month from the cube. Only complete trimesters are kept — with SEAS5's 7-month
 horizon (leads 0–6), a trimester starting at lead L spans leads L..L+2 and fits only
-when L ≤ 4, so leads are 0–4.
+when L ≤ 4. Leads −1/−2 are in-season (mixed) trimesters: the already-elapsed months
+come from ERA5 and only the remainder is forecast, so skill is naturally much higher.
 
 Reads the local detrended skill cube written by compute_skill_raster.py (matches the
 adm0 map's default), falling back to the DEV blob.
@@ -38,7 +39,7 @@ GEO = Path(__file__).resolve().parent.parent / "analysis" / "_world_countries.gp
 CUBE = Path("/tmp/skill_stats_grid_detrended.nc")  # falls back to dev blob if missing
 
 THRESH = {"r_mod": 0.30, "r_high": 0.50}
-LEADS = [0, 1, 2, 3, 4]  # complete trimesters only (L+2 ≤ 6 horizon); see module docstring
+LEADS = [-2, -1, 0, 1, 2, 3, 4]  # −2/−1 in-season (mixed); 0–4 fully forecast; see docstring
 
 # Category code per pixel and its RGBA colour (HDX brand ramp, matching the adm0
 # skill map's palette: brand greens, error-scale brown for negative).

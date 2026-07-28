@@ -20,6 +20,8 @@
     <button class="tab active" data-tab="map">Map</button>
     <button class="tab" data-tab="skillmap">Skill map</button>
     <button class="tab" data-tab="skill">Skill by country</button>
+    <!-- Unlisted for now: reachable only via the #hnrp hash link -->
+    <button class="tab" data-tab="hnrp" hidden>Forecast × HNRP</button>
     <button class="tab" data-tab="methods">Methodology</button>
   </nav>
 
@@ -98,8 +100,7 @@
       <strong>in-season</strong> (the trimester has already started): the elapsed months use ERA5
       observations and only the rest is forecast, so skill is naturally much higher.
       The <strong>Country</strong>/<strong>Pixel</strong>
-      toggle switches between country averages and the native SEAS5 0.4° grid (pixel: fully-forecast
-      issues only). By default skill is
+      toggle switches between country averages and the native SEAS5 0.4° grid. By default skill is
       shown only where the trimester is in the rainy season (≥&nbsp;15% of annual rainfall, the rest
       greyed); the checkbox reveals skill everywhere. Detrended, matching the forecast map's defaults.
       This shows skill only — not the current forecast.
@@ -130,6 +131,228 @@
       naturally much higher. Skill generally decays with leadtime and is highest in each area's rainy
       season. Detrended forecasts, matching the map's defaults.
     </p>
+  </section>
+
+  <section id="tab-hnrp" class="tab-panel" hidden>
+    <div id="hnrp-controls">
+      <div class="ctl-row">
+        <span class="row-tag">Forecast</span>
+        <label class="ctl">Skill
+          <select id="hnrp-skill" class="map-select">
+            <option value="mod" selected>Moderate or high (r ≥ 0.30)</option>
+            <option value="high">High only (r ≥ 0.50)</option>
+          </select>
+        </label>
+        <label class="ctl">Return period ≥
+          <select id="hnrp-rp" class="map-select">
+            <option value="1">any</option>
+            <option value="3" selected>3 yr (alert)</option>
+            <option value="10">10 yr (severe alert)</option>
+          </select>
+        </label>
+        <label class="ctl">Valid season
+          <select id="hnrp-tri" class="map-select">
+            <option value="auto" selected>Worst drought — forecast seasons</option>
+            <option value="auto-in">Worst drought — incl. in-season</option>
+          </select>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="hnrp-drought-only" checked />
+          Drought signals only
+        </label>
+      </div>
+      <div class="ctl-row">
+        <span class="row-tag">Caseload</span>
+        <label class="ctl">Sector
+          <select id="hnrp-sector" class="map-select">
+            <option value="is" selected>Intersectoral</option>
+          </select>
+        </label>
+      </div>
+      <div class="ctl-row">
+        <span class="row-tag">Severity</span>
+        <label class="ctl">Source
+          <select id="hnrp-sev-type" class="map-select">
+            <option value="ipc" selected>IPC/CH phases</option>
+            <option value="jiaf">JIAF severity</option>
+            <option value="pin">PiN (no severity)</option>
+          </select>
+        </label>
+        <label class="ctl" id="hnrp-sev-lvl-wrap">Level
+          <select id="hnrp-sev-lvl" class="map-select">
+            <option value="3" selected>3+</option>
+            <option value="4">4+</option>
+            <option value="5">5</option>
+          </select>
+        </label>
+        <label class="ctl" id="hnrp-ipc-period-wrap" hidden>IPC estimate
+          <select id="hnrp-ipc-period" class="map-select">
+            <option value="now" selected>Now (latest covering this month)</option>
+            <option value="fwd">Forecast window (latest projection)</option>
+          </select>
+        </label>
+      </div>
+      <div class="ctl-row">
+        <span class="row-tag">Country</span>
+        <label class="ctl">
+          <select id="hnrp-country" class="map-select"><option value="">All</option></select>
+        </label>
+        <span id="hnrp-issued" class="lock-note"></span>
+      </div>
+    </div>
+
+    <div id="hnrp-map"></div>
+
+    <h3 class="hnrp-h">Severity vs targeted, per admin 1</h3>
+    <div id="hnrp-scatter-wrap">
+      <svg id="hnrp-scatter"></svg>
+      <div id="hnrp-tip" hidden></div>
+    </div>
+    <div id="hnrp-scatter-legend">
+      <span><i style="background:#7f5619"></i> Strongly below normal</span>
+      <span><i style="background:#dda555"></i> Below normal</span>
+      <span><i style="background:#e2e8e8"></i> Roughly normal</span>
+      <span><i style="background:#74a1e8"></i> Above normal</span>
+      <span><i style="background:#134ead"></i> Strongly above</span>
+      <span><i style="background:#b1c1c2"></i> Outside rainy season</span>
+      <span><i class="hatched"></i> hatched = moderate skill (solid = high)</span>
+      <span>bubble area = admin population (largest analysed base)</span>
+    </div>
+
+    <div id="hnrp-bars-wrap" hidden>
+      <div id="hnrp-bars-head">
+        <h3 id="hnrp-bars-title"></h3>
+        <label class="ctl">Sort by
+          <select id="hnrp-bar-sort" class="map-select">
+            <option value="sev4" selected>Severity (JIAF 4+)</option>
+            <option value="total">Analysed population</option>
+            <option value="targeted">Targeted</option>
+            <option value="forecast">Forecast category</option>
+            <option value="name">Name</option>
+          </select>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="hnrp-bars-full" />
+          Include classes 1–2
+        </label>
+      </div>
+      <svg id="hnrp-bars"></svg>
+      <div id="hnrp-bars-legend"></div>
+    </div>
+    <p id="hnrp-bars-hint" class="lock-note">Select a country above to see its per-admin
+      severity breakdown (population of areas at each severity class or IPC phase, targeted
+      population, and the forecast category).</p>
+
+    <h3 class="hnrp-h">Matching areas, ranked</h3>
+    <table id="hnrp-table">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+    <p id="hnrp-empty" class="lock-note" hidden>No admin-1 units match the current filters.</p>
+
+    <p class="note">
+      Admin-1 areas where the latest SEAS5 seasonal forecast points to drought, weighted by
+      food-insecurity severity and HNRP caseloads — so the largest at-risk populations with
+      the worst forecasts rise to the top.
+    </p>
+    <details id="hnrp-note" class="note">
+      <summary>Methodology &amp; data notes</summary>
+
+      <h4>Forecast signal</h4>
+      <p>
+        For each area the single <strong>worst</strong> qualifying slot is shown: rainy-season
+        trimesters within the forecast horizon, drought side only (forecast percentile
+        &lt; 50), with at least moderate skill (r&nbsp;≥&nbsp;0.30). The
+        <strong>return period</strong> is directional: a 10-yr value means a forecast this
+        dry occurs about once a decade in the 1981–present hindcast for that area and season.
+        The <strong>Valid season</strong> selector defaults to the worst drought among
+        forecast seasons; "incl. in-season" also scans trimesters already in progress (the
+        worst signal is often a season underway), and picking a trimester (e.g. MJJ) shows
+        that season's forecast for every area. The trimester actually used is shown as its
+        compact code (e.g. MJJ) — inside scatter bubbles where space allows, centred on
+        each area when a country is selected on the map, and bold in every tooltip.
+        Forecast data are detrended, matching the Map tab's defaults.
+      </p>
+
+      <h4>Caseloads (PiN / targeted)</h4>
+      <p>
+        <strong>PiN / Targeted</strong> come from each plan's latest reference period via <a
+        href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>; figures
+        published at admin-2/3 are summed to admin-1 (some plans publish subnational
+        needs only at admin-3 — DR Congo, Myanmar; where such a plan reports a
+        single "Final HRP caseload" instead of Intersectoral, that is shown as the
+        Intersectoral figure). Caseloads appear only for countries whose newest plan
+        cycle is this year or last: Ethiopia (last subnational needs 2024, no newer
+        plan) and Syria (last needs 2024; its 2025 severity analysis publishes no
+        population figures) are absent entirely. PiN is the plan's headline total for
+        the selected caseload — <em>not</em> a severity band (it has no JIAF-class or
+        IPC-phase breakdown). The <strong>Caseload</strong> selector switches between
+        Intersectoral and any sector/cluster the plans publish (Food Security, Health,
+        Protection, …); not every plan publishes every sector — missing ones show a dash.
+        Each country shows its <strong>latest plan cycle</strong> (year in the country
+        selector, the Plan column, and tooltips); where no newer plan exists the previous
+        cycle is shown (e.g. Guatemala, latest 2025). Where the current cycle publishes a
+        unit's PiN but no targeted figure (or omits a unit entirely), the newest earlier
+        cycle fills the gap — a stale targeted is flagged with its year (* in the table,
+        "(2024 plan)" in tooltips), and a wholly carried-over unit shows the older year in
+        its Plan column. A country can still be absent from a given caseload when its plan
+        never publishes that sector subnationally — the columns then show dashes.
+      </p>
+
+      <h4>Severity sources</h4>
+      <p>
+        The <strong>Severity</strong> row picks the source and level. <strong>IPC/CH acute
+        food insecurity phases</strong> (default, via <a
+        href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>), <strong>JIAF
+        severity</strong> from the HNRP severity analysis (latest analysis year per country),
+        or the plan's <strong>PiN</strong> itself (no severity level; shares then divide by
+        the plan's JIAF analysed population). A structural difference matters here:
+        <strong>IPC counts people</strong> (population in each phase, per area), while
+        <strong>JIAF classifies areas</strong> — each area (× population group) carries one
+        intersectoral severity class and one population figure, with no per-class people
+        breakdown. JIAF figures on this page are therefore the <em>population of areas
+        classified</em> at each level ("JIAF 4+ areas"), not headcounts of people in that
+        condition. IPC and JIAF figures also do <em>not</em> line up:
+        they measure different things (acute food insecurity vs inter-sectoral needs) over
+        different analysed populations, scopes, and periods — compare shapes, not values.
+        In IPC mode the map, scatter, and table also include IPC-covered areas
+        <strong>outside any HNRP</strong> (no PiN/severity/targeted; plotted at 0% targeted)
+        — surfacing possible shocks beyond plan scope. Only IPC analyses valid in 2025 or
+        later are included; countries whose series stalled earlier (Ethiopia 2021,
+        Angola/El Salvador 2022, Burkina Faso Aug 2024, Timor-Leste 2024) carry no IPC
+        here.
+      </p>
+
+      <h4>IPC estimate periods</h4>
+      <p>
+        <em>Now</em> uses the most recent analysis covering the forecast issuance month
+        (preferring a current-type analysis); <em>Forecast window</em> uses the most recent
+        projection overlapping the 6-month horizon — and is offered only where it differs
+        from <em>Now</em>. The dropdown states each choice's exercise (analysis) month and
+        validity window — exactly, once a country is selected; as a cross-country range
+        otherwise — and every tooltip names the analysis used for that area.
+      </p>
+
+      <h4>Reading the scatter</h4>
+      <p>
+        Both axes divide by the <em>same</em> population base: the admin's total
+        population — the UNFPA COD-PS baseline via HDX HAPI where present and trusted,
+        else the plan's own HNO/JIAF baseline total (self-consistent with the
+        PiN/targeted figures; e.g. all of Yemen, which has no COD-PS in HAPI). The
+        tooltip names the source and reference year. Where neither exists, the fallback
+        is the larger of the IPC analysed base and the plan's JIAF analysed base — and
+        shares there can overstate against the true total where the analysis covers only
+        part of the population.
+        A shared denominator makes position compare absolute headcounts: above
+        the 45° line, more people sit in the severity band than the plan targets (a
+        possible coverage gap); below it, targeting exceeds it — and the base does not
+        change when the severity source switches. Axes are fixed 0–100%. Every admin with
+        a displayable forecast plots, regardless of HNRP or IPC membership — areas with no
+        figure for an axis sit at 0%, at the origin if they have neither. The severity
+        bars plot classes 3–5 by default (classes 1–2 dominate populous areas and drown
+        the signal — a checkbox restores them).
+      </p>
+    </details>
   </section>
 
   <section id="tab-methods" class="tab-panel" hidden>
@@ -254,12 +477,18 @@
   </section>
 
   <footer>
-    <p>Data: ECMWF SEAS5 (forecast) &amp; ERA5 (climatology). OCHA Centre for Humanitarian Data.</p>
+    <p>Data: ECMWF SEAS5 (forecast) &amp; ERA5 (climatology) · OCHA HPC HNRP caseloads &amp;
+      JIAF severity (<a href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>) ·
+      IPC/CH acute food insecurity (<a
+      href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>; IPC,
+      CC&nbsp;BY-NC-SA&nbsp;3.0&nbsp;IGO) · COD administrative boundaries.
+      OCHA Centre for Humanitarian Data.</p>
   </footer>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
+  <script src="hnrp.js"></script>
 </body>
 </html>

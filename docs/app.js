@@ -344,8 +344,8 @@ Promise.all([
                                           [worldBounds.getNorth(), worldBounds.getEast()]];
   const rasterLayer = new RasterLayer(rbounds);
   const variant = () => (seasonalityOn() ? "all" : "masked");
-  // Baked pixel PNGs exist only for the fully-forecast trimesters in rmeta; the two
-  // in-season (mixed obs+forecast) trimesters are country-level only.
+  // Baked pixel PNGs exist only for the trimesters listed in rmeta (incl. the in-season
+  // mixed obs+forecast ones); the note is a fallback for trimesters missing from rmeta.
   const pixTriNote = document.getElementById("pixel-tri-note");
   const pixelHasTri = (key) => !!rmeta && rmeta.trimesters.some((t) => t.key === key);
   function loadPixelGrid() {
@@ -461,7 +461,12 @@ Promise.all([
 // Tabs (Map / Methodology) with #hash deep-linking.
 (function setupTabs() {
   const buttons = document.querySelectorAll(".tab");
+  const TABS = ["map", "skillmap", "skill", "hnrp", "methods"];
   function show(name) {
+    // Unlisted tabs (hidden buttons, reachable only by #hash): once explicitly opened,
+    // reveal the button for this session so navigating away and back works.
+    const btn = document.querySelector(`.tab[data-tab="${name}"]`);
+    if (btn && btn.hidden) btn.hidden = false;
     buttons.forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
     document.querySelectorAll(".tab-panel").forEach((p) => {
       p.hidden = p.id !== "tab-" + name;
@@ -479,7 +484,13 @@ Promise.all([
     history.replaceState(null, "", "#" + b.dataset.tab);
   }));
   const initial = location.hash.replace("#", "");
-  if (["map", "skillmap", "skill", "methods"].includes(initial)) show(initial);
+  if (TABS.includes(initial)) show(initial);
+  // Editing the #hash in the address bar (or back/forward) also switches tabs —
+  // without this, a hash edit after load does nothing until a full reload.
+  window.addEventListener("hashchange", () => {
+    const h = location.hash.replace("#", "");
+    if (TABS.includes(h)) show(h);
+  });
 })();
 
 // CSS hatch fill for legend swatches — crosshatch for "cross", single stripe otherwise.
