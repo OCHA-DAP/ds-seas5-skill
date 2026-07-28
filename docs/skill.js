@@ -202,7 +202,8 @@
     svg.appendChild(el("text", {
       x: 14, y: yHeat + (nR * CELL_H) / 2, class: "skill-axttl", "text-anchor": "middle",
       transform: `rotate(-90 14 ${yHeat + (nR * CELL_H) / 2})`,
-    }, "Leadtime (months ahead; − = in-season)"));
+    }, leads.some((l) => l < 0)
+      ? "Leadtime (months ahead; − = in-season)" : "Leadtime (months ahead)"));
 
     // Categorical legend (right of the heatmap)
     const lx = ML + plotW + 16;

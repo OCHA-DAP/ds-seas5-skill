@@ -68,14 +68,15 @@ def _actual_issued_year(row) -> int:
     )
 
 
-def _tri_valid(months: list[int], im: int) -> bool:
+def _tri_valid(months: list[int], im: int, min_lead: int = -2, max_lead: int = 4) -> bool:
     """Valid = lead −2 … 4: complete trimesters with ≥1 forecast month in SEAS5's horizon.
 
     Leads 0–4 are fully-forecast trimesters (lead 5–6 would spill past the 6-month
     horizon). Leads −1/−2 are in-season (mixed) trimesters: 1–2 months already observed
-    from ERA5, the rest forecast from this issuance.
+    from ERA5, the rest forecast from this issuance. Other forecast systems can pass
+    their own lead window (CMA CMME: 1–4, no in-season trimesters).
     """
-    return -2 <= trimester_lead(im, months) <= 4
+    return min_lead <= trimester_lead(im, months) <= max_lead
 
 
 def _min_signed(months: list[int], im: int) -> int:
@@ -131,6 +132,7 @@ def build_skill_matrix(
     monthly_clim: pd.DataFrame,
     rainy_set: set[tuple[str, str]],
     pcode_to_iso3: dict[str, str],
+    leads: list[int] = SKILL_LEADS,
 ) -> dict:
     """Per-country correlation matrix (leadtime × trimester) + trimester climatology.
 
@@ -147,10 +149,10 @@ def build_skill_matrix(
 
     countries: dict[str, dict] = {}
     for pcode, iso3 in pcode_to_iso3.items():
-        # r matrix: rows = leadtime (SKILL_LEADS), cols = trimester (calendar order).
+        # r matrix: rows = leadtime (`leads`), cols = trimester (calendar order).
         matrix: list[list[float | None]] = []
         any_r = False
-        for lead in SKILL_LEADS:
+        for lead in leads:
             row: list[float | None] = []
             for tri in tri_names:
                 start = TRIMESTERS[tri][0]
@@ -186,7 +188,7 @@ def build_skill_matrix(
         }
 
     return {
-        "leads": SKILL_LEADS,
+        "leads": leads,
         "thresholds": {"r_mod": THRESHOLDS["r_mod"], "r_high": THRESHOLDS["r_high"]},
         "trimesters": [{"key": t, "label": _tri_label(TRIMESTERS[t])} for t in tri_names],
         "countries": dict(sorted(countries.items(), key=lambda kv: kv[1]["name"])),

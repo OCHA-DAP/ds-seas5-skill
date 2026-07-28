@@ -12,12 +12,15 @@ below-/above-normal seasons where the forecast is skilful.
   https://chd-ds-seas5-viz-skill-ewcwhteggec2gege.eastus2-01.azurewebsites.net/
 - **Static map** (latest forecast, defaults only; Country/Pixel toggle, zoomable):
   https://ocha-dap.github.io/ds-seas5-skill/
+- **CMA CMME mirror** (same method on CMA's multi-model ensemble, country level only;
+  unlisted — direct link only): https://ocha-dap.github.io/ds-seas5-skill/cma/
 
 ## Layout
 
 - `src/` — the method: `skill.py` (country level), `skill_raster.py` (per-pixel), `constants.py`.
 - `pipeline/` — batch jobs: `compute_skill.py` / `compute_skill_raster.py` (compute stats to blob),
-  `export_static_site.py` / `export_raster_site.py` (build the static-site data in `docs/`).
+  `export_static_site.py` / `export_raster_site.py` (build the static-site data in `docs/`),
+  `compute_skill_cma.py` / `export_cma_site.py` (the same, for the CMA CMME mirror at `docs/cma/`).
 - `analysis/` — the marimo app (`prob_alerts.py`) and other exploratory notebooks.
 - `docs/` — the static GitHub Pages site (see [`docs/README.md`](docs/README.md)).
 
