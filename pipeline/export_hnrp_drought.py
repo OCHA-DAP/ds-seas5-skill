@@ -1,21 +1,57 @@
 """Forecast × HNRP overlay: where a bad drought forecast meets a large PiN.
 
-Joins the latest ADM1 drought forecast (skill_stats_detrended_adm1, dev blob) against
-the HNRP mirror's intersectoral People-in-Need / targeted figures (hpc.needs_admin,
-dev DB, from ds-hnrp-mirror) per admin-1 unit, and writes one JSON for the static
-site's "Forecast × HNRP" tab.
+Joins the latest ADM1/ADM2 drought forecast against the humanitarian mirrors
+(hpc.*, ipc.*, pop.* in the dev DB) per admin unit and writes one JSON per level
+for the static site's "Forecast × HNRP" tab.
 
-Selection per ADM1 unit (latest issuance):
+Forecast selection per unit (latest issuance):
   - valid trimesters (lead −2..4), rainy-season only, skill r ≥ r_mod (0.30)
   - drought side only (forecast percentile < 50); severity = directional drought RP
   - the unit's row reports its WORST qualifying slot (max drought RP)
 
-Humanitarian weight: population in JIAF severity 4+ (hpc.severity_admin, latest
-analysis year per country), with intersectoral PiN (INN) and targeted (TGT) from
-hpc.needs_admin alongside. Figures published at admin-2/3 are summed to admin-1
-(both are additive across geography).
+DATA SEMANTICS & AGGREGATION RULES (hard-won — read before editing a loader):
 
-Run:  uv run python pipeline/export_hnrp_drought.py
+1. JIAF CLASSIFIES AREAS, IPC COUNTS PEOPLE. hpc.severity_admin gives each finest
+   unit (× population group) ONE final_severity and that unit's population — there
+   is NO people-per-class breakdown (verified: max one class per unit across all
+   8,108 units). Our "sN" figures are therefore populations of areas classified at
+   class N, and every label must say so. ipc.population_admin genuinely is
+   population_in_phase — people-level. PiN (needs_admin INN) is also people-level
+   and is NOT derivable from the severity table; treat it as the plan's
+   authoritative caseload and severity classes as area context.
+
+2. PREFER THE COARSEST PUBLISHED LEVEL. Where a country publishes the same series
+   at admin-1 AND finer, the admin-1 figures equal the finer sums (ratio 1.000)
+   EXCEPT where the finer level double-counts (MMR PRO 2024 sums to 2.18× its
+   admin-1 total) — so we aggregate the coarsest level at/below the target and
+   never mix levels.
+
+3. ONE NAMED SERIES PER SECTOR CODE. A sector_code can carry several sector_names
+   ("Protection (total)" AND "General Protection" both as PRO, category='total');
+   summing across them double-counts. Keep the dominant series (most rows, then
+   largest total) per (country, sector).
+
+4. category='total' ONLY for caseloads (231 other values are sex/age/group
+   breakdowns of the same people); population_status='all' + category total/blank
+   for the HNO population baseline.
+
+5. *-XXX PLACEHOLDER SUB-CODES may carry a WRONG stated admin-1 (MOZ 2024 filed
+   Nampula districts under Sofala, Zambézia under Cidade de Maputo — a systematic
+   shift). Their names are good: rollups re-attribute them by unique COD sub-unit
+   name match (sub_parent lookup); at their own level they are unmappable and drop.
+
+6. HAPI SHIPS EXACT DUPLICATE ROWS (same resource, same value, twice — COD 450
+   keys) in ipc.population_admin: drop_duplicates before any pivot/sum.
+
+7. hpc.severity_admin population GROUPS overlap rather than partition — per
+   country prefer the overall (blank) group when it covers ≥50% of units, then
+   'Global_Population', then the largest comma-named union; only sum when groups
+   are disjoint displacement categories.
+
+8. pop.population_admin is totals-only (gender='all', age_range='all') — safe to
+   take rows as-is; its *-XXX rows are distinct areas (one row per name).
+
+Run:  uv run python pipeline/export_hnrp_drought.py [--level 2] [--rebuild-geometry]
 """
 
 import argparse
@@ -219,7 +255,7 @@ def normalize_pcodes(
     return out
 
 
-def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
+def load_pin_adm1(sub_parent: dict | None = None) -> tuple[pd.DataFrame, dict[str, str]]:
     """PiN + targeted per ADM1 pcode, EVERY sector the plans publish.
 
     Per (country, sector): the latest reference period; rows published at admin-1
@@ -246,6 +282,47 @@ def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_start"])
     df = df[df["admin_level"] >= LEVEL]  # coarser rows can't be downscaled
+
+    # One sector_code can carry SEVERAL named series WITHIN a reference period
+    # ("Protection (total)" AND "General Protection" both under PRO,
+    # category='total') — summing them double-counts (MMR PRO 2024 summed to 2.2x
+    # its published admin-1 total). Keep the dominant series (most rows, then
+    # largest total) per (country, sector, reference period) — per period, because
+    # publishers rename series between cycles (COD: "Final HRP Caseload" 2024 vs
+    # "…caseload" 2025) and a global pick would silently freeze an old cycle.
+    grp = ["location_code", "sector_code", "reference_period_start"]
+    picks = (df.groupby(grp + ["sector_name"])
+             .agg(n=("population", "size"), tot=("population", "sum")).reset_index())
+    multi = picks.groupby(grp).filter(lambda x: len(x) > 1)
+    if len(multi):
+        keep = picks.sort_values(["n", "tot"], ascending=False).drop_duplicates(grp)
+        keep_keys = set(zip(*(keep[c] for c in grp + ["sector_name"])))
+        before = len(df)
+        df = df[[k in keep_keys for k in zip(*(df[c] for c in grp + ["sector_name"]))]]
+        dropped_series = sorted({f"{l}/{s}" for l, s in
+                                 zip(multi["location_code"], multi["sector_code"])})
+        print(f"  PiN: secondary same-period series under shared sector codes dropped "
+              f"({before - len(df)} rows; {', '.join(dropped_series[:8])}"
+              f"{'…' if len(dropped_series) > 8 else ''})")
+
+    if sub_parent:
+        # Placeholder-coded sub-rows (*-XXX) can carry a WRONG admin-1 upstream
+        # (MOZ 2024: Nampula districts filed under Sofala, Zambézia under Cidade de
+        # Maputo — a systematic shift). Their names are good: re-attribute by unique
+        # COD sub-unit name match; keep the stated parent when the name is unknown.
+        is_xxx = (df["admin2_code"].fillna("").str.endswith("-XXX")
+                  | df.get("admin3_code", pd.Series("", index=df.index)).fillna("")
+                    .str.endswith("-XXX"))
+        moved = 0
+        for i in df.index[is_xxx]:
+            nm = df.at[i, "admin2_name"]
+            par = sub_parent.get((df.at[i, "location_code"], _fold(nm or "")))
+            if par and par != df.at[i, "admin1_code"]:
+                df.at[i, "admin1_code"] = par
+                moved += 1
+        if moved:
+            print(f"  PiN: re-attributed {moved} placeholder-coded sub-row(s) to their "
+                  f"name-matched admin-1 (upstream parent was wrong)")
     # A country only belongs here while it HAS a current plan: newest cycle must be
     # this year or last. Per-unit fallback to the previous cycle (flagged) is fine
     # WITHIN such a country, but a country whose newest subnational needs are older
@@ -425,6 +502,12 @@ def load_ipc_adm1() -> pd.DataFrame:
             "reference_period_start", "reference_period_end", "analysis_date"])
     df = df.merge(dates, how="left", on=[
         "location_code", "ipc_type", "reference_period_start", "reference_period_end"])
+    # HAPI ships some rows verbatim TWICE (same resource file, same value — COD 450
+    # keys, CAF 204, SSD 138…); summing them doubles those phase populations.
+    before = len(df)
+    df = df.drop_duplicates(subset=[c for c in df.columns])
+    if len(df) < before:
+        print(f"  IPC: dropped {before - len(df)} exact duplicate row(s) (upstream)")
 
     rows = []
     for (loc, t, s, e), g in df.groupby(
@@ -478,7 +561,7 @@ def load_population_adm1() -> pd.DataFrame:
     return df.drop(columns=["reference_period_end"])
 
 
-def load_hno_pop_adm1() -> pd.DataFrame:
+def load_hno_pop_adm1(sub_parent: dict | None = None) -> pd.DataFrame:
     """Total population per ADM1 unit from the HNO/JIAF baseline (hpc.needs_admin,
     population_status='all'): each plan's own population base, self-consistent with
     the PiN/targeted figures on the axes. Second fallback layer for the scatter
@@ -488,13 +571,25 @@ def load_hno_pop_adm1() -> pd.DataFrame:
     engine = stratus.get_engine("dev")
     q = f"""
     SELECT location_code AS iso3, admin1_code, {ANAME} AS name, admin2_code,
-           admin3_code, admin_level, population, reference_period_start
+           admin2_name, admin3_code, admin_level, population, reference_period_start
     FROM hpc.needs_admin
     WHERE population_status = 'all' AND lower(COALESCE(category, '')) IN ('total', '')
       AND admin_level >= {LEVEL} AND {ACODE} IS NOT NULL
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_start"])
+    if sub_parent:
+        # Same upstream hazard as the PiN loader: *-XXX sub-rows with a wrong
+        # stated admin-1 — re-attribute by unique COD sub-unit name.
+        is_xxx = df["admin2_code"].fillna("").str.endswith("-XXX")
+        moved = 0
+        for i in df.index[is_xxx]:
+            par = sub_parent.get((df.at[i, "iso3"], _fold(df.at[i, "admin2_name"] or "")))
+            if par and par != df.at[i, "admin1_code"]:
+                df.at[i, "admin1_code"] = par
+                moved += 1
+        if moved:
+            print(f"  hno-pop: re-attributed {moved} placeholder-coded sub-row(s) by name")
     rows = []
     for iso3, g in df.groupby("iso3"):
         ref = g["reference_period_start"].max()
@@ -554,8 +649,27 @@ def main() -> None:
                     parent_names[r["pcode"]] = a1_names[par]
     names = poly.set_index("pcode")["name"].to_dict()
 
+    # (iso3, folded adm2 name) -> parent admin1 pcode, names unique within country:
+    # lets loaders re-attribute placeholder-coded sub-rows whose stated admin-1 is
+    # wrong upstream (see MOZ 2024). Level-1 rollups only.
+    sub_parent: dict = {}
+    if LEVEL == 1:
+        with engine.connect() as conn:
+            p2 = pd.read_sql(
+                "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=2", conn)
+        a1_by_iso = {i: sorted(g_["pcode"], key=len, reverse=True)
+                     for i, g_ in poly.groupby("iso3")}
+        cnt: dict = {}
+        for _, r in p2.iterrows():
+            k = (r["iso3"], _fold(r["name"]))
+            par = next((c for c in a1_by_iso.get(r["iso3"], [])
+                        if str(r["pcode"]).startswith(c)), None)
+            if par:
+                cnt[k] = None if k in cnt else par  # None marks ambiguous names
+        sub_parent = {k: v for k, v in cnt.items() if v}
+
     print("Reconciling humanitarian pcodes to the COD vintage...")
-    df_pin_raw, sector_names = load_pin_adm1()
+    df_pin_raw, sector_names = load_pin_adm1(sub_parent)
     df_pin = normalize_pcodes(df_pin_raw, poly, "PiN")
     df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
     df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
@@ -565,7 +679,7 @@ def main() -> None:
     df_pop = (df_pop.groupby("pcode", as_index=False)
               .agg({"population": "sum", "pop_year": "max"})
               .rename(columns={"population": "pop"}))
-    df_hno = normalize_pcodes(load_hno_pop_adm1(), poly, "hno-pop")
+    df_hno = normalize_pcodes(load_hno_pop_adm1(sub_parent), poly, "hno-pop")
     df_hno = (df_hno.groupby("pcode", as_index=False)
               .agg({"hno_pop": "sum", "hno_year": "max"}))
     ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
