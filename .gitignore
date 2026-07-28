@@ -9,3 +9,4 @@ outputs/
 
 # local credentials
 .env
+pipeline/.checkpoint_adm2/
