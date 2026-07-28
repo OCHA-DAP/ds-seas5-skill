@@ -16,7 +16,7 @@ import xarray as xr
 from scipy.stats import norm
 
 from src.constants import MIN_YEARS, TRIMESTERS  # noqa: F401  (TRIMESTERS re-exported for callers)
-from src.skill import season_year_for, trimester_lead  # noqa: F401  (trimester_lead re-exported)
+from src.skill import season_year_for
 
 
 # ── Trimester aggregation ────────────────────────────────────────────────────────────
@@ -61,86 +61,6 @@ def aggregate_seas5_trimester_grid(da_seas5: xr.DataArray, issued_month: int,
     da = da.assign_coords(season_year=("date", sy)).swap_dims({"date": "season_year"})
     da = da.drop_vars([c for c in ("date", "leadtime") if c in da.coords], errors="ignore")
     return da.sortby("season_year")
-
-
-def _monthly_series_grid(da: xr.DataArray, month: int, valid_months: list[int],
-                         season_years: np.ndarray | None = None) -> xr.DataArray | None:
-    """One calendar month of a (date, y, x) array as a (season_year, y, x) series.
-
-    `season_years` overrides the season_year assignment (used for SEAS5 forecast months,
-    whose season_year derives from the *valid* date, not the issued `date` coord).
-    """
-    da = _dt_coord(da)
-    mask = (da["date"].dt.month == month).to_numpy()
-    if not mask.any():
-        return None
-    sub = da.isel(date=mask)
-    sy = (season_years if season_years is not None
-          else _assign_season_year_np(pd.to_datetime(sub["date"].to_numpy()), valid_months))
-    sub = sub.assign_coords(season_year=("date", sy)).swap_dims({"date": "season_year"})
-    sub = sub.drop_vars([c for c in ("date", "leadtime") if c in sub.coords], errors="ignore")
-    return sub.sortby("season_year")
-
-
-def aggregate_mixed_trimester_grid(da_seas5: xr.DataArray, da_era5: xr.DataArray,
-                                   issued_month: int,
-                                   valid_months: list[int]) -> xr.DataArray | None:
-    """Grid version of src.skill.aggregate_mixed_trimester (in-season / negative leads).
-
-    Months before the issue month come from ERA5 (already observed at issuance); the issue
-    month and later come from this issuance's SEAS5, each bias-corrected per pixel against
-    ERA5 for that calendar month (mean/std matched in log space over the overlap years)
-    before the three months are averaged. Returns (season_year, y, x) in original units
-    (mm/day) — the same contract as aggregate_seas5_trimester_grid.
-    """
-    monthly: list[xr.DataArray] = []
-    for m in valid_months:
-        o = (m - issued_month) % 12
-        signed = o if o <= 6 else o - 12
-        e_ser = _monthly_series_grid(da_era5, m, valid_months)
-        if e_ser is None:
-            return None
-        if signed < 0:  # observed month
-            monthly.append(e_ser)
-            continue
-        # Forecast month: SEAS5 horizon < 12 months, so (issued month, valid month)
-        # uniquely determines the leadtime.
-        s = _dt_coord(da_seas5)
-        dmask = (s["date"].dt.month == issued_month).to_numpy()
-        if not dmask.any():
-            return None
-        sub = s.isel(date=dmask)
-        lmask = (_valid_month_for_leadtime(issued_month, sub["leadtime"]) == m).to_numpy()
-        if not lmask.any():
-            return None
-        sub = sub.isel(leadtime=lmask).mean("leadtime")
-        valid_dates = pd.DatetimeIndex(
-            pd.to_datetime(sub["date"].to_numpy()) + pd.DateOffset(months=signed)
-        )
-        f_sy = _assign_season_year_np(valid_dates, valid_months)
-        f_ser = _monthly_series_grid(sub, issued_month, valid_months, season_years=f_sy)
-        if f_ser is None:
-            return None
-        # Per-pixel, per-month bias correction in log space over the overlap years.
-        f_log = log1p(f_ser)
-        e_log = log1p(e_ser)
-        yrs = np.intersect1d(f_ser["season_year"].to_numpy(), e_ser["season_year"].to_numpy())
-        if len(yrs) >= 2:
-            fo, eo = f_log.sel(season_year=yrs), e_log.sel(season_year=yrs)
-            f_mu, f_sd = fo.mean("season_year"), fo.std("season_year", ddof=1)
-            e_mu, e_sd = eo.mean("season_year"), eo.std("season_year", ddof=1)
-            f_sd = f_sd.where(f_sd > 1e-9, 1e-9)
-            f_ser = np.expm1((f_log - f_mu) / f_sd * e_sd + e_mu).clip(min=0)
-        monthly.append(f_ser)
-
-    # Complete trimesters only: keep season_years present in all three monthly series.
-    yrs = monthly[0]["season_year"].to_numpy()
-    for p in monthly[1:]:
-        yrs = np.intersect1d(yrs, p["season_year"].to_numpy())
-    if len(yrs) == 0:
-        return None
-    stacked = xr.concat([p.sel(season_year=yrs) for p in monthly], dim="_slot")
-    return stacked.mean("_slot", skipna=False).sortby("season_year")
 
 
 def aggregate_era5_trimester_grid(da_era5: xr.DataArray,

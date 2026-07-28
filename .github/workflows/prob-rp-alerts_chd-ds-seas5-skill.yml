@@ -7,7 +7,7 @@ name: Build and deploy Python app to Azure Web App - chd-ds-seas5-skill
 on:
   push:
     branches:
-      - main
+      - prob-rp-alerts
   workflow_dispatch:
 
 jobs:
