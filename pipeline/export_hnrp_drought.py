@@ -19,6 +19,16 @@ DATA SEMANTICS & AGGREGATION RULES (hard-won — read before editing a loader):
    population_in_phase — people-level. PiN (needs_admin INN) is also people-level
    and is NOT derivable from the severity table; treat it as the plan's
    authoritative caseload and severity classes as area context.
+   HOW PiN IS MADE (JIAF 2.0 "Mosaic Method"): each sector estimates its own PiN
+   per finest analysis unit; the intersectoral PiN takes the HIGHEST sectoral PiN
+   per unit, sums those maxima upward, then validation workshops resolve flags by
+   consensus — so sectoral arithmetic will NOT reproduce it exactly (TCD: 73% of
+   admin-2 units equal max(sector); SDN 0% equal but 98% ≥ it, the signature of
+   mosaic at a finer unit). From HPC 2026 overall PiN counts only areas in
+   intersectoral severity 3+ (2025-cycle PiN can include class-1/2 areas — why
+   PiN > pop(3+ areas) in COD/MOZ). A PiN-BY-SEVERITY distribution exists in JIAF
+   ("PiN par gravité" workbook sheets, reintroduced by the 2025 Humanitarian
+   Reset) but is NOT in the mirror — only the area classification is.
 
 2. PREFER THE COARSEST PUBLISHED LEVEL. Where a country publishes the same series
    at admin-1 AND finer, the admin-1 figures equal the finer sums (ratio 1.000)
