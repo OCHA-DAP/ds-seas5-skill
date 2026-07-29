@@ -33,13 +33,37 @@
   document.querySelector(".hnrp-h").textContent = `Severity vs targeted, per admin ${ADM}`;
   // Parent admin-1 name qualifies adm2 units (district names repeat across regions).
   const dispName = (r) => (r.parent ? `${r.name ?? r.pcode} (${r.parent})` : (r.name ?? r.pcode));
+  // Every control survives the admin-level reload (and makes links shareable
+  // with their settings): state is carried in the URL query string.
+  const CTLS = {
+    skill: "hnrp-skill", rp: "hnrp-rp", tri: "hnrp-tri", sector: "hnrp-sector",
+    sev: "hnrp-sev-type", lvl: "hnrp-sev-lvl", ipcp: "hnrp-ipc-period",
+    country: "hnrp-country", sort: "hnrp-bar-sort",
+  };
   admSel.addEventListener("change", () => {
     const u = new URL(location.href);
     if (admSel.value === "2") u.searchParams.set("adm", "2");
     else u.searchParams.delete("adm");
+    for (const [k, id] of Object.entries(CTLS)) {
+      const el = document.getElementById(id);
+      if (el && el.value) u.searchParams.set(k, el.value);
+    }
+    u.searchParams.set("dro", document.getElementById("hnrp-drought-only").checked ? "1" : "0");
     u.hash = "hnrp";
     location.href = u.toString();
   });
+  function restoreControls() {
+    const q = new URLSearchParams(location.search);
+    for (const [k, id] of Object.entries(CTLS)) {
+      const v = q.get(k), el = document.getElementById(id);
+      // Only restore values that exist in the select (the country list differs
+      // between admin levels; an absent option silently stays at the default).
+      if (v != null && el && [...el.options].some((o) => o.value === v)) el.value = v;
+    }
+    if (q.get("dro") != null) {
+      document.getElementById("hnrp-drought-only").checked = q.get("dro") === "1";
+    }
+  }
 
   const skillSel = document.getElementById("hnrp-skill");
   const rpSel = document.getElementById("hnrp-rp");
@@ -899,6 +923,8 @@
     fitCountry(false); // instant on reveal — the panel just appeared, nothing to glide from
     renderAll(); // paths may mount after the panel becomes visible — restyle then
   };
+  restoreControls(); // after options are populated, before the first render
   renderAll();
+  if (countrySel.value) fitCountry(false); // restored country: land on it directly
   requestAnimationFrame(renderMap); // catch paths that mounted after the first pass
 })();
