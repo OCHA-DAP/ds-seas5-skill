@@ -5,24 +5,29 @@
 // skill), and the ranked table. Reuses app.js globals: STYLE, classify, catBase,
 // CAT_LABEL, T, buildPatterns.
 (async function () {
-  // Admin level via ?adm=2: switching reloads the page with the adm2 payload —
-  // the whole tab is data-driven, so a reload is the simplest correct switch.
-  let ADM = new URLSearchParams(location.search).get("adm") === "2" ? 2 : 1;
-  const files = (lvl) => [
-    lvl === 2 ? "data/hnrp_drought_adm2.json" : "data/hnrp_drought.json",
-    lvl === 2 ? "data/hnrp_adm2.geojson" : "data/hnrp_adm1.geojson",
-  ];
+  // Admin level via ?adm=1|2|3|low: switching reloads the page with that
+  // level's payload — the whole tab is data-driven, so a reload is the simplest
+  // correct switch. Default is "low": each country at its finest available level.
+  const ADM_FILES = {
+    low: ["data/hnrp_drought_low.json", "data/hnrp_low.geojson"],
+    1: ["data/hnrp_drought.json", "data/hnrp_adm1.geojson"],
+    2: ["data/hnrp_drought_adm2.json", "data/hnrp_adm2.geojson"],
+    3: ["data/hnrp_drought_adm3.json", "data/hnrp_adm3.geojson"],
+  };
+  let ADM = new URLSearchParams(location.search).get("adm") ?? "low";
+  if (!(ADM in ADM_FILES)) ADM = "low";
+  const ADM_LABEL = { low: "lowest available level", 1: "admin 1", 2: "admin 2", 3: "admin 3" };
   let data, geo, world;
   try {
     world = await fetch("data/countries.geojson").then((r) => r.json());
     try {
       [data, geo] = await Promise.all(
-        files(ADM).map((f) => fetch(f).then((r) => (r.ok ? r.json() : Promise.reject(r)))));
+        ADM_FILES[ADM].map((f) => fetch(f).then((r) => (r.ok ? r.json() : Promise.reject(r)))));
     } catch {
-      if (ADM === 2) { // adm2 payload not built yet — fall back rather than a blank tab
-        ADM = 1;
+      if (ADM !== "1") { // payload not built yet — fall back rather than a blank tab
+        ADM = "1";
         [data, geo] = await Promise.all(
-          files(1).map((f) => fetch(f).then((r) => r.json())));
+          ADM_FILES[1].map((f) => fetch(f).then((r) => r.json())));
       } else { throw new Error("no data"); }
     }
   } catch {
@@ -30,7 +35,7 @@
   }
   const admSel = document.getElementById("hnrp-adm");
   admSel.value = String(ADM);
-  document.querySelector(".hnrp-h").textContent = `Severity vs targeted, per admin ${ADM}`;
+  document.querySelector(".hnrp-h").textContent = `Severity vs targeted, per ${ADM_LABEL[ADM]}`;
   // Parent admin-1 name qualifies adm2 units (district names repeat across regions).
   const dispName = (r) => (r.parent ? `${r.name ?? r.pcode} (${r.parent})` : (r.name ?? r.pcode));
   // Every control survives the admin-level reload (and makes links shareable
@@ -42,8 +47,8 @@
   };
   admSel.addEventListener("change", () => {
     const u = new URL(location.href);
-    if (admSel.value === "2") u.searchParams.set("adm", "2");
-    else u.searchParams.delete("adm");
+    if (admSel.value === "low") u.searchParams.delete("adm");
+    else u.searchParams.set("adm", admSel.value);
     for (const [k, id] of Object.entries(CTLS)) {
       const el = document.getElementById(id);
       if (el && el.value) u.searchParams.set(k, el.value);
@@ -687,15 +692,15 @@
     barsHint.hidden = rows.length > 0;
     if (!rows.length) return;
     if (pinMode()) {
-      barsTitle.textContent = `${country} — PiN${secTag()} per admin ${ADM}` +
+      barsTitle.textContent = `${country} — PiN${secTag()} per ${ADM_LABEL[ADM]}` +
         ` (plan data ${planYrOf(rows[0]) ?? "–"})`;
     } else if (ipcMode()) {
       const c = ipcComboOf(rows[0]);
-      barsTitle.textContent = `${country} — population by IPC/CH phase, per admin ${ADM}` +
+      barsTitle.textContent = `${country} — population by IPC/CH phase, per ${ADM_LABEL[ADM]}` +
         (c ? ` (${comboDesc(c)})` : "");
     } else {
       barsTitle.textContent = `${country} — PiN by JIAF severity class, ` +
-        `per admin ${ADM} (${rows[0].pbs_yr ?? "–"} analysis)`;
+        `per ${ADM_LABEL[ADM]} (${rows[0].pbs_yr ?? "–"} analysis)`;
     }
 
     const W = barsSvg.parentElement.clientWidth || 900;
@@ -778,7 +783,7 @@
   // ── Table ────────────────────────────────────────────────────────────────────
   const COLS = [
     { key: "country", label: "Country", num: false },
-    { key: "name", label: `Admin ${ADM}`, num: false },
+    { key: "name", label: ADM === "low" ? "Admin unit" : `Admin ${ADM}`, num: false },
     { key: "_plan_yr", label: "Plan", num: true },
     { key: "sev4", label: "Severity 4+ pop", num: true },
     { key: "pin", label: "PiN", num: true },

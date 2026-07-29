@@ -101,6 +101,12 @@ LEVEL = 1
 ACODE, ANAME = "admin1_code", "admin1_name"
 
 
+# Admin-3: countries with adm3 humanitarian data AND an adm3 layer in the COD
+# shapefile zips. COD (DRC) publishes adm3 data against zones de santé, a health
+# geography absent from our boundary set — it stays at its admin-2 rollup.
+ADM3_ISO3S = ["BFA", "MMR", "SYR"]
+
+
 def _set_level(level: int) -> None:
     global LEVEL, ACODE, ANAME, SKILL_BLOB, OUT, GEO_OUT, SIMPLIFY_TOLERANCE
     LEVEL = level
@@ -110,6 +116,15 @@ def _set_level(level: int) -> None:
         OUT = HERE.parent / "docs" / "data" / "hnrp_drought_adm2.json"
         GEO_OUT = HERE.parent / "docs" / "data" / "hnrp_adm2.geojson"
         SIMPLIFY_TOLERANCE = 0.03
+    elif level == 3:
+        # No adm3 zonal stats exist — the forecast (skill, rainy season) is
+        # inherited from each unit's PARENT admin-2 (mapped via the shapefiles'
+        # ADM2_PCODE column), so the adm2 skill blob is the source here too.
+        ACODE, ANAME = "admin3_code", "admin3_name"
+        SKILL_BLOB = f"{PROJECT_PREFIX}/processed/skill_stats_detrended_adm2.parquet"
+        OUT = HERE.parent / "docs" / "data" / "hnrp_drought_adm3.json"
+        GEO_OUT = HERE.parent / "docs" / "data" / "hnrp_adm3.geojson"
+        SIMPLIFY_TOLERANCE = 0.035
 
 
 def export_geometry(isos: list[str], names: dict[str, str]) -> None:
@@ -282,7 +297,7 @@ def load_pin_adm1(sub_parent: dict | None = None) -> tuple[pd.DataFrame, dict[st
     # ("Max value of indicators…"), not caseloads.
     q = f"""
     SELECT location_code, sector_code, sector_name, admin1_code, admin1_name,
-           admin2_code, admin2_name,
+           admin2_code, admin2_name, admin3_code, admin3_name,
            admin_level, population_status, population, reference_period_start
     FROM hpc.needs_admin
     WHERE category = 'total' AND population_status IN ('INN', 'TGT')
@@ -429,6 +444,7 @@ def load_severity_adm1() -> pd.DataFrame:
     engine = stratus.get_engine("dev")
     q = """
     SELECT iso3, year, admin1_code, admin1_name, admin2_code, admin2_name,
+           admin3_code, admin3_name,
            population_group, final_severity, population
     FROM hpc.severity_admin
     """
@@ -488,6 +504,10 @@ def load_ipc_adm1() -> pd.DataFrame:
     because rounds overlap and the right comparison window is a user choice.
     Admin-2 rows are summed to admin-1 where a country publishes deeper.
     """
+    if LEVEL == 3:  # HAPI food-security has no admin-3 layer
+        print("IPC: none at admin-3 (HAPI stops at admin-2)")
+        return pd.DataFrame(columns=["pcode", "iso3", "name", "t", "s", "e", "a",
+                                     *(f"p{p}" for p in ["1", "2", "3", "4", "5", "all"])])
     engine = stratus.get_engine("dev")
     # Recency: analyses valid in 2025 or later. Dead/stalled series (ETH 2021,
     # AGO/SLV 2022, BFA 2024-08, TLS 2024-09) are excluded as too old to act on.
@@ -557,7 +577,7 @@ def load_pbs_adm1() -> pd.DataFrame:
     engine = stratus.get_engine("dev")
     q = f"""
     SELECT iso3, year, admin1_code, admin2_code, admin3_code,
-           COALESCE(admin2_name, admin1_name) AS name, population_group,
+           COALESCE(admin3_name, admin2_name, admin1_name) AS name, population_group,
            severity, final_pin
     FROM hpc.pin_admin WHERE {ACODE} IS NOT NULL AND final_pin IS NOT NULL
     """
@@ -614,6 +634,9 @@ def load_population_adm1() -> pd.DataFrame:
     mirror; normalize_pcodes reconciles them to our COD vintage (including
     name-matching units HAPI ships with *-XXX placeholder codes).
     """
+    if LEVEL == 3:  # COD-PS via HAPI has no admin-3 layer
+        print("Population baseline: none at admin-3")
+        return pd.DataFrame(columns=["iso3", "pcode", "name", "population", "pop_year"])
     engine = stratus.get_engine("dev")
     q = f"""
     SELECT location_code AS iso3, {ACODE} AS pcode, {ANAME} AS name,
@@ -682,9 +705,56 @@ def load_hno_pop_adm1(sub_parent: dict | None = None) -> pd.DataFrame:
         rows += [{"pcode": p, "iso3": iso3, "name": a1names.get(p),
                   "hno_pop": int(v), "hno_year": int(ref.year)}
                  for p, v in tot.items() if pd.notna(v)]
+    if not rows:
+        print("HNO baseline: none at this level")
+        return pd.DataFrame(columns=["pcode", "iso3", "name", "hno_pop", "hno_year"])
     out = pd.DataFrame(rows)
-    print(f"HNO baseline: {out['iso3'].nunique()} countries, {len(out)} ADM1 units")
+    print(f"HNO baseline: {out['iso3'].nunique()} countries, {len(out)} units")
     return out
+
+
+def build_lowest() -> None:
+    """Combine the per-level exports into the 'lowest available level' view.
+
+    Per country: admin-3 where we have it (BFA/MMR/SYR), else admin-2 (the
+    21-country adm2 scope), else admin-1. Reads the three payloads/geojsons
+    already written by --level 1/2/3 runs and writes hnrp_drought_low.json +
+    hnrp_low.geojson — rows carry "lvl" so the site can say which level a unit
+    came from.
+    """
+    base = HERE.parent / "docs" / "data"
+    data, geo = {}, {}
+    for lvl, suffix in [(1, ""), (2, "_adm2"), (3, "_adm3")]:
+        dp = base / f"hnrp_drought{suffix}.json"
+        gp = base / (f"hnrp_adm{lvl}.geojson" if lvl > 1 else "hnrp_adm1.geojson")
+        if not dp.exists() or not gp.exists():
+            sys.exit(f"Missing level-{lvl} outputs ({dp.name} / {gp.name}) — "
+                     f"run --level {lvl} first")
+        data[lvl] = json.loads(dp.read_text())
+        geo[lvl] = json.loads(gp.read_text())
+
+    level_of: dict[str, int] = {}
+    for lvl in (1, 2, 3):
+        for r in data[lvl]["rows"]:
+            level_of[r["iso3"]] = max(level_of.get(r["iso3"], 1), lvl)
+    rows = [dict(r, lvl=lvl) for lvl in (1, 2, 3) for r in data[lvl]["rows"]
+            if level_of.get(r["iso3"]) == lvl]
+    feats = [f for lvl in (1, 2, 3) for f in geo[lvl]["features"]
+             if level_of.get(f["properties"].get("iso3")) == lvl]
+
+    payload = {**data[1], "adm_level": "low", "rows": rows}
+    out = base / "hnrp_drought_low.json"
+    out.write_text(json.dumps(payload, separators=(",", ":")))
+    gout = base / "hnrp_low.geojson"
+    gout.write_text(json.dumps({"type": "FeatureCollection", "features": feats},
+                               separators=(",", ":")))
+    from collections import Counter
+    mix = Counter(level_of.values())
+    print(f"Lowest-level view: {len(rows)} units, {len(feats)} polygons "
+          f"({mix.get(3, 0)} countries at adm3, {mix.get(2, 0)} at adm2, "
+          f"{mix.get(1, 0)} at adm1)")
+    print(f"Wrote {out} ({out.stat().st_size / 1024:.0f} KB) and {gout.name} "
+          f"({gout.stat().st_size / 1e6:.1f} MB)")
 
 
 def main() -> None:
@@ -692,24 +762,51 @@ def main() -> None:
     ap.add_argument("--rebuild-geometry", action="store_true",
                     help="Rewrite the geojson even if it already exists (it is "
                          "stable between runs; the default skips it when present).")
-    ap.add_argument("--level", type=int, choices=(1, 2), default=1,
-                    help="Admin level of the export (2 writes *_adm2 outputs)")
+    ap.add_argument("--level", choices=("1", "2", "3", "low"), default="1",
+                    help="Admin level of the export (2/3 write *_admN outputs; "
+                         "'low' combines the three per-country finest levels)")
     args = ap.parse_args()
-    _set_level(args.level)
+    if args.level == "low":
+        build_lowest()
+        return
+    _set_level(int(args.level))
 
     print(f"Loading ADM{LEVEL} skill stats: {SKILL_BLOB}")
     skill = stratus.load_parquet_from_blob(SKILL_BLOB, stage="dev")
 
     engine = stratus.get_engine("prod")
+    parent2: dict[str, str] = {}  # adm3 pcode -> parent adm2 pcode (LEVEL 3 only)
     with engine.connect() as conn:
-        poly = pd.read_sql(
-            f"SELECT pcode, iso3, name FROM public.polygon WHERE adm_level={LEVEL}", conn)
+        if LEVEL == 3:
+            # public.polygon stops at adm2 — the adm3 reference (pcodes, names,
+            # parent adm2) comes straight from the COD shapefiles.
+            parts, parent_names = [], {}
+            for iso3 in ADM3_ISO3S:
+                g = stratus.load_shp_from_blob(
+                    f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm3.shp",
+                    stage="prod", container_name="polygon",
+                )
+                ncol = next(c for c in g.columns
+                            if c.upper() in ("ADM3_EN", "ADM3_FR", "ADM3_ES"))
+                n2col = ncol.replace("3", "2")
+                parts.append(pd.DataFrame({
+                    "pcode": g["ADM3_PCODE"], "iso3": iso3, "name": g[ncol]}))
+                parent2.update(dict(zip(g["ADM3_PCODE"], g["ADM2_PCODE"])))
+                parent_names.update(dict(zip(g["ADM3_PCODE"], g[n2col])))
+            poly = pd.concat(parts, ignore_index=True)
+            print(f"ADM3 reference from shapefiles: {len(poly)} units "
+                  f"({', '.join(ADM3_ISO3S)})")
+        else:
+            poly = pd.read_sql(
+                f"SELECT pcode, iso3, name FROM public.polygon WHERE adm_level={LEVEL}",
+                conn)
         country_names = pd.read_sql(
             "SELECT iso3, name FROM public.polygon WHERE adm_level=0", conn,
         ).set_index("iso3")["name"].to_dict()
         # Parent admin-1 names for level-2 rows (tooltips/table): no parent column
         # exists, but COD adm2 pcodes extend their adm1 parent's pcode.
-        parent_names: dict[str, str] = {}
+        if LEVEL != 3:
+            parent_names = {}
         if LEVEL == 2:
             p1 = pd.read_sql(
                 "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=1", conn)
@@ -817,6 +914,13 @@ def main() -> None:
         )
         print(f"Scope: +{len(extra)} IPC-covered ADM1 units outside HNRP plans "
               f"({len(set(ipc_iso3[p] for p in extra))} countries)")
+    if LEVEL == 3:
+        # Forecast inheritance: each adm3 unit carries its parent adm2's skill
+        # rows verbatim (no adm3 zonal stats exist).
+        kids = pd.DataFrame({"pcode": list(parent2), "_par": list(parent2.values())})
+        skill = (skill.rename(columns={"pcode": "_par"})
+                 .merge(kids, on="_par").drop(columns=["_par"]))
+        print(f"Skill inherited from parent adm2 for {skill['pcode'].nunique()} adm3 units")
     skill = skill[skill["pcode"].isin(set(df_hum["pcode"]))]
     if skill.empty:
         sys.exit("No overlap between ADM1 skill pcodes and HNRP PiN pcodes")
@@ -833,10 +937,13 @@ def main() -> None:
     issued_label = f"{calendar.month_name[issued_month]} {global_max_iy}"
     print(f"Latest issuance: {issued_label}")
 
-    # Rainy-season mask over the HNRP ADM1 units (same ERA5 climatology as other exports).
-    pcodes = sorted(set(skill["pcode"].dropna()))
+    # Rainy-season mask (same ERA5 climatology as other exports). At level 3 the
+    # climatology, like the skill, is the parent adm2's — queried on parents and
+    # mapped onto children.
+    pcodes = (sorted({parent2[p] for p in skill["pcode"].dropna() if p in parent2})
+              if LEVEL == 3 else sorted(set(skill["pcode"].dropna())))
     ph = ",".join(["%s"] * len(pcodes))
-    print(f"Querying ERA5 climatology for {len(pcodes)} ADM1 pcodes...")
+    print(f"Querying ERA5 climatology for {len(pcodes)} pcodes...")
     with engine.connect() as conn:
         era5 = pd.read_sql(
             f"SELECT pcode, valid_date, mean FROM public.era5 WHERE pcode IN ({ph})",
@@ -848,6 +955,11 @@ def main() -> None:
         .reset_index().rename(columns={"mean": "mean_mm_day"})
     )
     rainy_set = compute_rainy_set(monthly_clim)
+    if LEVEL == 3:
+        by_par: dict[str, list] = {}
+        for (p, t) in rainy_set:
+            by_par.setdefault(p, []).append(t)
+        rainy_set = {(c, t) for c, p in parent2.items() for t in by_par.get(p, [])}
 
     # Per unit: the worst qualifying drought slot at the latest issuance.
     sub = skill[skill["issued_month"] == issued_month].copy()
@@ -965,7 +1077,7 @@ def main() -> None:
     merged["name"] = merged["name"].combine_first(merged["name_hum"])
     merged = merged.drop(columns=["name_hum"])
     merged["country"] = merged["iso3"].map(country_names)
-    if LEVEL == 2:
+    if LEVEL >= 2:
         merged["parent"] = merged["pcode"].map(parent_names)
     # A row whose pcode has no polygon at this level can never display — no map
     # geometry and no forecast series behind it (at level 2, mostly IPC codes from

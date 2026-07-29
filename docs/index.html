@@ -199,8 +199,10 @@
         </label>
         <label class="ctl">Admin level
           <select id="hnrp-adm" class="map-select">
-            <option value="1" selected>Admin 1</option>
+            <option value="low" selected>Lowest available</option>
+            <option value="1">Admin 1</option>
             <option value="2">Admin 2</option>
+            <option value="3">Admin 3</option>
           </select>
         </label>
         <span id="hnrp-issued" class="lock-note"></span>
@@ -338,13 +340,22 @@
 
       <h4>Admin levels</h4>
       <p>
-        The <strong>Admin level</strong> selector switches the whole tab between admin-1
-        (all 45 countries) and admin-2 (~4,900 units across 21 countries with admin-2
-        boundaries and zonal statistics in our database: AFG, BFA, CAF, CMR, COD, COL,
+        The <strong>Admin level</strong> selector switches the whole tab between four
+        views. <em>Lowest available</em> (the default) shows each country at the finest
+        level we can: admin-3 where plans publish it against boundaries we hold
+        (Burkina Faso communes, Myanmar townships, Syria sub-districts), admin-2 for the
+        21-country admin-2 scope, admin-1 elsewhere. Fixed admin-1/2/3 views show one
+        level only. Admin-2 covers ~4,900 units across 21 countries with admin-2
+        boundaries and zonal statistics in our database (AFG, BFA, CAF, CMR, COD, COL,
         GTM, HND, HTI, MLI, MOZ, NER, NGA, SDN, SLV, SOM, SSD, TCD, UKR, VEN, YEM —
         the rest lack admin-2 polygons on our side and are excluded on that basis;
-        Myanmar has the boundaries but publishes its data keyed admin-1/3 with no
-        admin-2 codes, so it cannot appear). Figures published only at admin-1 cannot be downscaled
+        Myanmar publishes admin-1/3 only). DR Congo's admin-3 data is keyed to zones
+        de santé, a health geography absent from our boundary set — it stays at
+        admin-2. <strong>No admin-3 forecast exists</strong>: admin-3 units inherit
+        their parent admin-2's forecast (skill, return period, rainy season)
+        verbatim — only the humanitarian figures are finer. IPC and the population
+        baselines stop at admin-2, so admin-3 units (and their countries in the
+        Lowest view) show no IPC layer and use analysed-population denominators. Figures published only at admin-1 cannot be downscaled
         and show dashes at admin-2. Forecast skill at admin-2 is computed identically,
         per unit; smaller units are noisier, so treat marginal signals with extra
         caution. The table shows at most 500 rows at a time; admin-2 unit names carry

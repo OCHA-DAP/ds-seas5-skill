@@ -30,7 +30,7 @@ from compute_skill_adm1 import _compute_unit  # noqa: E402 — level-agnostic wo
 # The Forecast × HNRP scope (HNRP or recent-IPC countries) ∩ adm2 availability.
 ADM2_ISO3S = [
     "AFG", "BFA", "CAF", "CMR", "COD", "COL", "GTM", "HND", "HTI", "MLI", "MMR",
-    "MOZ", "NER", "NGA", "SDN", "SLV", "SOM", "SSD", "TCD", "UKR", "VEN", "YEM",
+    "MOZ", "NER", "NGA", "SDN", "SLV", "SOM", "SSD", "SYR", "TCD", "UKR", "VEN", "YEM",
 ]
 
 SKILL_BLOB     = f"{PROJECT_PREFIX}/processed/skill_stats_adm2.parquet"

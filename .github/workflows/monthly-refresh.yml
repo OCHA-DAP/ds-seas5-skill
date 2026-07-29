@@ -81,6 +81,12 @@ jobs:
       - name: Export Forecast × HNRP admin-2 data (hnrp_drought_adm2.json)
         run: uv run python pipeline/export_hnrp_drought.py --level 2
 
+      - name: Export Forecast × HNRP admin-3 data (forecast from parent adm2)
+        run: uv run python pipeline/export_hnrp_drought.py --level 3
+
+      - name: Combine per-country lowest-level view (hnrp_drought_low.json)
+        run: uv run python pipeline/export_hnrp_drought.py --level low
+
       - name: Commit updated data
         run: |
           git config user.name "github-actions[bot]"
