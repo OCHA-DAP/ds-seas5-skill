@@ -24,7 +24,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.constants import PROJECT_PREFIX  # noqa: E402
 
-ADM3_ISO3S = ["BFA", "MMR", "SYR"]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from export_hnrp_drought import ADM3_ISO3S, load_adm3_shp  # noqa: E402
+
 WP_URL = ("https://data.worldpop.org/GIS/Population/Global_2000_2020_1km_UNadj/"
           "2020/{ISO}/{iso}_ppp_2020_1km_Aggregated_UNadj.tif")
 OUT_BLOB = f"{PROJECT_PREFIX}/processed/pop_adm3_worldpop.parquet"
@@ -38,12 +40,7 @@ def main() -> None:
             url = WP_URL.format(ISO=iso3, iso=iso3.lower())
             print(f"{iso3}: downloading WorldPop raster...")
             urllib.request.urlretrieve(url, tif)
-            g = stratus.load_shp_from_blob(
-                f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm3.shp",
-                stage="prod", container_name="polygon",
-            )
-            ncol = next(c for c in g.columns
-                        if c.upper() in ("ADM3_EN", "ADM3_FR", "ADM3_ES"))
+            g, pcol, ncol, _ = load_adm3_shp(iso3)
             with rasterio.open(tif) as src:
                 if g.crs != src.crs:
                     g = g.to_crs(src.crs)
@@ -54,7 +51,7 @@ def main() -> None:
                         pop = float(np.nansum(arr))
                     except ValueError:  # geometry outside raster bounds
                         pop = float("nan")
-                    rows.append({"pcode": r["ADM3_PCODE"], "iso3": iso3,
+                    rows.append({"pcode": r[pcol], "iso3": iso3,
                                  "name": r[ncol],
                                  "population": round(pop) if pop == pop else None,
                                  "pop_year": 2020})

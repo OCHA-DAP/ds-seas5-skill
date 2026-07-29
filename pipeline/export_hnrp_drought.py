@@ -101,10 +101,29 @@ LEVEL = 1
 ACODE, ANAME = "admin1_code", "admin1_name"
 
 
-# Admin-3: countries with adm3 humanitarian data AND an adm3 layer in the COD
-# shapefile zips. COD (DRC) publishes adm3 data against zones de santé, a health
-# geography absent from our boundary set — it stays at its admin-2 rollup.
-ADM3_ISO3S = ["BFA", "MMR", "SYR"]
+# Admin-3: countries with adm3 humanitarian data AND boundaries we hold. BFA/MMR/
+# SYR come from the COD shapefile zips' adm3 layers; COD (DRC) publishes against
+# zones de santé — the SNIS/OCHA health-zone shapefile (RDC_Zone_de_sante_09092019,
+# HDX dr-congo-health-0, mirrored to our dev blob) joins hpc.* 519/519 by ZSCode.
+ADM3_ISO3S = ["BFA", "COD", "MMR", "SYR"]
+
+
+def load_adm3_shp(iso3: str):
+    """The adm3 boundary layer + (pcode, name, parent-adm2) column names."""
+    if iso3 == "COD":
+        g = stratus.load_shp_from_blob(
+            f"{PROJECT_PREFIX}/raw/cod_zs_09092019.zip",
+            shapefile="RDC_Zone_de_sante_09092019.shp",
+            stage="dev", container_name="projects",
+        )
+        g["_parent"] = g["ZSCode"].str[:6]  # CD####ZS## -> CD####
+        return g, "ZSCode", "Nom", "_parent"
+    g = stratus.load_shp_from_blob(
+        f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm3.shp",
+        stage="prod", container_name="polygon",
+    )
+    ncol = next(c for c in g.columns if c.upper() in ("ADM3_EN", "ADM3_FR", "ADM3_ES"))
+    return g, "ADM3_PCODE", ncol, "ADM2_PCODE"
 
 
 def _set_level(level: int) -> None:
@@ -138,22 +157,28 @@ def export_geometry(isos: list[str], names: dict[str, str]) -> None:
     parts = []
     for iso3 in isos:
         try:
-            g = stratus.load_shp_from_blob(
-                f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm{LEVEL}.shp",
-                stage="prod", container_name="polygon",
-            )
+            if LEVEL == 3:
+                g, pcol, _, _ = load_adm3_shp(iso3)
+            else:
+                g = stratus.load_shp_from_blob(
+                    f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm{LEVEL}.shp",
+                    stage="prod", container_name="polygon",
+                )
+                pcol = next((c for c in g.columns
+                             if c.lower() in (f"adm{LEVEL}_pcode", "pcode")), None)
         except Exception as e:  # noqa: BLE001 — a missing country shouldn't kill the export
             print(f"  {iso3}: boundary load failed ({type(e).__name__}), skipped")
             continue
-        pcol = next((c for c in g.columns
-                     if c.lower() in (f"adm{LEVEL}_pcode", "pcode")), None)
         if pcol is None:
             print(f"  {iso3}: no pcode column, skipped")
             continue
         g = g[[pcol, "geometry"]].rename(columns={pcol: "pcode"})
         topo = tp.Topology(g, prequantize=True, shared_coords=True)
         g = topo.toposimplify(SIMPLIFY_TOLERANCE).to_gdf()
-        g["geometry"] = g["geometry"].make_valid()
+        try:
+            g["geometry"] = g["geometry"].make_valid()
+        except Exception:  # mixed-dimension collections (COD zones): rebuild by structure
+            g["geometry"] = g["geometry"].make_valid(method="structure", keep_collapsed=False)
         # make_valid can emit GeometryCollections/points; keep polygonal parts only
         # (a stray Point renders as a Leaflet marker and wrecks the map fit).
         g = g.explode(index_parts=False)
@@ -792,19 +817,22 @@ def main() -> None:
         if LEVEL == 3:
             # public.polygon stops at adm2 — the adm3 reference (pcodes, names,
             # parent adm2) comes straight from the COD shapefiles.
+            a2names = pd.read_sql(
+                "SELECT pcode, name FROM public.polygon WHERE adm_level=2",
+                conn).set_index("pcode")["name"].to_dict()
             parts, parent_names = [], {}
             for iso3 in ADM3_ISO3S:
-                g = stratus.load_shp_from_blob(
-                    f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm3.shp",
-                    stage="prod", container_name="polygon",
-                )
-                ncol = next(c for c in g.columns
-                            if c.upper() in ("ADM3_EN", "ADM3_FR", "ADM3_ES"))
-                n2col = ncol.replace("3", "2")
+                g, pcol, ncol, parcol = load_adm3_shp(iso3)
                 parts.append(pd.DataFrame({
-                    "pcode": g["ADM3_PCODE"], "iso3": iso3, "name": g[ncol]}))
-                parent2.update(dict(zip(g["ADM3_PCODE"], g["ADM2_PCODE"])))
-                parent_names.update(dict(zip(g["ADM3_PCODE"], g[n2col])))
+                    "pcode": g[pcol], "iso3": iso3, "name": g[ncol]}))
+                parent2.update(dict(zip(g[pcol], g[parcol])))
+                if ncol.upper().startswith("ADM3"):
+                    n2col = ncol.replace("3", "2")
+                    parent_names.update(dict(zip(g[pcol], g[n2col])))
+                else:  # COD: parent names from the adm2 polygon table
+                    parent_names.update({z: a2names.get(par)
+                                         for z, par in zip(g[pcol], g[parcol])
+                                         if a2names.get(par)})
             poly = pd.concat(parts, ignore_index=True)
             print(f"ADM3 reference from shapefiles: {len(poly)} units "
                   f"({', '.join(ADM3_ISO3S)})")
