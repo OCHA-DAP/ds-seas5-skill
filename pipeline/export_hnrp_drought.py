@@ -577,7 +577,17 @@ def load_pbs_adm1() -> pd.DataFrame:
             # Named disjoint groups partition the caseload — sum them; a stray
             # sub-dominant blank row (MLI: 1 unit) would double-count, drop it.
             g = g[g["population_group"] != ""]
-        by_class = g[g["severity"].notna()].pivot_table(
+        classed = g[g["severity"].notna()]
+        # Degenerate-distribution guard: SSD 2026 fills a constant severity 4 on
+        # every PiN row while its severity sheet shows a real 3/4/5 spread (KB:
+        # pipelines/hnrp-mirror). One distinct class across a whole country's
+        # units is a template artifact, not analysis — degrade to total-only.
+        if classed["severity"].nunique() == 1 and classed[ACODE].nunique() >= 10:
+            print(f"  pbs: {iso3} fills one constant class "
+                  f"({int(classed['severity'].iloc[0])}) on every unit — "
+                  f"degenerate, kept as total-only")
+            classed = classed.iloc[0:0]
+        by_class = classed.pivot_table(
             index=ACODE, columns="severity", values="final_pin", aggfunc="sum")
         total = g.groupby(ACODE)["final_pin"].sum()
         a1names = g.drop_duplicates(ACODE).set_index(ACODE)["name"]
@@ -588,7 +598,7 @@ def load_pbs_adm1() -> pd.DataFrame:
                 v = by_class.loc[pcode, cls] if (pcode in by_class.index
                                                  and cls in by_class.columns) else None
                 row[f"pb{cls}"] = int(v) if pd.notna(v) else 0
-            row["pbs_classed"] = int(g.loc[g[ACODE] == pcode, "severity"].notna().any())
+            row["pbs_classed"] = int(pcode in by_class.index)  # respects the degenerate guard
             rows.append(row)
     out = pd.DataFrame(rows)
     print(f"PiN-by-severity: {out['iso3'].nunique()} countries, {len(out)} units "
