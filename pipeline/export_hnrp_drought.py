@@ -634,9 +634,21 @@ def load_population_adm1() -> pd.DataFrame:
     mirror; normalize_pcodes reconciles them to our COD vintage (including
     name-matching units HAPI ships with *-XXX placeholder codes).
     """
-    if LEVEL == 3:  # COD-PS via HAPI has no admin-3 layer
-        print("Population baseline: none at admin-3")
-        return pd.DataFrame(columns=["iso3", "pcode", "name", "population", "pop_year"])
+    if LEVEL == 3:
+        # COD-PS via HAPI has no admin-3 layer — WorldPop 1km UN-adjusted totals,
+        # zonally summed over the same adm3 boundaries, stand in
+        # (pipeline/backfill_adm3_population.py; spatial join, no pcodes involved).
+        try:
+            df = stratus.load_parquet_from_blob(
+                f"{PROJECT_PREFIX}/processed/pop_adm3_worldpop.parquet", stage="dev")
+            df = df[df["population"].notna()]
+            print(f"Population baseline (WorldPop adm3): {df['iso3'].nunique()} "
+                  f"countries, {len(df)} units")
+            return df
+        except Exception as e:  # noqa: BLE001
+            print(f"Population baseline: WorldPop adm3 parquet unavailable "
+                  f"({type(e).__name__}) — run backfill_adm3_population.py")
+            return pd.DataFrame(columns=["iso3", "pcode", "name", "population", "pop_year"])
     engine = stratus.get_engine("dev")
     q = f"""
     SELECT location_code AS iso3, {ACODE} AS pcode, {ANAME} AS name,
@@ -1050,7 +1062,8 @@ def main() -> None:
               f"{sorted(set(merged.loc[bad, 'iso3'] + ':' + merged.loc[bad, 'pcode']))}")
         merged.loc[bad, ["pop", "pop_year"]] = float("nan")
     merged["pop_src"] = None
-    merged.loc[merged["pop"].notna(), "pop_src"] = "COD-PS"
+    merged.loc[merged["pop"].notna(), "pop_src"] = ("WorldPop" if LEVEL == 3
+                                                     else "COD-PS")
     # Layer 2: the HNO/JIAF baseline fills units the COD-PS layer left empty
     # (missing upstream or distrust-nulled). An HNO total clearly below the
     # analysed population can't be a valid denominator either — logged and
@@ -1065,9 +1078,10 @@ def main() -> None:
               f"population, skipped: "
               f"{sorted(set(merged.loc[hno_low, 'iso3'] + ':' + merged.loc[hno_low, 'pcode']))}")
     use_hno = merged["pop"].isna() & merged["hno_pop"].notna() & ~hno_low
-    merged.loc[use_hno, "pop"] = merged.loc[use_hno, "hno_pop"]
-    merged.loc[use_hno, "pop_year"] = merged.loc[use_hno, "hno_year"]
-    merged.loc[use_hno, "pop_src"] = "HNO"
+    if use_hno.any():  # empty assignment TypeErrors when the HNO layer is empty (adm3)
+        merged.loc[use_hno, "pop"] = merged.loc[use_hno, "hno_pop"]
+        merged.loc[use_hno, "pop_year"] = merged.loc[use_hno, "hno_year"]
+        merged.loc[use_hno, "pop_src"] = "HNO"
     merged = merged.drop(columns=["hno_pop", "hno_year"])
     n_pop = merged["pop"].notna().sum()
     print(f"Population baseline covers {n_pop}/{len(merged)} units "

@@ -501,7 +501,8 @@
     r.pop ?? (Math.max(ipcComboOf(r)?.tot ?? 0, r.sev_total ?? 0) || null);
   const popSrcOf = (r) => {
     if (r.pop) {
-      return `total population, ${r.pop_src === "HNO" ? "HNO baseline" : "COD-PS"}` +
+      const srcName = { HNO: "HNO baseline", WorldPop: "WorldPop" }[r.pop_src] ?? "COD-PS";
+      return `total population, ${srcName}` +
         (r.pop_year ? ` ${r.pop_year}` : "");
     }
     const ipc = ipcComboOf(r)?.tot ?? 0, jiaf = r.sev_total ?? 0;
