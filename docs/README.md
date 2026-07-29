@@ -47,11 +47,20 @@ the scripts fall back to country-only and the page has no Country/Pixel toggles.
 
 CMME specifics: ensemble-mean precipitation at 1°, monthly leads 1–6 (the issue month itself
 is not forecast → trimester leads 1–4, no in-season trimesters), hindcast inits 1991–2020 +
-realtime from Aug 2025 (nothing in between). Rebuild with:
+realtime from Aug 2025 (nothing in between).
+
+**Password protection.** The repo and Pages site are public, so every JSON under `cma/data/`
+is **AES-256-GCM encrypted** by the exporter; `cma/index.html` shows a password prompt,
+derives the key in-browser (PBKDF2, WebCrypto) and decrypts through a fetch shim — the shared
+JS is untouched. The password is NOT stored in the repo (ask the CHD data science team);
+rotating it = re-running the export with a new one. This is a share-by-link courtesy gate,
+not hard security: the derived stats are brute-forceable offline by a determined attacker.
+
+Rebuild with:
 
 ```bash
-uv run python pipeline/compute_skill_cma.py   # CMME blob → adm0 skill parquets (processed/cma/)
-uv run python pipeline/export_cma_site.py     # → docs/cma/data/  (--rebuild to rewrite history)
+uv run python pipeline/compute_skill_cma.py                        # CMME blob → adm0 skill parquets (processed/cma/)
+CMA_SITE_PASSWORD=... uv run python pipeline/export_cma_site.py    # → docs/cma/data/  (--rebuild to rewrite history)
 ```
 
 ## Files

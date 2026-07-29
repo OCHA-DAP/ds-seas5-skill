@@ -12,6 +12,33 @@
   <link rel="stylesheet" href="../style.css" />
 </head>
 <body>
+  <div id="gate">
+    <div id="gate-box">
+      <h2>CMA CMME precipitation alerts</h2>
+      <p>This page is password-protected.</p>
+      <form id="gate-form">
+        <input type="password" id="gate-pw" placeholder="Password"
+               autocomplete="current-password" autofocus />
+        <button type="submit">Unlock</button>
+      </form>
+      <p id="gate-err" hidden>Wrong password — try again.</p>
+    </div>
+  </div>
+  <style>
+    #gate { position: fixed; inset: 0; z-index: 10000; background: #fff;
+            display: flex; align-items: flex-start; justify-content: center; }
+    #gate-box { margin-top: 18vh; text-align: center; font-family: Roboto, sans-serif; }
+    #gate-box h2 { font-family: Merriweather, serif; margin-bottom: 6px; }
+    #gate-box p { color: #555; margin: 4px 0 14px; }
+    #gate-pw { padding: 8px 10px; font-size: 15px; border: 1px solid #c4d0d1;
+               border-radius: 4px; width: 220px; }
+    #gate-form button { padding: 8px 16px; font-size: 15px; margin-left: 6px;
+                        border: none; border-radius: 4px; background: #134ead;
+                        color: #fff; cursor: pointer; }
+    #gate-form button[disabled] { opacity: 0.6; cursor: default; }
+    #gate-err { color: #b91c1c; }
+  </style>
+
   <header>
     <h1>CMA CMME precipitation alerts</h1>
     <p id="subtitle">Latest forecast — loading…</p>
@@ -236,8 +263,106 @@
 
   <script>window.SITE_GEO = "../data/countries.geojson";</script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="../app.js"></script>
-  <script src="../skillmap.js"></script>
-  <script src="../skill.js"></script>
+  <script>
+    // Password gate. The data JSONs under data/ are AES-256-GCM encrypted at rest
+    // (pipeline/export_cma_site.py); this derives the key from the password
+    // (PBKDF2-SHA256, same salt/iterations as the exporter) and installs a fetch
+    // shim that transparently decrypts any response carrying the magic header —
+    // so app.js / skillmap.js / skill.js run completely unchanged. The app
+    // scripts are only injected once a working key is in hand.
+    (function () {
+      const MAGIC = [0x43, 0x4d, 0x41, 0x45, 0x4e, 0x43, 0x31];  // "CMAENC1"
+      const SALT = Uint8Array.from(
+        "69c3f243a3adf0585c1198d0b9c815a5".match(/../g), (h) => parseInt(h, 16));
+      const ITERS = 600000;
+      const STORE = "cma_site_key";
+      let KEY = null;
+
+      const origFetch = window.fetch.bind(window);
+      window.fetch = async function (input, init) {
+        const resp = await origFetch(input, init);
+        if (!resp.ok || !KEY) return resp;
+        const buf = await resp.clone().arrayBuffer();
+        const u8 = new Uint8Array(buf);
+        if (u8.length < MAGIC.length + 12 + 16 ||
+            !MAGIC.every((b, i) => u8[i] === b)) return resp;
+        const plain = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv: u8.slice(MAGIC.length, MAGIC.length + 12) },
+          KEY, u8.slice(MAGIC.length + 12));
+        return new Response(plain, {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      };
+
+      const deriveKey = async (pw) => crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt: SALT, iterations: ITERS, hash: "SHA-256" },
+        await crypto.subtle.importKey(
+          "raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]),
+        { name: "AES-GCM", length: 256 }, true, ["decrypt"]);
+
+      // A key "works" if it decrypts the issuance index (the app's first fetch).
+      async function test(key) {
+        const prev = KEY;
+        KEY = key;
+        try {
+          await (await window.fetch("data/forecasts/index.json")).json();
+          return true;
+        } catch (e) {
+          KEY = prev;
+          return false;
+        }
+      }
+
+      function boot() {
+        document.getElementById("gate").remove();
+        for (const src of ["../app.js", "../skillmap.js", "../skill.js"]) {
+          const s = document.createElement("script");
+          s.src = src;
+          s.async = false;  // preserve execution order (skillmap needs app's tab registry)
+          document.body.appendChild(s);
+        }
+      }
+
+      async function tryStored() {
+        const b64 = localStorage.getItem(STORE);
+        if (!b64) return false;
+        try {
+          const key = await crypto.subtle.importKey(
+            "raw", Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)),
+            "AES-GCM", true, ["decrypt"]);
+          return await test(key);
+        } catch (e) {
+          return false;
+        }
+      }
+
+      const form = document.getElementById("gate-form");
+      const pwInput = document.getElementById("gate-pw");
+      const err = document.getElementById("gate-err");
+      const btn = form.querySelector("button");
+      form.addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        err.hidden = true;
+        btn.disabled = true;
+        btn.textContent = "Checking…";
+        try {
+          const key = await deriveKey(pwInput.value);
+          if (await test(key)) {
+            const raw = await crypto.subtle.exportKey("raw", key);
+            localStorage.setItem(STORE, btoa(String.fromCharCode(...new Uint8Array(raw))));
+            boot();
+            return;
+          }
+          err.hidden = false;
+          pwInput.select();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "Unlock";
+        }
+      });
+
+      tryStored().then((ok) => { if (ok) boot(); });
+    })();
+  </script>
 </body>
 </html>
