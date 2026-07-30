@@ -421,6 +421,7 @@
     triLabels.clearLayers();
     const sel = countrySel.value;
     if (!sel) return;
+    if (!triSel.value.startsWith("auto")) return; // one explicit season — labels are noise
     // At adm2 a country can have 1,000+ units (Colombia) — label soup. Cap it.
     const nShown = data.rows.filter((r) => r.country === sel && slotOf(r)).length;
     if (nShown > 150) return;
@@ -562,6 +563,11 @@
     diagLabel(80, -8, `↑ more people in ${sevLabel()} than targeted`);
     diagLabel(80, 16, `↓ more people targeted than in ${sevLabel()}`);
 
+    if (ADM === "low" && countrySel.value && rows.length) {
+      g("text", { x: W - M.r - 6, y: M.t + 12, "text-anchor": "end",
+                  "font-size": 11, fill: "#9db1b3" })
+        .textContent = `shown at admin ${rows[0].lvl ?? "?"}`;
+    }
     const xOf = (r) => X(clamp(pctOf(tgtOf(r), popOf(r))));
     const yOf = (r) => Y(clamp(pctOf(sevValOf(r), popOf(r))));
     // Bubbles: big ones first so small ones stay hoverable; 2px surface ring.
@@ -600,7 +606,7 @@
       // The trimester actually used, printed inside the bubble where it fits —
       // in auto mode different admins use different worst seasons, and that
       // should be visible without hovering.
-      if (sl && R(popOf(r)) >= 11) {
+      if (sl && R(popOf(r)) >= 11 && triSel.value.startsWith("auto")) {
         const darkFill = cat && /vsev/.test(cat);
         g("text", { x: xOf(r), y: yOf(r) + 3, "text-anchor": "middle", "font-size": 9,
                     "font-weight": 600, fill: darkFill ? "#ffffff" : "#333",
@@ -879,10 +885,15 @@
     map.stop();
     map.fitBounds(bounds, { padding: [10, 10], animate });
     if (animate) {
+      // The world view CONTAINS every country's centre, so a containment check
+      // can't detect a wedged animation (observed: Benin never zooming while
+      // the check passed). Compare against the target zoom instead.
       const want = bounds;
+      const tz = map.getBoundsZoom(want, false, L.point(10, 10));
       setTimeout(() => {
         if (countrySel.value !== c) return; // selection moved on — don't fight it
-        if (!map.getBounds().contains(want.getCenter())) {
+        if (Math.abs(map.getZoom() - tz) > 0.5
+            || !map.getBounds().contains(want.getCenter())) {
           map.stop();
           map.fitBounds(want, { padding: [10, 10], animate: false });
         }

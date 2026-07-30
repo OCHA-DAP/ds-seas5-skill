@@ -195,8 +195,9 @@ footer p { margin: 4px 0; }
      clear Leaflet's in-map controls (~1000). */
   position: sticky; top: 0; z-index: 1200; background: var(--hdx-neutral-0);
   padding: 8px 0 10px; border-bottom: 1px solid var(--hdx-neutral-15); }
-#hnrp-controls .ctl-row { display: flex; gap: 18px; align-items: baseline; flex-wrap: wrap; }
-#hnrp-controls .row-tag { min-width: 72px; font-size: 0.72rem; font-weight: 600;
+#hnrp-controls .ctl-row { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+#hnrp-controls .ctl-row .toggle { white-space: nowrap; }
+#hnrp-controls .row-tag { min-width: 60px; font-size: 0.72rem; font-weight: 600;
   color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 #hnrp-controls #hnrp-issued { margin: 0 0 0 auto; }
 #hnrp-sev-lvl-wrap[hidden] { display: none; }
