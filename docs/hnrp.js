@@ -19,15 +19,17 @@
   const ADM_LABEL = { low: "lowest available level", 1: "admin 1", 2: "admin 2", 3: "admin 3" };
   let data, geo, world;
   try {
-    world = await fetch("data/countries.geojson").then((r) => r.json());
+    // no-cache = revalidate: the admin-level switch is a plain navigation, which
+    // otherwise serves stale payloads straight from HTTP cache mid-session.
+    const fj = (f) => fetch(f, { cache: "no-cache" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)));
+    world = await fj("data/countries.geojson");
     try {
-      [data, geo] = await Promise.all(
-        ADM_FILES[ADM].map((f) => fetch(f).then((r) => (r.ok ? r.json() : Promise.reject(r)))));
+      [data, geo] = await Promise.all(ADM_FILES[ADM].map(fj));
     } catch {
       if (ADM !== "1") { // payload not built yet — fall back rather than a blank tab
         ADM = "1";
-        [data, geo] = await Promise.all(
-          ADM_FILES[1].map((f) => fetch(f).then((r) => r.json())));
+        [data, geo] = await Promise.all(ADM_FILES[1].map(fj));
       } else { throw new Error("no data"); }
     }
   } catch {
@@ -45,7 +47,7 @@
     sev: "hnrp-sev-type", lvl: "hnrp-sev-lvl", ipcp: "hnrp-ipc-period",
     country: "hnrp-country", sort: "hnrp-bar-sort",
   };
-  admSel.addEventListener("change", () => {
+  function stateURL() {
     const u = new URL(location.href);
     if (admSel.value === "low") u.searchParams.delete("adm");
     else u.searchParams.set("adm", admSel.value);
@@ -55,8 +57,10 @@
     }
     u.searchParams.set("dro", document.getElementById("hnrp-drought-only").checked ? "1" : "0");
     u.hash = "hnrp";
-    location.href = u.toString();
-  });
+    return u;
+  }
+  function syncURL() { history.replaceState(null, "", stateURL().toString()); }
+  admSel.addEventListener("change", () => { location.href = stateURL().toString(); });
   function restoreControls() {
     const q = new URLSearchParams(location.search);
     for (const [k, id] of Object.entries(CTLS)) {
@@ -913,6 +917,7 @@
   // The bar-sort "Severity" option follows the severity-source selector.
   const sortSevOpt = barSortSel.querySelector('option[value="sev4"]');
   function renderAll() {
+    syncURL(); // keep the URL an exact mirror of the controls at all times
     updateIpcPeriodUI();
     sortSevOpt.textContent = `Severity (${sevLabel()})`;
     renderMap(); renderScatter(); renderBars(); renderTable();
