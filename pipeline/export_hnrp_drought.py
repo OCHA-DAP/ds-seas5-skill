@@ -604,6 +604,11 @@ def load_pbs_adm1() -> pd.DataFrame:
     is the overall figure (BFA) — use it alone; otherwise sum the named disjoint
     groups (spelling variants like CAF's 'IDP_FA'/'IDP FA' cover disjoint units —
     verified — so a plain sum is safe).
+
+    Where a plan's PbS classes are unusable (SSD: constant class 4 on every row;
+    GTM/SLV/VEN: no classes), the unit's PiN is placed at the unit's AREA
+    classification from hpc.severity_admin — the same one-class-per-unit
+    semantic every other country's PbS encodes — flagged pbs_area for the site.
     """
     engine = stratus.get_engine("dev")
     q = f"""
@@ -612,8 +617,23 @@ def load_pbs_adm1() -> pd.DataFrame:
            severity, final_pin
     FROM hpc.pin_admin WHERE {ACODE} IS NOT NULL AND final_pin IS NOT NULL
     """
+    qa = f"""
+    SELECT iso3, year, {ACODE} AS pcode, final_severity, population
+    FROM hpc.severity_admin
+    WHERE {ACODE} IS NOT NULL AND final_severity IS NOT NULL
+    """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn)
+        sev = pd.read_sql(qa, conn)
+    # Per-unit dominant area class (population-weighted; row count where the
+    # sheet publishes no populations — BFA/SYR adm3).
+    sev = sev[sev["year"] == sev.groupby("iso3")["year"].transform("max")]
+    sev["_wt"] = sev["population"].fillna(1)
+    cls_w = (sev.groupby(["iso3", "pcode", "final_severity"])["_wt"].sum()
+             .reset_index())
+    cls_w = cls_w.sort_values("_wt", ascending=False).drop_duplicates(["iso3", "pcode"])
+    area_cls = {(r["iso3"], r["pcode"]): int(r["final_severity"])
+                for _, r in cls_w.iterrows()}
     df = df[df["year"] == df.groupby("iso3")["year"].transform("max")]
     df["population_group"] = df["population_group"].fillna("")
 
@@ -642,15 +662,30 @@ def load_pbs_adm1() -> pd.DataFrame:
             index=ACODE, columns="severity", values="final_pin", aggfunc="sum")
         total = g.groupby(ACODE)["final_pin"].sum()
         a1names = g.drop_duplicates(ACODE).set_index(ACODE)["name"]
+        n_area = 0
         for pcode, tot in total.items():
             row = {"pcode": pcode, "iso3": iso3, "name": a1names.get(pcode),
-                   "pbs_tot": int(tot), "pbs_yr": int(g["year"].iloc[0])}
-            for cls in range(1, 6):
-                v = by_class.loc[pcode, cls] if (pcode in by_class.index
-                                                 and cls in by_class.columns) else None
-                row[f"pb{cls}"] = int(v) if pd.notna(v) else 0
-            row["pbs_classed"] = int(pcode in by_class.index)  # respects the degenerate guard
+                   "pbs_tot": int(tot), "pbs_yr": int(g["year"].iloc[0]),
+                   "pbs_area": 0}
+            if pcode in by_class.index:
+                for cls in range(1, 6):
+                    v = (by_class.loc[pcode, cls]
+                         if cls in by_class.columns else None)
+                    row[f"pb{cls}"] = int(v) if pd.notna(v) else 0
+                row["pbs_classed"] = 1
+            else:
+                # No usable published classes — place the unit's PiN at its
+                # AREA classification (severity_admin), if one exists.
+                acls = area_cls.get((iso3, pcode))
+                for cls in range(1, 6):
+                    row[f"pb{cls}"] = int(tot) if cls == acls else 0
+                row["pbs_classed"] = int(acls is not None)
+                row["pbs_area"] = int(acls is not None)
+                n_area += row["pbs_area"]
             rows.append(row)
+        if n_area:
+            print(f"  pbs: {iso3}: {n_area} unit(s) classed from the AREA "
+                  f"classification (no usable published classes)")
     out = pd.DataFrame(rows)
     print(f"PiN-by-severity: {out['iso3'].nunique()} countries, {len(out)} units "
           f"({int(out['pbs_classed'].sum())} with class breakdown)")
@@ -921,7 +956,8 @@ def main() -> None:
     df_pbs = (df_pbs.groupby("pcode", as_index=False)
               .agg({"iso3": "first", "name": "first",
                     **{f"pb{c}": "sum" for c in range(1, 6)},
-                    "pbs_tot": "sum", "pbs_yr": "max", "pbs_classed": "max"}))
+                    "pbs_tot": "sum", "pbs_yr": "max", "pbs_classed": "max",
+                    "pbs_area": "max"}))
     df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
     df_pop = normalize_pcodes(load_population_adm1(), poly, "population",
                               xxx_name_match=True)
@@ -1253,6 +1289,7 @@ def main() -> None:
         # (only when the plan publishes a class breakdown — else pbs_tot alone).
         pbs_tot = rec.pop("pbs_tot", None)
         pbs_classed = rec.pop("pbs_classed", None)
+        pbs_area = rec.pop("pbs_area", None)
         pbs = [rec.pop(f"pb{c}", None) for c in range(1, 6)]
         out = {k: (v if isinstance(v, (list, dict)) else None if pd.isna(v) else v)
                for k, v in rec.items()}
@@ -1260,6 +1297,8 @@ def main() -> None:
             out["pbs_tot"] = int(pbs_tot)
             if pbs_classed:
                 out["pb"] = [int(v) if pd.notna(v) else 0 for v in pbs]
+                if pbs_area and pd.notna(pbs_area) and int(pbs_area):
+                    out["pba"] = 1  # classes come from the AREA classification
         if out.get("pbs_yr") is not None:
             out["pbs_yr"] = int(out["pbs_yr"])
         if out.get("tgt_year") is not None:

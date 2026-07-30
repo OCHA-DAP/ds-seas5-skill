@@ -701,7 +701,8 @@
         (c ? ` (${comboDesc(c)})` : "");
     } else {
       barsTitle.textContent = `${country} — PiN by JIAF severity class, ` +
-        `per ${ADM_LABEL[ADM]} (${rows[0].pbs_yr ?? "–"} analysis)`;
+        `per ${ADM_LABEL[ADM]} (${rows[0].pbs_yr ?? "–"} analysis` +
+        `${rows[0].pba ? ", classes from the area classification" : ""})`;
     }
 
     const W = barsSvg.parentElement.clientWidth || 900;
