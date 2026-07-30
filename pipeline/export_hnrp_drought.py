@@ -521,19 +521,22 @@ def load_severity_adm1() -> pd.DataFrame:
     return out
 
 
-def load_ipc_adm1() -> pd.DataFrame:
-    """IPC/CH acute food insecurity phases per ADM1 pcode, per analysis period.
+def load_ipc_adm1(key: str | None = None) -> pd.DataFrame:
+    """IPC/CH acute food insecurity phases per unit, per analysis period.
 
     From ipc.population_admin (ds-ipc-mirror, HDX HAPI food-security): every
     (period type × validity window) is kept — current vs first/second projection —
     because rounds overlap and the right comparison window is a user choice.
     Admin-2 rows are summed to admin-1 where a country publishes deeper.
+    key overrides the grouping column (parent-level lists for downscaling).
     """
-    if LEVEL == 3:  # HAPI food-security has no admin-3 layer
+    key = key or ACODE
+    if key == "admin3_code":  # HAPI food-security has no admin-3 layer
         print("IPC: none at admin-3 (HAPI stops at admin-2)")
         return pd.DataFrame(columns=["pcode", "iso3", "name", "t", "s", "e", "a",
                                      *(f"p{p}" for p in ["1", "2", "3", "4", "5", "all"])])
     engine = stratus.get_engine("dev")
+    lvls = "1, 2" if key == "admin1_code" else "2, 2"
     # Recency: analyses valid in 2025 or later. Dead/stalled series (ETH 2021,
     # AGO/SLV 2022, BFA 2024-08, TLS 2024-09) are excluded as too old to act on.
     q = f"""
@@ -541,8 +544,8 @@ def load_ipc_adm1() -> pd.DataFrame:
            admin_level, ipc_phase, ipc_type,
            population_in_phase, reference_period_start, reference_period_end
     FROM ipc.population_admin
-    WHERE admin_level IN ({LEVEL}, 2) AND ipc_phase IN ('1', '2', '3', '4', '5', 'all')
-      AND {ACODE} IS NOT NULL AND reference_period_end >= '2025-01-01'
+    WHERE admin_level IN ({lvls}) AND ipc_phase IN ('1', '2', '3', '4', '5', 'all')
+      AND {key} IS NOT NULL AND reference_period_end >= '2025-01-01'
     """
     # HAPI rows carry only the validity window; the exercise (analysis) date lives in
     # the per-country HDX table. (country, period type, window) joins it back 1:1.
@@ -568,11 +571,11 @@ def load_ipc_adm1() -> pd.DataFrame:
     for (loc, t, s, e), g in df.groupby(
         ["location_code", "ipc_type", "reference_period_start", "reference_period_end"]
     ):
-        lvl = min(g["admin_level"].unique())  # coarsest at/below LEVEL
+        lvl = min(g["admin_level"].unique())  # coarsest available
         g = g[g["admin_level"] == lvl]
-        piv = g.pivot_table(index=ACODE, columns="ipc_phase",
+        piv = g.pivot_table(index=key, columns="ipc_phase",
                             values="population_in_phase", aggfunc="sum")
-        a1names = g.drop_duplicates(ACODE).set_index(ACODE)[ANAME]
+        a1names = g.drop_duplicates(key).set_index(key)[key.replace("code", "name")]
         adate = g["analysis_date"].max()
         for pcode in piv.index:
             row = {"pcode": pcode, "iso3": loc, "name": a1names.get(pcode),
@@ -582,7 +585,10 @@ def load_ipc_adm1() -> pd.DataFrame:
                 row[f"p{ph}"] = int(v) if pd.notna(v) else 0
             rows.append(row)
     out = pd.DataFrame(rows)
-    print(f"IPC: {out['iso3'].nunique()} countries, {out['pcode'].nunique()} ADM1 units, "
+    if out.empty:
+        return pd.DataFrame(columns=["pcode", "iso3", "name", "t", "s", "e", "a",
+                                     *(f"p{p}" for p in ["1", "2", "3", "4", "5", "all"])])
+    print(f"IPC ({key}): {out['iso3'].nunique()} countries, {out['pcode'].nunique()} units, "
           f"{out.groupby(['iso3', 't', 's']).ngroups} analysis periods")
     return out
 
@@ -750,6 +756,34 @@ def load_hno_pop_adm1(sub_parent: dict | None = None) -> pd.DataFrame:
     return out
 
 
+def _ipc_lists(df_ipc: pd.DataFrame) -> dict[str, list]:
+    """Per pcode: the analysis periods, newest validity first — capped at 6
+    (payload guard; the period logic only ever reaches recent ones plus the
+    most-recent-past fallback)."""
+    if df_ipc.empty:
+        return {}
+    df_ipc = (df_ipc.groupby(["pcode", "t", "s", "e"], as_index=False)
+              .agg({**{f"p{ph}": "sum" for ph in ["1", "2", "3", "4", "5", "all"]},
+                    "a": "max"}))
+    out: dict[str, list] = {}
+    for pcode, g in df_ipc.groupby("pcode"):
+        g = g.sort_values("e", ascending=False).head(6)
+        out[pcode] = [
+            {
+                "t": r["t"],
+                "s": r["s"].strftime("%Y-%m"),
+                "e": r["e"].strftime("%Y-%m"),
+                "a": r["a"].strftime("%Y-%m") if pd.notna(r["a"]) else None,
+                "label": f"{calendar.month_abbr[r['s'].month]}–"
+                         f"{calendar.month_abbr[r['e'].month]} {r['e'].year}",
+                "p": [int(r[f"p{ph}"]) for ph in ["1", "2", "3", "4", "5"]],
+                "tot": int(r["pall"]),
+            }
+            for _, r in g.iterrows()
+        ]
+    return out
+
+
 def build_lowest() -> None:
     """Combine the per-level exports into the 'lowest available level' view.
 
@@ -899,28 +933,7 @@ def main() -> None:
     df_hno = (df_hno.groupby("pcode", as_index=False)
               .agg({"hno_pop": "sum", "hno_year": "max"}))
     ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
-    df_ipc = (df_ipc.groupby(["pcode", "t", "s", "e"], as_index=False)
-              .agg({**{f"p{ph}": "sum" for ph in ["1", "2", "3", "4", "5", "all"]},
-                    "a": "max"}))
-    # Per pcode: the list of available analysis periods, newest validity first —
-    # capped at 6 (payload guard; the period logic only ever reaches recent ones
-    # plus the most-recent-past fallback).
-    ipc_lists: dict[str, list] = {}
-    for pcode, g in df_ipc.groupby("pcode"):
-        g = g.sort_values("e", ascending=False).head(6)
-        ipc_lists[pcode] = [
-            {
-                "t": r["t"],
-                "s": r["s"].strftime("%Y-%m"),
-                "e": r["e"].strftime("%Y-%m"),
-                "a": r["a"].strftime("%Y-%m") if pd.notna(r["a"]) else None,
-                "label": f"{calendar.month_abbr[r['s'].month]}–"
-                         f"{calendar.month_abbr[r['e'].month]} {r['e'].year}",
-                "p": [int(r[f"p{ph}"]) for ph in ["1", "2", "3", "4", "5"]],
-                "tot": int(r["pall"]),
-            }
-            for _, r in g.iterrows()
-        ]
+    ipc_lists = _ipc_lists(df_ipc)
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
     _sum = lambda s: s.sum(min_count=1)  # noqa: E731 — all-NaN stays None, not 0
     sec_cols = [c for c in df_pin.columns if c.startswith(("pin__", "tgt__", "tgtyr__"))]
@@ -1132,6 +1145,78 @@ def main() -> None:
         merged = merged[in_poly]
     n_signal = merged["rp"].notna().sum()
     print(f"{len(merged)} HNRP ADM1 units; {n_signal} with a qualifying drought signal")
+
+    # IPC downscaling: HAPI publishes IPC at admin-1/2 — units finer than the
+    # published level (AFG districts, COD zones de santé…) have no IPC rows and
+    # showed zeros. Fill them from the PARENT analysis, prorated by each unit's
+    # population weight within the parent, marked "d": <source level> so every
+    # tooltip says the numbers are downscaled shares, not unit-level analysis.
+    if LEVEL >= 2:
+        with engine.connect() as conn:
+            poly1 = pd.read_sql(
+                "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=1", conn)
+        par1 = normalize_pcodes(load_ipc_adm1(key="admin1_code"), poly1, "IPC-adm1")
+        lists1 = _ipc_lists(par1)
+        lists2 = {}
+        if LEVEL == 3:
+            with engine.connect() as conn:
+                poly2 = pd.read_sql(
+                    "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=2",
+                    conn)
+            par2 = normalize_pcodes(load_ipc_adm1(key="admin2_code"), poly2, "IPC-adm2")
+            lists2 = _ipc_lists(par2)
+        a1_by_iso = {i: sorted(g_["pcode"], key=len, reverse=True)
+                     for i, g_ in poly1.groupby("iso3")}
+
+        def _src_of(pcode: str, iso3: str):
+            if LEVEL == 3:
+                p2 = parent2.get(pcode)
+                if p2 and p2 in lists2:
+                    return p2, 2, lists2[p2]
+                base = p2 or pcode
+            else:
+                base = pcode
+            p1 = next((c for c in a1_by_iso.get(iso3, [])
+                       if str(base).startswith(c)), None)
+            if p1 and p1 in lists1:
+                return p1, 1, lists1[p1]
+            return None, None, None
+
+        w = merged["pop"].astype(float)
+        for col in ["sev_total", "pbs_tot"]:
+            if col in merged.columns:
+                w = w.fillna(merged[col].astype(float))
+        merged["_w"] = w
+        # Σ weight per source parent (over ALL its units, so own-IPC and
+        # downscaled units together still sum to ~the parent's figures).
+        src_key, src_lvl, src_lists = {}, {}, {}
+        for _, r in merged.iterrows():
+            k, lv, ls = _src_of(r["pcode"], r["iso3"])
+            if k:
+                src_key[r["pcode"]], src_lvl[r["pcode"]], src_lists[r["pcode"]] = k, lv, ls
+        wsum: dict[str, float] = {}
+        for _, r in merged.iterrows():
+            k = src_key.get(r["pcode"])
+            if k and pd.notna(r["_w"]):
+                wsum[k] = wsum.get(k, 0) + float(r["_w"])
+        n_ds = 0
+        for _, r in merged.iterrows():
+            pcode = r["pcode"]
+            if pcode in ipc_lists or pcode not in src_key:
+                continue
+            if pd.isna(r["_w"]) or not wsum.get(src_key[pcode]):
+                continue
+            frac = float(r["_w"]) / wsum[src_key[pcode]]
+            ipc_lists[pcode] = [
+                {**c, "p": [round(v * frac) for v in c["p"]],
+                 "tot": round(c["tot"] * frac), "d": src_lvl[pcode]}
+                for c in src_lists[pcode]
+            ]
+            n_ds += 1
+        merged = merged.drop(columns=["_w"])
+        if n_ds:
+            print(f"IPC downscaled to {n_ds} unit(s) from parent analyses "
+                  f"(population-share proration, flagged 'd')")
 
     # Coverage report: every humanitarian unit should have forecast data and a polygon.
     no_fc = merged.loc[~merged["pcode"].isin(set(skill["pcode"])), ["iso3", "pcode"]]

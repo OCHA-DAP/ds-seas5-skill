@@ -190,7 +190,8 @@
     const [y, m] = s.split("-").map(Number);
     return new Date(Date.UTC(y, m - 1)).toLocaleString("en", { month: "short", timeZone: "UTC" }) + " " + y;
   };
-  const comboDesc = (c) => `${c.t}, exercise ${fmtYM(c.a)}, valid ${c.label}`;
+  const comboDesc = (c) => `${c.t}, exercise ${fmtYM(c.a)}, valid ${c.label}` +
+    (c.d ? ` — downscaled from admin-${c.d} by population share` : "");
 
   const IPC_OPT_BASE = { now: "Now", fwd: "Forecast window" };
   function updateIpcPeriodUI() {
