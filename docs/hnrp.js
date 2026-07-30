@@ -683,6 +683,7 @@
     const country = countrySel.value;
     const rows = country
       ? data.rows.filter((r) => r.country === country
+            && (!droughtOnly() || isDrought(rawSlotOf(r)))
             && (pinMode() ? sevValOf(r) != null
               : ipcMode() ? sevTotOf(r) > 0 && segsOf(r) : !!segsOf(r)))
           .sort(BAR_SORTS[barSortSel.value] || BAR_SORTS.sev4)
