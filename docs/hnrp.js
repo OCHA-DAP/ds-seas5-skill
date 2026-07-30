@@ -41,7 +41,7 @@
   // Every control survives the admin-level reload (and makes links shareable
   // with their settings): state is carried in the URL query string.
   const CTLS = {
-    skill: "hnrp-skill", rp: "hnrp-rp", tri: "hnrp-tri", sector: "hnrp-sector",
+    skill: "hnrp-skill", rp: "hnrp-rp", tri: "hnrp-tri",
     sev: "hnrp-sev-type", lvl: "hnrp-sev-lvl", ipcp: "hnrp-ipc-period",
     country: "hnrp-country", sort: "hnrp-bar-sort",
   };
@@ -72,7 +72,6 @@
 
   const skillSel = document.getElementById("hnrp-skill");
   const rpSel = document.getElementById("hnrp-rp");
-  const sectorSel = document.getElementById("hnrp-sector");
   const srcTypeSel = document.getElementById("hnrp-sev-type");
   const srcLvlSel = document.getElementById("hnrp-sev-lvl");
   const srcLvlWrap = document.getElementById("hnrp-sev-lvl-wrap");
@@ -117,22 +116,15 @@
   const fmtN = (v) => (v == null ? "–" : Math.round(v).toLocaleString("en-US"));
   const fmt = (v, d) => (v == null ? "–" : Number(v).toFixed(d));
   const pctOf = (num, den) => (num == null || !den ? null : (100 * num) / den);
-  // Caseload selector: Intersectoral, or any sector the plans publish (from the
-  // payload's sectors list; per-row figures live in r.sec = {code: [pin, targeted]}).
-  for (const [code, name] of data.sectors ?? []) {
-    const o = document.createElement("option");
-    o.value = code;
-    o.textContent = name;
-    sectorSel.appendChild(o);
-  }
-  const pinOf = (r) => (sectorSel.value === "is" ? r.pin : (r.sec?.[sectorSel.value]?.[0] ?? null));
-  const tgtOf = (r) => (sectorSel.value === "is" ? r.targeted : (r.sec?.[sectorSel.value]?.[1] ?? null));
+  // PiN/targeted are always the plan's INTERSECTORAL figures (per-sector series
+  // remain in the payload's r.sec should a sector view ever return).
+  const pinOf = (r) => r.pin ?? null;
+  const tgtOf = (r) => r.targeted ?? null;
   // Plan-cycle year of a targeted figure that fell back to an OLDER cycle than the
   // unit's PiN (none published in the current one) — flagged wherever it appears.
-  const tgtYrOf = (r) => (sectorSel.value === "is" ? (r.tgt_year ?? null)
-    : (r.sec?.[sectorSel.value]?.[2] ?? null));
+  const tgtYrOf = (r) => r.tgt_year ?? null;
   const tgtFlag = (r) => (tgtYrOf(r) ? ` (${tgtYrOf(r)} plan)` : "");
-  const secTag = () => (sectorSel.value === "is" ? "" : ` (${sectorSel.value})`);
+  const secTag = () => "";
 
   const droughtOnly = () => droughtOnlyEl.checked;
   // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
@@ -805,8 +797,8 @@
       let label = c.label + ((c.key === "pin" || c.key === "targeted") ? secTag() : "");
       if (c.key === "sev4") label = `${sevLabel()} pop`;
       if (c.key === "pin") {
-        th.title = "People in Need — the plan's total PiN for the selected caseload " +
-          "(Intersectoral or FSC). A headline planning figure, not a severity band: " +
+        th.title = "People in Need — the plan's total intersectoral PiN. " +
+          "A headline planning figure, not a severity band: " +
           "it is not broken down by JIAF class or IPC phase.";
       }
       th.textContent = label + (c.key === sortKey ? (sortDesc ? " ↓" : " ↑") : "");
@@ -911,7 +903,7 @@
     sortSevOpt.textContent = `Severity (${sevLabel()})`;
     renderMap(); renderScatter(); renderBars(); renderTable();
   }
-  for (const el of [skillSel, rpSel, sectorSel, srcTypeSel, srcLvlSel,
+  for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel,
                     droughtOnlyEl, triSel, ipcPeriodSel]) {
     el.addEventListener("change", renderAll);
   }
