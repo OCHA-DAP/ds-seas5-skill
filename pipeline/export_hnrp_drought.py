@@ -1,21 +1,67 @@
 """Forecast × HNRP overlay: where a bad drought forecast meets a large PiN.
 
-Joins the latest ADM1 drought forecast (skill_stats_detrended_adm1, dev blob) against
-the HNRP mirror's intersectoral People-in-Need / targeted figures (hpc.needs_admin,
-dev DB, from ds-hnrp-mirror) per admin-1 unit, and writes one JSON for the static
-site's "Forecast × HNRP" tab.
+Joins the latest ADM1/ADM2 drought forecast against the humanitarian mirrors
+(hpc.*, ipc.*, pop.* in the dev DB) per admin unit and writes one JSON per level
+for the static site's "Forecast × HNRP" tab.
 
-Selection per ADM1 unit (latest issuance):
+Forecast selection per unit (latest issuance):
   - valid trimesters (lead −2..4), rainy-season only, skill r ≥ r_mod (0.30)
   - drought side only (forecast percentile < 50); severity = directional drought RP
   - the unit's row reports its WORST qualifying slot (max drought RP)
 
-Humanitarian weight: population in JIAF severity 4+ (hpc.severity_admin, latest
-analysis year per country), with intersectoral PiN (INN) and targeted (TGT) from
-hpc.needs_admin alongside. Figures published at admin-2/3 are summed to admin-1
-(both are additive across geography).
+DATA SEMANTICS & AGGREGATION RULES (hard-won — read before editing a loader):
 
-Run:  uv run python pipeline/export_hnrp_drought.py
+1. JIAF CLASSIFIES AREAS, IPC COUNTS PEOPLE. hpc.severity_admin gives each finest
+   unit (× population group) ONE final_severity and that unit's population — there
+   is NO people-per-class breakdown (verified: max one class per unit across all
+   8,108 units). Our "sN" figures are therefore populations of areas classified at
+   class N, and every label must say so. ipc.population_admin genuinely is
+   population_in_phase — people-level. PiN (needs_admin INN) is also people-level
+   and is NOT derivable from the severity table; treat it as the plan's
+   authoritative caseload and severity classes as area context.
+   HOW PiN IS MADE (JIAF 2.0 "Mosaic Method"): each sector estimates its own PiN
+   per finest analysis unit; the intersectoral PiN takes the HIGHEST sectoral PiN
+   per unit, sums those maxima upward, then validation workshops resolve flags by
+   consensus — so sectoral arithmetic will NOT reproduce it exactly (TCD: 73% of
+   admin-2 units equal max(sector); SDN 0% equal but 98% ≥ it, the signature of
+   mosaic at a finer unit). From HPC 2026 overall PiN counts only areas in
+   intersectoral severity 3+ (2025-cycle PiN can include class-1/2 areas — why
+   PiN > pop(3+ areas) in COD/MOZ). A PiN-BY-SEVERITY distribution exists in JIAF
+   ("PiN par gravité" workbook sheets, reintroduced by the 2025 Humanitarian
+   Reset) but is NOT in the mirror — only the area classification is.
+
+2. PREFER THE COARSEST PUBLISHED LEVEL. Where a country publishes the same series
+   at admin-1 AND finer, the admin-1 figures equal the finer sums (ratio 1.000)
+   EXCEPT where the finer level double-counts (MMR PRO 2024 sums to 2.18× its
+   admin-1 total) — so we aggregate the coarsest level at/below the target and
+   never mix levels.
+
+3. ONE NAMED SERIES PER SECTOR CODE. A sector_code can carry several sector_names
+   ("Protection (total)" AND "General Protection" both as PRO, category='total');
+   summing across them double-counts. Keep the dominant series (most rows, then
+   largest total) per (country, sector).
+
+4. category='total' ONLY for caseloads (231 other values are sex/age/group
+   breakdowns of the same people); population_status='all' + category total/blank
+   for the HNO population baseline.
+
+5. *-XXX PLACEHOLDER SUB-CODES may carry a WRONG stated admin-1 (MOZ 2024 filed
+   Nampula districts under Sofala, Zambézia under Cidade de Maputo — a systematic
+   shift). Their names are good: rollups re-attribute them by unique COD sub-unit
+   name match (sub_parent lookup); at their own level they are unmappable and drop.
+
+6. HAPI SHIPS EXACT DUPLICATE ROWS (same resource, same value, twice — COD 450
+   keys) in ipc.population_admin: drop_duplicates before any pivot/sum.
+
+7. hpc.severity_admin population GROUPS overlap rather than partition — per
+   country prefer the overall (blank) group when it covers ≥50% of units, then
+   'Global_Population', then the largest comma-named union; only sum when groups
+   are disjoint displacement categories.
+
+8. pop.population_admin is totals-only (gender='all', age_range='all') — safe to
+   take rows as-is; its *-XXX rows are distinct areas (one row per name).
+
+Run:  uv run python pipeline/export_hnrp_drought.py [--level 2] [--rebuild-geometry]
 """
 
 import argparse
@@ -47,6 +93,58 @@ OUT = HERE.parent / "docs" / "data" / "hnrp_drought.json"
 GEO_OUT = HERE.parent / "docs" / "data" / "hnrp_adm1.geojson"
 SIMPLIFY_TOLERANCE = 0.02  # per-country topology-preserving simplify (adm1 scale)
 
+# Admin level of the whole export (--level). Level 2 swaps the grouping key, the
+# skill stats blob, output filenames, and a coarser simplify (5k+ polygons); the
+# scope self-restricts to countries with adm2 polygons/zonal stats (22 of 45 —
+# the rest have no adm2 in public.polygon and are excluded on that basis).
+LEVEL = 1
+ACODE, ANAME = "admin1_code", "admin1_name"
+
+
+# Admin-3: countries with adm3 humanitarian data AND boundaries we hold. BFA/MMR/
+# SYR come from the COD shapefile zips' adm3 layers; COD (DRC) publishes against
+# zones de santé — the SNIS/OCHA health-zone shapefile (RDC_Zone_de_sante_09092019,
+# HDX dr-congo-health-0, mirrored to our dev blob) joins hpc.* 519/519 by ZSCode.
+ADM3_ISO3S = ["BFA", "COD", "MMR", "SYR"]
+
+
+def load_adm3_shp(iso3: str):
+    """The adm3 boundary layer + (pcode, name, parent-adm2) column names."""
+    if iso3 == "COD":
+        g = stratus.load_shp_from_blob(
+            f"{PROJECT_PREFIX}/raw/cod_zs_09092019.zip",
+            shapefile="RDC_Zone_de_sante_09092019.shp",
+            stage="dev", container_name="projects",
+        )
+        g["_parent"] = g["ZSCode"].str[:6]  # CD####ZS## -> CD####
+        return g, "ZSCode", "Nom", "_parent"
+    g = stratus.load_shp_from_blob(
+        f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm3.shp",
+        stage="prod", container_name="polygon",
+    )
+    ncol = next(c for c in g.columns if c.upper() in ("ADM3_EN", "ADM3_FR", "ADM3_ES"))
+    return g, "ADM3_PCODE", ncol, "ADM2_PCODE"
+
+
+def _set_level(level: int) -> None:
+    global LEVEL, ACODE, ANAME, SKILL_BLOB, OUT, GEO_OUT, SIMPLIFY_TOLERANCE
+    LEVEL = level
+    if level == 2:
+        ACODE, ANAME = "admin2_code", "admin2_name"
+        SKILL_BLOB = f"{PROJECT_PREFIX}/processed/skill_stats_detrended_adm2.parquet"
+        OUT = HERE.parent / "docs" / "data" / "hnrp_drought_adm2.json"
+        GEO_OUT = HERE.parent / "docs" / "data" / "hnrp_adm2.geojson"
+        SIMPLIFY_TOLERANCE = 0.03
+    elif level == 3:
+        # No adm3 zonal stats exist — the forecast (skill, rainy season) is
+        # inherited from each unit's PARENT admin-2 (mapped via the shapefiles'
+        # ADM2_PCODE column), so the adm2 skill blob is the source here too.
+        ACODE, ANAME = "admin3_code", "admin3_name"
+        SKILL_BLOB = f"{PROJECT_PREFIX}/processed/skill_stats_detrended_adm2.parquet"
+        OUT = HERE.parent / "docs" / "data" / "hnrp_drought_adm3.json"
+        GEO_OUT = HERE.parent / "docs" / "data" / "hnrp_adm3.geojson"
+        SIMPLIFY_TOLERANCE = 0.035
+
 
 def export_geometry(isos: list[str], names: dict[str, str]) -> None:
     """ADM1 boundaries for the HNRP countries -> one simplified geojson.
@@ -59,21 +157,28 @@ def export_geometry(isos: list[str], names: dict[str, str]) -> None:
     parts = []
     for iso3 in isos:
         try:
-            g = stratus.load_shp_from_blob(
-                f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm1.shp",
-                stage="prod", container_name="polygon",
-            )
+            if LEVEL == 3:
+                g, pcol, _, _ = load_adm3_shp(iso3)
+            else:
+                g = stratus.load_shp_from_blob(
+                    f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm{LEVEL}.shp",
+                    stage="prod", container_name="polygon",
+                )
+                pcol = next((c for c in g.columns
+                             if c.lower() in (f"adm{LEVEL}_pcode", "pcode")), None)
         except Exception as e:  # noqa: BLE001 — a missing country shouldn't kill the export
             print(f"  {iso3}: boundary load failed ({type(e).__name__}), skipped")
             continue
-        pcol = next((c for c in g.columns if c.lower() in ("adm1_pcode", "pcode")), None)
         if pcol is None:
             print(f"  {iso3}: no pcode column, skipped")
             continue
         g = g[[pcol, "geometry"]].rename(columns={pcol: "pcode"})
         topo = tp.Topology(g, prequantize=True, shared_coords=True)
         g = topo.toposimplify(SIMPLIFY_TOLERANCE).to_gdf()
-        g["geometry"] = g["geometry"].make_valid()
+        try:
+            g["geometry"] = g["geometry"].make_valid()
+        except Exception:  # mixed-dimension collections (COD zones): rebuild by structure
+            g["geometry"] = g["geometry"].make_valid(method="structure", keep_collapsed=False)
         # make_valid can emit GeometryCollections/points; keep polygonal parts only
         # (a stray Point renders as a Leaflet marker and wrecks the map fit).
         g = g.explode(index_parts=False)
@@ -200,7 +305,7 @@ def normalize_pcodes(
     return out
 
 
-def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
+def load_pin_adm1(sub_parent: dict | None = None) -> tuple[pd.DataFrame, dict[str, str]]:
     """PiN + targeted per ADM1 pcode, EVERY sector the plans publish.
 
     Per (country, sector): the latest reference period; rows published at admin-1
@@ -215,16 +320,59 @@ def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     # health-zone/township level ONLY — every row still carries admin1_code, so
     # they roll up like admin-2 rows do. Blank sector codes are indicator noise
     # ("Max value of indicators…"), not caseloads.
-    q = """
+    q = f"""
     SELECT location_code, sector_code, sector_name, admin1_code, admin1_name,
+           admin2_code, admin2_name, admin3_code, admin3_name,
            admin_level, population_status, population, reference_period_start
     FROM hpc.needs_admin
     WHERE category = 'total' AND population_status IN ('INN', 'TGT')
-      AND admin_level IN (1, 2, 3) AND COALESCE(sector_code, '') <> ''
-      AND admin1_code IS NOT NULL
+      AND admin_level IN ({LEVEL}, 2, 3) AND COALESCE(sector_code, '') <> ''
+      AND {ACODE} IS NOT NULL
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_start"])
+    df = df[df["admin_level"] >= LEVEL]  # coarser rows can't be downscaled
+
+    # One sector_code can carry SEVERAL named series WITHIN a reference period
+    # ("Protection (total)" AND "General Protection" both under PRO,
+    # category='total') — summing them double-counts (MMR PRO 2024 summed to 2.2x
+    # its published admin-1 total). Keep the dominant series (most rows, then
+    # largest total) per (country, sector, reference period) — per period, because
+    # publishers rename series between cycles (COD: "Final HRP Caseload" 2024 vs
+    # "…caseload" 2025) and a global pick would silently freeze an old cycle.
+    grp = ["location_code", "sector_code", "reference_period_start"]
+    picks = (df.groupby(grp + ["sector_name"])
+             .agg(n=("population", "size"), tot=("population", "sum")).reset_index())
+    multi = picks.groupby(grp).filter(lambda x: len(x) > 1)
+    if len(multi):
+        keep = picks.sort_values(["n", "tot"], ascending=False).drop_duplicates(grp)
+        keep_keys = set(zip(*(keep[c] for c in grp + ["sector_name"])))
+        before = len(df)
+        df = df[[k in keep_keys for k in zip(*(df[c] for c in grp + ["sector_name"]))]]
+        dropped_series = sorted({f"{l}/{s}" for l, s in
+                                 zip(multi["location_code"], multi["sector_code"])})
+        print(f"  PiN: secondary same-period series under shared sector codes dropped "
+              f"({before - len(df)} rows; {', '.join(dropped_series[:8])}"
+              f"{'…' if len(dropped_series) > 8 else ''})")
+
+    if sub_parent:
+        # Placeholder-coded sub-rows (*-XXX) can carry a WRONG admin-1 upstream
+        # (MOZ 2024: Nampula districts filed under Sofala, Zambézia under Cidade de
+        # Maputo — a systematic shift). Their names are good: re-attribute by unique
+        # COD sub-unit name match; keep the stated parent when the name is unknown.
+        is_xxx = (df["admin2_code"].fillna("").str.endswith("-XXX")
+                  | df.get("admin3_code", pd.Series("", index=df.index)).fillna("")
+                    .str.endswith("-XXX"))
+        moved = 0
+        for i in df.index[is_xxx]:
+            nm = df.at[i, "admin2_name"]
+            par = sub_parent.get((df.at[i, "location_code"], _fold(nm or "")))
+            if par and par != df.at[i, "admin1_code"]:
+                df.at[i, "admin1_code"] = par
+                moved += 1
+        if moved:
+            print(f"  PiN: re-attributed {moved} placeholder-coded sub-row(s) to their "
+                  f"name-matched admin-1 (upstream parent was wrong)")
     # A country only belongs here while it HAS a current plan: newest cycle must be
     # this year or last. Per-unit fallback to the previous cycle (flagged) is fine
     # WITHIN such a country, but a country whose newest subnational needs are older
@@ -269,10 +417,10 @@ def load_pin_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
         ent: dict[str, dict] = {}
         for ref in refs:
             gr = g[g["reference_period_start"] == ref]
-            lvl = min(gr["admin_level"].unique())  # prefer 1, else 2, else 3
+            lvl = min(gr["admin_level"].unique())  # prefer the coarsest at/below LEVEL
             gr = gr[gr["admin_level"] == lvl]
-            a1names = gr.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
-            agg = gr.groupby(["admin1_code", "population_status"])["population"].sum().unstack()
+            a1names = gr.drop_duplicates(ACODE).set_index(ACODE)[ANAME]
+            agg = gr.groupby([ACODE, "population_status"])["population"].sum().unstack()
             yr = int(pd.Timestamp(ref).year)
             for pcode, r in agg.iterrows():
                 e = ent.setdefault(pcode, {"name": a1names.get(pcode), "lvl": lvl})
@@ -320,11 +468,14 @@ def load_severity_adm1() -> pd.DataFrame:
     """
     engine = stratus.get_engine("dev")
     q = """
-    SELECT iso3, year, admin1_code, admin1_name, population_group, final_severity, population
+    SELECT iso3, year, admin1_code, admin1_name, admin2_code, admin2_name,
+           admin3_code, admin3_name,
+           population_group, final_severity, population
     FROM hpc.severity_admin
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn)
+    df = df[df[ACODE].notna()]
     df = df[df["year"] == df.groupby("iso3")["year"].transform("max")]
     df["population_group"] = df["population_group"].fillna("")
 
@@ -336,8 +487,8 @@ def load_severity_adm1() -> pd.DataFrame:
         # only the most inclusive one may be used; or disjoint displacement categories
         # (Mali: PDI / Rapatries / Communauté Hôte / …) which partition the analysed
         # population and must be summed.
-        units = g.groupby("population_group")["admin1_code"].nunique()
-        n_units = g["admin1_code"].nunique()
+        units = g.groupby("population_group")[ACODE].nunique()
+        n_units = g[ACODE].nunique()
         if units.get("", 0) >= 0.5 * n_units:
             g = g[g["population_group"] == ""]
         elif "Global_Population" in units.index:
@@ -346,12 +497,12 @@ def load_severity_adm1() -> pd.DataFrame:
             top = g.groupby("population_group")["population"].sum().idxmax()
             g = g[g["population_group"] == top]
         # else: disjoint categories — keep all rows and let the sums add them up.
-        a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
-        sev4 = g[g["final_severity"] >= 4].groupby("admin1_code")["population"].sum()
-        total = g.groupby("admin1_code")["population"].sum()
+        a1names = g.drop_duplicates(ACODE).set_index(ACODE)[ANAME]
+        sev4 = g[g["final_severity"] >= 4].groupby(ACODE)["population"].sum()
+        total = g.groupby(ACODE)["population"].sum()
         # Full class breakdown (each source row carries ONE final_severity 1-5 for its
         # population; an admin-1's distribution comes from its sub-units' classes).
-        by_class = g.pivot_table(index="admin1_code", columns="final_severity",
+        by_class = g.pivot_table(index=ACODE, columns="final_severity",
                                  values="population", aggfunc="sum")
         for pcode, tot in total.items():
             row = {
@@ -370,23 +521,31 @@ def load_severity_adm1() -> pd.DataFrame:
     return out
 
 
-def load_ipc_adm1() -> pd.DataFrame:
-    """IPC/CH acute food insecurity phases per ADM1 pcode, per analysis period.
+def load_ipc_adm1(key: str | None = None) -> pd.DataFrame:
+    """IPC/CH acute food insecurity phases per unit, per analysis period.
 
     From ipc.population_admin (ds-ipc-mirror, HDX HAPI food-security): every
     (period type × validity window) is kept — current vs first/second projection —
     because rounds overlap and the right comparison window is a user choice.
     Admin-2 rows are summed to admin-1 where a country publishes deeper.
+    key overrides the grouping column (parent-level lists for downscaling).
     """
+    key = key or ACODE
+    if key == "admin3_code":  # HAPI food-security has no admin-3 layer
+        print("IPC: none at admin-3 (HAPI stops at admin-2)")
+        return pd.DataFrame(columns=["pcode", "iso3", "name", "t", "s", "e", "a",
+                                     *(f"p{p}" for p in ["1", "2", "3", "4", "5", "all"])])
     engine = stratus.get_engine("dev")
+    lvls = "1, 2" if key == "admin1_code" else "2, 2"
     # Recency: analyses valid in 2025 or later. Dead/stalled series (ETH 2021,
     # AGO/SLV 2022, BFA 2024-08, TLS 2024-09) are excluded as too old to act on.
-    q = """
-    SELECT location_code, admin1_code, admin1_name, admin_level, ipc_phase, ipc_type,
+    q = f"""
+    SELECT location_code, admin1_code, admin1_name, admin2_code, admin2_name,
+           admin_level, ipc_phase, ipc_type,
            population_in_phase, reference_period_start, reference_period_end
     FROM ipc.population_admin
-    WHERE admin_level IN (1, 2) AND ipc_phase IN ('1', '2', '3', '4', '5', 'all')
-      AND admin1_code IS NOT NULL AND reference_period_end >= '2025-01-01'
+    WHERE admin_level IN ({lvls}) AND ipc_phase IN ('1', '2', '3', '4', '5', 'all')
+      AND {key} IS NOT NULL AND reference_period_end >= '2025-01-01'
     """
     # HAPI rows carry only the validity window; the exercise (analysis) date lives in
     # the per-country HDX table. (country, period type, window) joins it back 1:1.
@@ -401,16 +560,22 @@ def load_ipc_adm1() -> pd.DataFrame:
             "reference_period_start", "reference_period_end", "analysis_date"])
     df = df.merge(dates, how="left", on=[
         "location_code", "ipc_type", "reference_period_start", "reference_period_end"])
+    # HAPI ships some rows verbatim TWICE (same resource file, same value — COD 450
+    # keys, CAF 204, SSD 138…); summing them doubles those phase populations.
+    before = len(df)
+    df = df.drop_duplicates(subset=[c for c in df.columns])
+    if len(df) < before:
+        print(f"  IPC: dropped {before - len(df)} exact duplicate row(s) (upstream)")
 
     rows = []
     for (loc, t, s, e), g in df.groupby(
         ["location_code", "ipc_type", "reference_period_start", "reference_period_end"]
     ):
-        lvl = 1 if (g["admin_level"] == 1).any() else 2
+        lvl = min(g["admin_level"].unique())  # coarsest available
         g = g[g["admin_level"] == lvl]
-        piv = g.pivot_table(index="admin1_code", columns="ipc_phase",
+        piv = g.pivot_table(index=key, columns="ipc_phase",
                             values="population_in_phase", aggfunc="sum")
-        a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["admin1_name"]
+        a1names = g.drop_duplicates(key).set_index(key)[key.replace("code", "name")]
         adate = g["analysis_date"].max()
         for pcode in piv.index:
             row = {"pcode": pcode, "iso3": loc, "name": a1names.get(pcode),
@@ -420,8 +585,110 @@ def load_ipc_adm1() -> pd.DataFrame:
                 row[f"p{ph}"] = int(v) if pd.notna(v) else 0
             rows.append(row)
     out = pd.DataFrame(rows)
-    print(f"IPC: {out['iso3'].nunique()} countries, {out['pcode'].nunique()} ADM1 units, "
+    if out.empty:
+        return pd.DataFrame(columns=["pcode", "iso3", "name", "t", "s", "e", "a",
+                                     *(f"p{p}" for p in ["1", "2", "3", "4", "5", "all"])])
+    print(f"IPC ({key}): {out['iso3'].nunique()} countries, {out['pcode'].nunique()} units, "
           f"{out.groupby(['iso3', 't', 's']).ngroups} analysis periods")
+    return out
+
+
+def load_pbs_adm1() -> pd.DataFrame:
+    """Intersectoral PiN BY SEVERITY CLASS per unit (hpc.pin_admin — the JIAF 2.0
+    PiN-by-Severity workstream, mirrored from country workbooks), latest year per
+    country. This is people-level: final_pin per (unit × group × severity class) —
+    the per-class headcounts the area classification cannot give. Some plans
+    publish PiN without classes (GTM/SLV/VEN: severity NULL) — total only.
+
+    Group logic mirrors load_severity_adm1: a blank group covering ≥50% of units
+    is the overall figure (BFA) — use it alone; otherwise sum the named disjoint
+    groups (spelling variants like CAF's 'IDP_FA'/'IDP FA' cover disjoint units —
+    verified — so a plain sum is safe).
+
+    Where a plan's PbS classes are unusable (SSD: constant class 4 on every row;
+    GTM/SLV/VEN: no classes), the unit's PiN is placed at the unit's AREA
+    classification from hpc.severity_admin — the same one-class-per-unit
+    semantic every other country's PbS encodes — flagged pbs_area for the site.
+    """
+    engine = stratus.get_engine("dev")
+    q = f"""
+    SELECT iso3, year, admin1_code, admin2_code, admin3_code,
+           COALESCE(admin3_name, admin2_name, admin1_name) AS name, population_group,
+           severity, final_pin
+    FROM hpc.pin_admin WHERE {ACODE} IS NOT NULL AND final_pin IS NOT NULL
+    """
+    qa = f"""
+    SELECT iso3, year, {ACODE} AS pcode, final_severity, population
+    FROM hpc.severity_admin
+    WHERE {ACODE} IS NOT NULL AND final_severity IS NOT NULL
+    """
+    with engine.connect() as conn:
+        df = pd.read_sql(q, conn)
+        sev = pd.read_sql(qa, conn)
+    # Per-unit dominant area class (population-weighted; row count where the
+    # sheet publishes no populations — BFA/SYR adm3).
+    sev = sev[sev["year"] == sev.groupby("iso3")["year"].transform("max")]
+    sev["_wt"] = sev["population"].fillna(1)
+    cls_w = (sev.groupby(["iso3", "pcode", "final_severity"])["_wt"].sum()
+             .reset_index())
+    cls_w = cls_w.sort_values("_wt", ascending=False).drop_duplicates(["iso3", "pcode"])
+    area_cls = {(r["iso3"], r["pcode"]): int(r["final_severity"])
+                for _, r in cls_w.iterrows()}
+    df = df[df["year"] == df.groupby("iso3")["year"].transform("max")]
+    df["population_group"] = df["population_group"].fillna("")
+
+    rows = []
+    for iso3, g in df.groupby("iso3"):
+        units = g.groupby("population_group")[ACODE].nunique()
+        n_units = g[ACODE].nunique()
+        if units.get("", 0) >= 0.5 * n_units:
+            # Blank group is the overall figure (BFA) — named groups are subsets.
+            g = g[g["population_group"] == ""]
+        elif (units.index != "").any():
+            # Named disjoint groups partition the caseload — sum them; a stray
+            # sub-dominant blank row (MLI: 1 unit) would double-count, drop it.
+            g = g[g["population_group"] != ""]
+        classed = g[g["severity"].notna()]
+        # Degenerate-distribution guard: SSD 2026 fills a constant severity 4 on
+        # every PiN row while its severity sheet shows a real 3/4/5 spread (KB:
+        # pipelines/hnrp-mirror). One distinct class across a whole country's
+        # units is a template artifact, not analysis — degrade to total-only.
+        if classed["severity"].nunique() == 1 and classed[ACODE].nunique() >= 10:
+            print(f"  pbs: {iso3} fills one constant class "
+                  f"({int(classed['severity'].iloc[0])}) on every unit — "
+                  f"degenerate, kept as total-only")
+            classed = classed.iloc[0:0]
+        by_class = classed.pivot_table(
+            index=ACODE, columns="severity", values="final_pin", aggfunc="sum")
+        total = g.groupby(ACODE)["final_pin"].sum()
+        a1names = g.drop_duplicates(ACODE).set_index(ACODE)["name"]
+        n_area = 0
+        for pcode, tot in total.items():
+            row = {"pcode": pcode, "iso3": iso3, "name": a1names.get(pcode),
+                   "pbs_tot": int(tot), "pbs_yr": int(g["year"].iloc[0]),
+                   "pbs_area": 0}
+            if pcode in by_class.index:
+                for cls in range(1, 6):
+                    v = (by_class.loc[pcode, cls]
+                         if cls in by_class.columns else None)
+                    row[f"pb{cls}"] = int(v) if pd.notna(v) else 0
+                row["pbs_classed"] = 1
+            else:
+                # No usable published classes — place the unit's PiN at its
+                # AREA classification (severity_admin), if one exists.
+                acls = area_cls.get((iso3, pcode))
+                for cls in range(1, 6):
+                    row[f"pb{cls}"] = int(tot) if cls == acls else 0
+                row["pbs_classed"] = int(acls is not None)
+                row["pbs_area"] = int(acls is not None)
+                n_area += row["pbs_area"]
+            rows.append(row)
+        if n_area:
+            print(f"  pbs: {iso3}: {n_area} unit(s) classed from the AREA "
+                  f"classification (no usable published classes)")
+    out = pd.DataFrame(rows)
+    print(f"PiN-by-severity: {out['iso3'].nunique()} countries, {len(out)} units "
+          f"({int(out['pbs_classed'].sum())} with class breakdown)")
     return out
 
 
@@ -433,12 +700,27 @@ def load_population_adm1() -> pd.DataFrame:
     mirror; normalize_pcodes reconciles them to our COD vintage (including
     name-matching units HAPI ships with *-XXX placeholder codes).
     """
+    if LEVEL == 3:
+        # COD-PS via HAPI has no admin-3 layer — WorldPop 1km UN-adjusted totals,
+        # zonally summed over the same adm3 boundaries, stand in
+        # (pipeline/backfill_adm3_population.py; spatial join, no pcodes involved).
+        try:
+            df = stratus.load_parquet_from_blob(
+                f"{PROJECT_PREFIX}/processed/pop_adm3_worldpop.parquet", stage="dev")
+            df = df[df["population"].notna()]
+            print(f"Population baseline (WorldPop adm3): {df['iso3'].nunique()} "
+                  f"countries, {len(df)} units")
+            return df
+        except Exception as e:  # noqa: BLE001
+            print(f"Population baseline: WorldPop adm3 parquet unavailable "
+                  f"({type(e).__name__}) — run backfill_adm3_population.py")
+            return pd.DataFrame(columns=["iso3", "pcode", "name", "population", "pop_year"])
     engine = stratus.get_engine("dev")
-    q = """
-    SELECT location_code AS iso3, admin1_code AS pcode, admin1_name AS name,
+    q = f"""
+    SELECT location_code AS iso3, {ACODE} AS pcode, {ANAME} AS name,
            population, reference_period_end
     FROM pop.population_admin
-    WHERE admin_level = 1 AND admin1_code IS NOT NULL
+    WHERE admin_level = {LEVEL} AND {ACODE} IS NOT NULL
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_end"])
@@ -454,7 +736,7 @@ def load_population_adm1() -> pd.DataFrame:
     return df.drop(columns=["reference_period_end"])
 
 
-def load_hno_pop_adm1() -> pd.DataFrame:
+def load_hno_pop_adm1(sub_parent: dict | None = None) -> pd.DataFrame:
     """Total population per ADM1 unit from the HNO/JIAF baseline (hpc.needs_admin,
     population_status='all'): each plan's own population base, self-consistent with
     the PiN/targeted figures on the axes. Second fallback layer for the scatter
@@ -462,81 +744,66 @@ def load_hno_pop_adm1() -> pd.DataFrame:
     COD-PS in HAPI at all) or where its census vintage is distrusted (MLI, SDN…).
     """
     engine = stratus.get_engine("dev")
-    q = """
-    SELECT location_code AS iso3, admin1_code, admin1_name AS name, admin2_code,
-           admin_level, population, reference_period_start
+    q = f"""
+    SELECT location_code AS iso3, admin1_code, {ANAME} AS name, admin2_code,
+           admin2_name, admin3_code, admin_level, population, reference_period_start
     FROM hpc.needs_admin
     WHERE population_status = 'all' AND lower(COALESCE(category, '')) IN ('total', '')
-      AND admin_level >= 1 AND admin1_code IS NOT NULL
+      AND admin_level >= {LEVEL} AND {ACODE} IS NOT NULL
     """
     with engine.connect() as conn:
         df = pd.read_sql(q, conn, parse_dates=["reference_period_start"])
+    if sub_parent:
+        # Same upstream hazard as the PiN loader: *-XXX sub-rows with a wrong
+        # stated admin-1 — re-attribute by unique COD sub-unit name.
+        is_xxx = df["admin2_code"].fillna("").str.endswith("-XXX")
+        moved = 0
+        for i in df.index[is_xxx]:
+            par = sub_parent.get((df.at[i, "iso3"], _fold(df.at[i, "admin2_name"] or "")))
+            if par and par != df.at[i, "admin1_code"]:
+                df.at[i, "admin1_code"] = par
+                moved += 1
+        if moved:
+            print(f"  hno-pop: re-attributed {moved} placeholder-coded sub-row(s) by name")
     rows = []
     for iso3, g in df.groupby("iso3"):
         ref = g["reference_period_start"].max()
         g = g[g["reference_period_start"] == ref]
-        lvl = min(g["admin_level"].unique())  # prefer admin-1 rows, else sum admin-2+
+        lvl = min(g["admin_level"].unique())  # prefer the coarsest at/below LEVEL
         g = g[g["admin_level"] == lvl]
         # One row per finest unit, or the sum double-counts (dup check, not assumed).
-        key = ["admin1_code"] if lvl == 1 else ["admin1_code", "admin2_code"]
+        key = ["admin1_code", "admin2_code", "admin3_code"][:max(lvl, LEVEL)]
         dup = g.duplicated(key, keep=False)
         if dup.any():
             print(f"  hno-pop: {iso3} has {int(dup.sum())} duplicated unit row(s) "
                   f"at level {lvl} — kept first per unit")
             g = g.drop_duplicates(key)
-        a1names = g.drop_duplicates("admin1_code").set_index("admin1_code")["name"]
-        tot = g.groupby("admin1_code")["population"].sum()
+        a1names = g.drop_duplicates(ACODE).set_index(ACODE)["name"]
+        tot = g.groupby(ACODE)["population"].sum()
         rows += [{"pcode": p, "iso3": iso3, "name": a1names.get(p),
                   "hno_pop": int(v), "hno_year": int(ref.year)}
                  for p, v in tot.items() if pd.notna(v)]
+    if not rows:
+        print("HNO baseline: none at this level")
+        return pd.DataFrame(columns=["pcode", "iso3", "name", "hno_pop", "hno_year"])
     out = pd.DataFrame(rows)
-    print(f"HNO baseline: {out['iso3'].nunique()} countries, {len(out)} ADM1 units")
+    print(f"HNO baseline: {out['iso3'].nunique()} countries, {len(out)} units")
     return out
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--rebuild-geometry", action="store_true",
-                    help="Rewrite the adm1 geojson even if it already exists (it is "
-                         "stable between runs; the default skips it when present).")
-    args = ap.parse_args()
-
-    print(f"Loading ADM1 skill stats: {SKILL_BLOB}")
-    skill = stratus.load_parquet_from_blob(SKILL_BLOB, stage="dev")
-
-    engine = stratus.get_engine("prod")
-    with engine.connect() as conn:
-        poly = pd.read_sql("SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=1", conn)
-        country_names = pd.read_sql(
-            "SELECT iso3, name FROM public.polygon WHERE adm_level=0", conn,
-        ).set_index("iso3")["name"].to_dict()
-    names = poly.set_index("pcode")["name"].to_dict()
-
-    print("Reconciling humanitarian pcodes to the COD vintage...")
-    df_pin_raw, sector_names = load_pin_adm1()
-    df_pin = normalize_pcodes(df_pin_raw, poly, "PiN")
-    df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
-    df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
-    df_pop = normalize_pcodes(load_population_adm1(), poly, "population",
-                              xxx_name_match=True)
-    # Normalization can merge units (reforms, renumberings) — sum to one per pcode.
-    df_pop = (df_pop.groupby("pcode", as_index=False)
-              .agg({"population": "sum", "pop_year": "max"})
-              .rename(columns={"population": "pop"}))
-    df_hno = normalize_pcodes(load_hno_pop_adm1(), poly, "hno-pop")
-    df_hno = (df_hno.groupby("pcode", as_index=False)
-              .agg({"hno_pop": "sum", "hno_year": "max"}))
-    ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
+def _ipc_lists(df_ipc: pd.DataFrame) -> dict[str, list]:
+    """Per pcode: the analysis periods, newest validity first — capped at 6
+    (payload guard; the period logic only ever reaches recent ones plus the
+    most-recent-past fallback)."""
+    if df_ipc.empty:
+        return {}
     df_ipc = (df_ipc.groupby(["pcode", "t", "s", "e"], as_index=False)
               .agg({**{f"p{ph}": "sum" for ph in ["1", "2", "3", "4", "5", "all"]},
                     "a": "max"}))
-    # Per pcode: the list of available analysis periods, newest validity first —
-    # capped at 6 (payload guard; the period logic only ever reaches recent ones
-    # plus the most-recent-past fallback).
-    ipc_lists: dict[str, list] = {}
+    out: dict[str, list] = {}
     for pcode, g in df_ipc.groupby("pcode"):
         g = g.sort_values("e", ascending=False).head(6)
-        ipc_lists[pcode] = [
+        out[pcode] = [
             {
                 "t": r["t"],
                 "s": r["s"].strftime("%Y-%m"),
@@ -549,6 +816,160 @@ def main() -> None:
             }
             for _, r in g.iterrows()
         ]
+    return out
+
+
+def build_lowest() -> None:
+    """Combine the per-level exports into the 'lowest available level' view.
+
+    Per country: admin-3 where we have it (BFA/MMR/SYR), else admin-2 (the
+    21-country adm2 scope), else admin-1. Reads the three payloads/geojsons
+    already written by --level 1/2/3 runs and writes hnrp_drought_low.json +
+    hnrp_low.geojson — rows carry "lvl" so the site can say which level a unit
+    came from.
+    """
+    base = HERE.parent / "docs" / "data"
+    data, geo = {}, {}
+    for lvl, suffix in [(1, ""), (2, "_adm2"), (3, "_adm3")]:
+        dp = base / f"hnrp_drought{suffix}.json"
+        gp = base / (f"hnrp_adm{lvl}.geojson" if lvl > 1 else "hnrp_adm1.geojson")
+        if not dp.exists() or not gp.exists():
+            sys.exit(f"Missing level-{lvl} outputs ({dp.name} / {gp.name}) — "
+                     f"run --level {lvl} first")
+        data[lvl] = json.loads(dp.read_text())
+        geo[lvl] = json.loads(gp.read_text())
+
+    level_of: dict[str, int] = {}
+    for lvl in (1, 2, 3):
+        for r in data[lvl]["rows"]:
+            level_of[r["iso3"]] = max(level_of.get(r["iso3"], 1), lvl)
+    rows = [dict(r, lvl=lvl) for lvl in (1, 2, 3) for r in data[lvl]["rows"]
+            if level_of.get(r["iso3"]) == lvl]
+    feats = [f for lvl in (1, 2, 3) for f in geo[lvl]["features"]
+             if level_of.get(f["properties"].get("iso3")) == lvl]
+
+    payload = {**data[1], "adm_level": "low", "rows": rows}
+    out = base / "hnrp_drought_low.json"
+    out.write_text(json.dumps(payload, separators=(",", ":")))
+    gout = base / "hnrp_low.geojson"
+    gout.write_text(json.dumps({"type": "FeatureCollection", "features": feats},
+                               separators=(",", ":")))
+    from collections import Counter
+    mix = Counter(level_of.values())
+    print(f"Lowest-level view: {len(rows)} units, {len(feats)} polygons "
+          f"({mix.get(3, 0)} countries at adm3, {mix.get(2, 0)} at adm2, "
+          f"{mix.get(1, 0)} at adm1)")
+    print(f"Wrote {out} ({out.stat().st_size / 1024:.0f} KB) and {gout.name} "
+          f"({gout.stat().st_size / 1e6:.1f} MB)")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--rebuild-geometry", action="store_true",
+                    help="Rewrite the geojson even if it already exists (it is "
+                         "stable between runs; the default skips it when present).")
+    ap.add_argument("--level", choices=("1", "2", "3", "low"), default="1",
+                    help="Admin level of the export (2/3 write *_admN outputs; "
+                         "'low' combines the three per-country finest levels)")
+    args = ap.parse_args()
+    if args.level == "low":
+        build_lowest()
+        return
+    _set_level(int(args.level))
+
+    print(f"Loading ADM{LEVEL} skill stats: {SKILL_BLOB}")
+    skill = stratus.load_parquet_from_blob(SKILL_BLOB, stage="dev")
+
+    engine = stratus.get_engine("prod")
+    parent2: dict[str, str] = {}  # adm3 pcode -> parent adm2 pcode (LEVEL 3 only)
+    with engine.connect() as conn:
+        if LEVEL == 3:
+            # public.polygon stops at adm2 — the adm3 reference (pcodes, names,
+            # parent adm2) comes straight from the COD shapefiles.
+            a2names = pd.read_sql(
+                "SELECT pcode, name FROM public.polygon WHERE adm_level=2",
+                conn).set_index("pcode")["name"].to_dict()
+            parts, parent_names = [], {}
+            for iso3 in ADM3_ISO3S:
+                g, pcol, ncol, parcol = load_adm3_shp(iso3)
+                parts.append(pd.DataFrame({
+                    "pcode": g[pcol], "iso3": iso3, "name": g[ncol]}))
+                parent2.update(dict(zip(g[pcol], g[parcol])))
+                if ncol.upper().startswith("ADM3"):
+                    n2col = ncol.replace("3", "2")
+                    parent_names.update(dict(zip(g[pcol], g[n2col])))
+                else:  # COD: parent names from the adm2 polygon table
+                    parent_names.update({z: a2names.get(par)
+                                         for z, par in zip(g[pcol], g[parcol])
+                                         if a2names.get(par)})
+            poly = pd.concat(parts, ignore_index=True)
+            print(f"ADM3 reference from shapefiles: {len(poly)} units "
+                  f"({', '.join(ADM3_ISO3S)})")
+        else:
+            poly = pd.read_sql(
+                f"SELECT pcode, iso3, name FROM public.polygon WHERE adm_level={LEVEL}",
+                conn)
+        country_names = pd.read_sql(
+            "SELECT iso3, name FROM public.polygon WHERE adm_level=0", conn,
+        ).set_index("iso3")["name"].to_dict()
+        # Parent admin-1 names for level-2 rows (tooltips/table): no parent column
+        # exists, but COD adm2 pcodes extend their adm1 parent's pcode.
+        if LEVEL != 3:
+            parent_names = {}
+        if LEVEL == 2:
+            p1 = pd.read_sql(
+                "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=1", conn)
+            a1_by_iso = {i: sorted(g_["pcode"], key=len, reverse=True)
+                         for i, g_ in p1.groupby("iso3")}
+            a1_names = p1.set_index("pcode")["name"].to_dict()
+            for _, r in poly.iterrows():
+                par = next((c for c in a1_by_iso.get(r["iso3"], [])
+                            if str(r["pcode"]).startswith(c)), None)
+                if par:
+                    parent_names[r["pcode"]] = a1_names[par]
+    names = poly.set_index("pcode")["name"].to_dict()
+
+    # (iso3, folded adm2 name) -> parent admin1 pcode, names unique within country:
+    # lets loaders re-attribute placeholder-coded sub-rows whose stated admin-1 is
+    # wrong upstream (see MOZ 2024). Level-1 rollups only.
+    sub_parent: dict = {}
+    if LEVEL == 1:
+        with engine.connect() as conn:
+            p2 = pd.read_sql(
+                "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=2", conn)
+        a1_by_iso = {i: sorted(g_["pcode"], key=len, reverse=True)
+                     for i, g_ in poly.groupby("iso3")}
+        cnt: dict = {}
+        for _, r in p2.iterrows():
+            k = (r["iso3"], _fold(r["name"]))
+            par = next((c for c in a1_by_iso.get(r["iso3"], [])
+                        if str(r["pcode"]).startswith(c)), None)
+            if par:
+                cnt[k] = None if k in cnt else par  # None marks ambiguous names
+        sub_parent = {k: v for k, v in cnt.items() if v}
+
+    print("Reconciling humanitarian pcodes to the COD vintage...")
+    df_pin_raw, sector_names = load_pin_adm1(sub_parent)
+    df_pin = normalize_pcodes(df_pin_raw, poly, "PiN")
+    df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
+    df_pbs = normalize_pcodes(load_pbs_adm1(), poly, "pbs")
+    df_pbs = (df_pbs.groupby("pcode", as_index=False)
+              .agg({"iso3": "first", "name": "first",
+                    **{f"pb{c}": "sum" for c in range(1, 6)},
+                    "pbs_tot": "sum", "pbs_yr": "max", "pbs_classed": "max",
+                    "pbs_area": "max"}))
+    df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
+    df_pop = normalize_pcodes(load_population_adm1(), poly, "population",
+                              xxx_name_match=True)
+    # Normalization can merge units (reforms, renumberings) — sum to one per pcode.
+    df_pop = (df_pop.groupby("pcode", as_index=False)
+              .agg({"population": "sum", "pop_year": "max"})
+              .rename(columns={"population": "pop"}))
+    df_hno = normalize_pcodes(load_hno_pop_adm1(sub_parent), poly, "hno-pop")
+    df_hno = (df_hno.groupby("pcode", as_index=False)
+              .agg({"hno_pop": "sum", "hno_year": "max"}))
+    ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
+    ipc_lists = _ipc_lists(df_ipc)
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
     _sum = lambda s: s.sum(min_count=1)  # noqa: E731 — all-NaN stays None, not 0
     sec_cols = [c for c in df_pin.columns if c.startswith(("pin__", "tgt__", "tgtyr__"))]
@@ -564,7 +985,12 @@ def main() -> None:
     df_hum = df_pin.merge(df_sev, on="pcode", how="outer", suffixes=("", "_sev"))
     for col in ["iso3", "name"]:
         df_hum[col] = df_hum[col].combine_first(df_hum[f"{col}_sev"])
-    df_hum = df_hum.drop(columns=["iso3_sev", "name_sev"]).rename(columns={"name": "name_hum"})
+    df_hum = df_hum.drop(columns=["iso3_sev", "name_sev"])
+    df_hum = df_hum.merge(df_pbs, on="pcode", how="outer", suffixes=("", "_pbs"))
+    for col in ["iso3", "name"]:
+        df_hum[col] = df_hum[col].combine_first(df_hum[f"{col}_pbs"])
+    df_hum = (df_hum.drop(columns=["iso3_pbs", "name_pbs"])
+              .rename(columns={"name": "name_hum"}))
 
     # Scope: HNRP units PLUS IPC-covered units outside any plan — the tab's purpose
     # includes surfacing severe food insecurity the HNRP does not capture. IPC-only
@@ -577,6 +1003,13 @@ def main() -> None:
         )
         print(f"Scope: +{len(extra)} IPC-covered ADM1 units outside HNRP plans "
               f"({len(set(ipc_iso3[p] for p in extra))} countries)")
+    if LEVEL == 3:
+        # Forecast inheritance: each adm3 unit carries its parent adm2's skill
+        # rows verbatim (no adm3 zonal stats exist).
+        kids = pd.DataFrame({"pcode": list(parent2), "_par": list(parent2.values())})
+        skill = (skill.rename(columns={"pcode": "_par"})
+                 .merge(kids, on="_par").drop(columns=["_par"]))
+        print(f"Skill inherited from parent adm2 for {skill['pcode'].nunique()} adm3 units")
     skill = skill[skill["pcode"].isin(set(df_hum["pcode"]))]
     if skill.empty:
         sys.exit("No overlap between ADM1 skill pcodes and HNRP PiN pcodes")
@@ -593,10 +1026,13 @@ def main() -> None:
     issued_label = f"{calendar.month_name[issued_month]} {global_max_iy}"
     print(f"Latest issuance: {issued_label}")
 
-    # Rainy-season mask over the HNRP ADM1 units (same ERA5 climatology as other exports).
-    pcodes = sorted(set(skill["pcode"].dropna()))
+    # Rainy-season mask (same ERA5 climatology as other exports). At level 3 the
+    # climatology, like the skill, is the parent adm2's — queried on parents and
+    # mapped onto children.
+    pcodes = (sorted({parent2[p] for p in skill["pcode"].dropna() if p in parent2})
+              if LEVEL == 3 else sorted(set(skill["pcode"].dropna())))
     ph = ",".join(["%s"] * len(pcodes))
-    print(f"Querying ERA5 climatology for {len(pcodes)} ADM1 pcodes...")
+    print(f"Querying ERA5 climatology for {len(pcodes)} pcodes...")
     with engine.connect() as conn:
         era5 = pd.read_sql(
             f"SELECT pcode, valid_date, mean FROM public.era5 WHERE pcode IN ({ph})",
@@ -608,6 +1044,11 @@ def main() -> None:
         .reset_index().rename(columns={"mean": "mean_mm_day"})
     )
     rainy_set = compute_rainy_set(monthly_clim)
+    if LEVEL == 3:
+        by_par: dict[str, list] = {}
+        for (p, t) in rainy_set:
+            by_par.setdefault(p, []).append(t)
+        rainy_set = {(c, t) for c, p in parent2.items() for t in by_par.get(p, [])}
 
     # Per unit: the worst qualifying drought slot at the latest issuance.
     sub = skill[skill["issued_month"] == issued_month].copy()
@@ -698,7 +1139,8 @@ def main() -> None:
               f"{sorted(set(merged.loc[bad, 'iso3'] + ':' + merged.loc[bad, 'pcode']))}")
         merged.loc[bad, ["pop", "pop_year"]] = float("nan")
     merged["pop_src"] = None
-    merged.loc[merged["pop"].notna(), "pop_src"] = "COD-PS"
+    merged.loc[merged["pop"].notna(), "pop_src"] = ("WorldPop" if LEVEL == 3
+                                                     else "COD-PS")
     # Layer 2: the HNO/JIAF baseline fills units the COD-PS layer left empty
     # (missing upstream or distrust-nulled). An HNO total clearly below the
     # analysed population can't be a valid denominator either — logged and
@@ -713,9 +1155,10 @@ def main() -> None:
               f"population, skipped: "
               f"{sorted(set(merged.loc[hno_low, 'iso3'] + ':' + merged.loc[hno_low, 'pcode']))}")
     use_hno = merged["pop"].isna() & merged["hno_pop"].notna() & ~hno_low
-    merged.loc[use_hno, "pop"] = merged.loc[use_hno, "hno_pop"]
-    merged.loc[use_hno, "pop_year"] = merged.loc[use_hno, "hno_year"]
-    merged.loc[use_hno, "pop_src"] = "HNO"
+    if use_hno.any():  # empty assignment TypeErrors when the HNO layer is empty (adm3)
+        merged.loc[use_hno, "pop"] = merged.loc[use_hno, "hno_pop"]
+        merged.loc[use_hno, "pop_year"] = merged.loc[use_hno, "hno_year"]
+        merged.loc[use_hno, "pop_src"] = "HNO"
     merged = merged.drop(columns=["hno_pop", "hno_year"])
     n_pop = merged["pop"].notna().sum()
     print(f"Population baseline covers {n_pop}/{len(merged)} units "
@@ -725,8 +1168,91 @@ def main() -> None:
     merged["name"] = merged["name"].combine_first(merged["name_hum"])
     merged = merged.drop(columns=["name_hum"])
     merged["country"] = merged["iso3"].map(country_names)
+    if LEVEL >= 2:
+        merged["parent"] = merged["pcode"].map(parent_names)
+    # A row whose pcode has no polygon at this level can never display — no map
+    # geometry and no forecast series behind it (at level 2, mostly IPC codes from
+    # countries outside the adm2 scope, plus unreconciled reform codes). Prune.
+    in_poly = merged["pcode"].isin(set(poly["pcode"]))
+    if (~in_poly).any():
+        gone = sorted(set(merged.loc[~in_poly, "iso3"].dropna()))
+        print(f"Pruned {int((~in_poly).sum())} unit(s) with no adm{LEVEL} polygon "
+              f"({len(gone)} countries: {', '.join(gone[:14])}{'…' if len(gone) > 14 else ''})")
+        merged = merged[in_poly]
     n_signal = merged["rp"].notna().sum()
     print(f"{len(merged)} HNRP ADM1 units; {n_signal} with a qualifying drought signal")
+
+    # IPC downscaling: HAPI publishes IPC at admin-1/2 — units finer than the
+    # published level (AFG districts, COD zones de santé…) have no IPC rows and
+    # showed zeros. Fill them from the PARENT analysis, prorated by each unit's
+    # population weight within the parent, marked "d": <source level> so every
+    # tooltip says the numbers are downscaled shares, not unit-level analysis.
+    if LEVEL >= 2:
+        with engine.connect() as conn:
+            poly1 = pd.read_sql(
+                "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=1", conn)
+        par1 = normalize_pcodes(load_ipc_adm1(key="admin1_code"), poly1, "IPC-adm1")
+        lists1 = _ipc_lists(par1)
+        lists2 = {}
+        if LEVEL == 3:
+            with engine.connect() as conn:
+                poly2 = pd.read_sql(
+                    "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=2",
+                    conn)
+            par2 = normalize_pcodes(load_ipc_adm1(key="admin2_code"), poly2, "IPC-adm2")
+            lists2 = _ipc_lists(par2)
+        a1_by_iso = {i: sorted(g_["pcode"], key=len, reverse=True)
+                     for i, g_ in poly1.groupby("iso3")}
+
+        def _src_of(pcode: str, iso3: str):
+            if LEVEL == 3:
+                p2 = parent2.get(pcode)
+                if p2 and p2 in lists2:
+                    return p2, 2, lists2[p2]
+                base = p2 or pcode
+            else:
+                base = pcode
+            p1 = next((c for c in a1_by_iso.get(iso3, [])
+                       if str(base).startswith(c)), None)
+            if p1 and p1 in lists1:
+                return p1, 1, lists1[p1]
+            return None, None, None
+
+        w = merged["pop"].astype(float)
+        for col in ["sev_total", "pbs_tot"]:
+            if col in merged.columns:
+                w = w.fillna(merged[col].astype(float))
+        merged["_w"] = w
+        # Σ weight per source parent (over ALL its units, so own-IPC and
+        # downscaled units together still sum to ~the parent's figures).
+        src_key, src_lvl, src_lists = {}, {}, {}
+        for _, r in merged.iterrows():
+            k, lv, ls = _src_of(r["pcode"], r["iso3"])
+            if k:
+                src_key[r["pcode"]], src_lvl[r["pcode"]], src_lists[r["pcode"]] = k, lv, ls
+        wsum: dict[str, float] = {}
+        for _, r in merged.iterrows():
+            k = src_key.get(r["pcode"])
+            if k and pd.notna(r["_w"]):
+                wsum[k] = wsum.get(k, 0) + float(r["_w"])
+        n_ds = 0
+        for _, r in merged.iterrows():
+            pcode = r["pcode"]
+            if pcode in ipc_lists or pcode not in src_key:
+                continue
+            if pd.isna(r["_w"]) or not wsum.get(src_key[pcode]):
+                continue
+            frac = float(r["_w"]) / wsum[src_key[pcode]]
+            ipc_lists[pcode] = [
+                {**c, "p": [round(v * frac) for v in c["p"]],
+                 "tot": round(c["tot"] * frac), "d": src_lvl[pcode]}
+                for c in src_lists[pcode]
+            ]
+            n_ds += 1
+        merged = merged.drop(columns=["_w"])
+        if n_ds:
+            print(f"IPC downscaled to {n_ds} unit(s) from parent analyses "
+                  f"(population-share proration, flagged 'd')")
 
     # Coverage report: every humanitarian unit should have forecast data and a polygon.
     no_fc = merged.loc[~merged["pcode"].isin(set(skill["pcode"])), ["iso3", "pcode"]]
@@ -759,8 +1285,22 @@ def main() -> None:
         for code, yr in stale.items():
             if code in sec and sec[code][1] is not None:
                 sec[code].append(yr)  # [pin, targeted, staleTargetedYear]
+        # PiN-by-severity travels as wide pb1..pb5 columns; fold into "pb": [c1..c5]
+        # (only when the plan publishes a class breakdown — else pbs_tot alone).
+        pbs_tot = rec.pop("pbs_tot", None)
+        pbs_classed = rec.pop("pbs_classed", None)
+        pbs_area = rec.pop("pbs_area", None)
+        pbs = [rec.pop(f"pb{c}", None) for c in range(1, 6)]
         out = {k: (v if isinstance(v, (list, dict)) else None if pd.isna(v) else v)
                for k, v in rec.items()}
+        if pbs_tot is not None and pd.notna(pbs_tot):
+            out["pbs_tot"] = int(pbs_tot)
+            if pbs_classed:
+                out["pb"] = [int(v) if pd.notna(v) else 0 for v in pbs]
+                if pbs_area and pd.notna(pbs_area) and int(pbs_area):
+                    out["pba"] = 1  # classes come from the AREA classification
+        if out.get("pbs_yr") is not None:
+            out["pbs_yr"] = int(out["pbs_yr"])
         if out.get("tgt_year") is not None:
             out["tgt_year"] = int(out["tgt_year"])
         for k in ("pop", "pop_year"):
@@ -773,6 +1313,7 @@ def main() -> None:
         return out
 
     payload = {
+        "adm_level": LEVEL,
         "issued_label": issued_label,
         "issued_month": int(issued_month),
         "issued_year": int(global_max_iy),
@@ -796,6 +1337,7 @@ def main() -> None:
                 for rec in merged.drop(columns=["pin_admin_level"]).to_dict("records"))
             if row.get("pin") is not None or row.get("targeted") is not None
             or row.get("sec") or row.get("ipc") or (row.get("sev_total") or 0) > 0
+            or row.get("pbs_tot") is not None
         ],
     }
     OUT.write_text(json.dumps(payload, separators=(",", ":")))

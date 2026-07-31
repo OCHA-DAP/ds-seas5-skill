@@ -5,20 +5,77 @@
 // skill), and the ranked table. Reuses app.js globals: STYLE, classify, catBase,
 // CAT_LABEL, T, buildPatterns.
 (async function () {
+  // Admin level via ?adm=1|2|3|low: switching reloads the page with that
+  // level's payload — the whole tab is data-driven, so a reload is the simplest
+  // correct switch. Default is "low": each country at its finest available level.
+  const ADM_FILES = {
+    low: ["data/hnrp_drought_low.json", "data/hnrp_low.geojson"],
+    1: ["data/hnrp_drought.json", "data/hnrp_adm1.geojson"],
+    2: ["data/hnrp_drought_adm2.json", "data/hnrp_adm2.geojson"],
+    3: ["data/hnrp_drought_adm3.json", "data/hnrp_adm3.geojson"],
+  };
+  let ADM = new URLSearchParams(location.search).get("adm") ?? "low";
+  if (!(ADM in ADM_FILES)) ADM = "low";
+  const ADM_LABEL = { low: "lowest available level", 1: "admin 1", 2: "admin 2", 3: "admin 3" };
   let data, geo, world;
   try {
-    [data, geo, world] = await Promise.all([
-      fetch("data/hnrp_drought.json").then((r) => r.json()),
-      fetch("data/hnrp_adm1.geojson").then((r) => r.json()),
-      fetch("data/countries.geojson").then((r) => r.json()),
-    ]);
+    // no-cache = revalidate: the admin-level switch is a plain navigation, which
+    // otherwise serves stale payloads straight from HTTP cache mid-session.
+    const fj = (f) => fetch(f, { cache: "no-cache" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(r)));
+    world = await fj("data/countries.geojson");
+    try {
+      [data, geo] = await Promise.all(ADM_FILES[ADM].map(fj));
+    } catch {
+      if (ADM !== "1") { // payload not built yet — fall back rather than a blank tab
+        ADM = "1";
+        [data, geo] = await Promise.all(ADM_FILES[1].map(fj));
+      } else { throw new Error("no data"); }
+    }
   } catch {
     return; // data files not built yet — leave the tab empty
+  }
+  const admSel = document.getElementById("hnrp-adm");
+  admSel.value = String(ADM);
+  document.querySelector(".hnrp-h").textContent = `Severity vs targeted, per ${ADM_LABEL[ADM]}`;
+  // Parent admin-1 name qualifies adm2 units (district names repeat across regions).
+  const dispName = (r) => (r.parent ? `${r.name ?? r.pcode} (${r.parent})` : (r.name ?? r.pcode));
+  // Every control survives the admin-level reload (and makes links shareable
+  // with their settings): state is carried in the URL query string.
+  const CTLS = {
+    skill: "hnrp-skill", rp: "hnrp-rp", tri: "hnrp-tri",
+    sev: "hnrp-sev-type", lvl: "hnrp-sev-lvl", ipcp: "hnrp-ipc-period",
+    country: "hnrp-country", sort: "hnrp-bar-sort",
+  };
+  function stateURL() {
+    const u = new URL(location.href);
+    if (admSel.value === "low") u.searchParams.delete("adm");
+    else u.searchParams.set("adm", admSel.value);
+    for (const [k, id] of Object.entries(CTLS)) {
+      const el = document.getElementById(id);
+      if (el && el.value) u.searchParams.set(k, el.value);
+    }
+    u.searchParams.set("dro", document.getElementById("hnrp-drought-only").checked ? "1" : "0");
+    u.hash = "hnrp";
+    return u;
+  }
+  function syncURL() { history.replaceState(null, "", stateURL().toString()); }
+  admSel.addEventListener("change", () => { location.href = stateURL().toString(); });
+  function restoreControls() {
+    const q = new URLSearchParams(location.search);
+    for (const [k, id] of Object.entries(CTLS)) {
+      const v = q.get(k), el = document.getElementById(id);
+      // Only restore values that exist in the select (the country list differs
+      // between admin levels; an absent option silently stays at the default).
+      if (v != null && el && [...el.options].some((o) => o.value === v)) el.value = v;
+    }
+    if (q.get("dro") != null) {
+      document.getElementById("hnrp-drought-only").checked = q.get("dro") === "1";
+    }
   }
 
   const skillSel = document.getElementById("hnrp-skill");
   const rpSel = document.getElementById("hnrp-rp");
-  const sectorSel = document.getElementById("hnrp-sector");
   const srcTypeSel = document.getElementById("hnrp-sev-type");
   const srcLvlSel = document.getElementById("hnrp-sev-lvl");
   const srcLvlWrap = document.getElementById("hnrp-sev-lvl-wrap");
@@ -40,7 +97,7 @@
   // Plan cycle varies by country (e.g. Guatemala's latest is the 2025 HNRP) — surface
   // the year everywhere caseload figures appear.
   const planYrOf = (r) => {
-    const ys = [r.ref_year, r.sev_year].filter((y) => y != null);
+    const ys = [r.ref_year, r.sev_year, r.pbs_yr].filter((y) => y != null);
     return ys.length ? Math.max(...ys) : null;
   };
   const planYrByCountry = new Map();
@@ -63,27 +120,21 @@
   const fmtN = (v) => (v == null ? "–" : Math.round(v).toLocaleString("en-US"));
   const fmt = (v, d) => (v == null ? "–" : Number(v).toFixed(d));
   const pctOf = (num, den) => (num == null || !den ? null : (100 * num) / den);
-  // Caseload selector: Intersectoral, or any sector the plans publish (from the
-  // payload's sectors list; per-row figures live in r.sec = {code: [pin, targeted]}).
-  for (const [code, name] of data.sectors ?? []) {
-    const o = document.createElement("option");
-    o.value = code;
-    o.textContent = name;
-    sectorSel.appendChild(o);
-  }
-  const pinOf = (r) => (sectorSel.value === "is" ? r.pin : (r.sec?.[sectorSel.value]?.[0] ?? null));
-  const tgtOf = (r) => (sectorSel.value === "is" ? r.targeted : (r.sec?.[sectorSel.value]?.[1] ?? null));
+  // PiN/targeted are always the plan's INTERSECTORAL figures (per-sector series
+  // remain in the payload's r.sec should a sector view ever return).
+  const pinOf = (r) => r.pin ?? null;
+  const tgtOf = (r) => r.targeted ?? null;
   // Plan-cycle year of a targeted figure that fell back to an OLDER cycle than the
   // unit's PiN (none published in the current one) — flagged wherever it appears.
-  const tgtYrOf = (r) => (sectorSel.value === "is" ? (r.tgt_year ?? null)
-    : (r.sec?.[sectorSel.value]?.[2] ?? null));
+  const tgtYrOf = (r) => r.tgt_year ?? null;
   const tgtFlag = (r) => (tgtYrOf(r) ? ` (${tgtYrOf(r)} plan)` : "");
-  const secTag = () => (sectorSel.value === "is" ? "" : ` (${sectorSel.value})`);
+  const secTag = () => "";
 
   const droughtOnly = () => droughtOnlyEl.checked;
   // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
   // shown only in IPC mode, where surfacing needs the plan does NOT capture is the point.
-  const inHnrp = (r) => r.sev_total > 0 || r.pin != null || r.targeted != null || r.sec != null;
+  const inHnrp = (r) => r.sev_total > 0 || r.pin != null || r.targeted != null
+    || r.sec != null || r.pbs_tot != null;
 
   // ── Severity source: JIAF inter-sectoral 4+ (default) or IPC/CH phase N+ ─────
   // IPC rows carry a list of analysis periods (current / projections, each with a
@@ -117,8 +168,10 @@
   function sevValOf(r) {
     if (pinMode()) return pinOf(r);
     if (srcTypeSel.value === "jiaf") {
-      if (!(r.sev_total > 0)) return null;
-      return [r.s1, r.s2, r.s3, r.s4, r.s5].slice(lvl() - 1).reduce((a, b) => a + (b ?? 0), 0);
+      // People-level: the plan's PiN-by-severity distribution (JIAF 2.0 PbS,
+      // hpc.pin_admin). Plans without a class breakdown (GTM/SLV/VEN) show dashes.
+      if (!r.pb) return null;
+      return r.pb.slice(lvl() - 1).reduce((a, b) => a + (b ?? 0), 0);
     }
     const c = ipcComboOf(r);
     if (!c) return null;
@@ -128,12 +181,10 @@
   // shares use the plan's JIAF analysed population (same plan, same admin unit).
   const sevTotOf = (r) => (ipcMode() ? (ipcComboOf(r)?.tot ?? null) : r.sev_total);
   const lvlTag = () => (lvl() === 5 ? "5" : lvl() + "+");
-  // JIAF assigns each area (x population group) ONE intersectoral severity class —
-  // there is no people-per-class breakdown (unlike IPC's population_in_phase). Our
-  // JIAF sums are therefore populations of AREAS classified at each level, and the
-  // labels must say so.
+  // JIAF figures are now people-level: PiN per severity class from the plan's
+  // PiN-by-Severity distribution — labelled plainly as "PiN N+".
   const sevLabel = () => (pinMode() ? `PiN${secTag()}`
-    : srcTypeSel.value === "jiaf" ? `JIAF ${lvlTag()} areas`
+    : srcTypeSel.value === "jiaf" ? `PiN ${lvlTag()}`
     : `IPC ${lvlTag()}`);
 
   // Exercise (analysis) month + validity window of an IPC combo — spelled out
@@ -143,7 +194,8 @@
     const [y, m] = s.split("-").map(Number);
     return new Date(Date.UTC(y, m - 1)).toLocaleString("en", { month: "short", timeZone: "UTC" }) + " " + y;
   };
-  const comboDesc = (c) => `${c.t}, exercise ${fmtYM(c.a)}, valid ${c.label}`;
+  const comboDesc = (c) => `${c.t}, exercise ${fmtYM(c.a)}, valid ${c.label}` +
+    (c.d ? ` — downscaled from admin-${c.d} by population share` : "");
 
   const IPC_OPT_BASE = { now: "Now", fwd: "Forecast window" };
   function updateIpcPeriodUI() {
@@ -302,7 +354,7 @@
       ? `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>`
       : `<div class="cat" style="color:#9db1b3">${member ? "In HNRP" : "IPC-covered, not in an HNRP"}` +
         ` — ${droughtOnly() ? "no qualifying drought signal" : "no forecast data"}</div>`;
-    return `<div class="name">${p.name ?? p.pcode}</div>` + catLine + rows;
+    return `<div class="name">${dispName(r)}</div>` + catLine + rows;
   };
   // World countries beneath as context (non-interactive, like the Map tab's backdrop).
   L.geoJSON(world, {
@@ -374,6 +426,10 @@
     triLabels.clearLayers();
     const sel = countrySel.value;
     if (!sel) return;
+    if (!triSel.value.startsWith("auto")) return; // one explicit season — labels are noise
+    // At adm2 a country can have 1,000+ units (Colombia) — label soup. Cap it.
+    const nShown = data.rows.filter((r) => r.country === sel && slotOf(r)).length;
+    if (nShown > 150) return;
     layer.eachLayer((l) => {
       const r = byPcode.get(l.feature.properties.pcode);
       if (!r || r.country !== sel) return;
@@ -443,7 +499,8 @@
     r.pop ?? (Math.max(ipcComboOf(r)?.tot ?? 0, r.sev_total ?? 0) || null);
   const popSrcOf = (r) => {
     if (r.pop) {
-      return `total population, ${r.pop_src === "HNO" ? "HNO baseline" : "COD-PS"}` +
+      const srcName = { HNO: "HNO baseline", WorldPop: "WorldPop" }[r.pop_src] ?? "COD-PS";
+      return `total population, ${srcName}` +
         (r.pop_year ? ` ${r.pop_year}` : "");
     }
     const ipc = ipcComboOf(r)?.tot ?? 0, jiaf = r.sev_total ?? 0;
@@ -494,7 +551,9 @@
     g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 13, fill: "#555" })
       .textContent = `Targeted${secTag()} (${denom})`;
     const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 13, fill: "#555" });
-    yl.textContent = `Population in ${sevLabel()} (${denom})`;
+    // "Population in IPC 3+" reads well; "Population in PiN 3+" doesn't — PiN is
+    // already a population.
+    yl.textContent = `${ipcMode() ? `Population in ${sevLabel()}` : sevLabel()} (${denom})`;
     yl.setAttribute("transform", `rotate(-90 14 ${(M.t + H - M.b) / 2})`);
     g("line", { x1: X(0), y1: Y(0), x2: X(100), y2: Y(100),
                 stroke: "#c4d0d1", "stroke-width": 1, "stroke-dasharray": "5 4" });
@@ -509,6 +568,11 @@
     diagLabel(80, -8, `↑ more people in ${sevLabel()} than targeted`);
     diagLabel(80, 16, `↓ more people targeted than in ${sevLabel()}`);
 
+    if (ADM === "low" && countrySel.value && rows.length) {
+      g("text", { x: W - M.r - 6, y: M.t + 12, "text-anchor": "end",
+                  "font-size": 11, fill: "#9db1b3" })
+        .textContent = `shown at admin ${rows[0].lvl ?? "?"}`;
+    }
     const xOf = (r) => X(clamp(pctOf(tgtOf(r), popOf(r))));
     const yOf = (r) => Y(clamp(pctOf(sevValOf(r), popOf(r))));
     // Bubbles: big ones first so small ones stay hoverable; 2px surface ring.
@@ -529,7 +593,7 @@
         const s = slotOfAny(r);
         tip.hidden = false;
         const combo = ipcMode() ? ipcComboOf(r) : null;
-        tip.innerHTML = `<strong>${r.name ?? r.pcode}</strong> — ${r.country ?? r.iso3}<br>` +
+        tip.innerHTML = `<strong>${dispName(r)}</strong> — ${r.country ?? r.iso3}<br>` +
           `${sevLabel()}${combo ? ` (${comboDesc(combo)})` : ""}: ${fmtN(sevValOf(r))} (${fmt(pctOf(sevValOf(r), popOf(r)), 1)}%)<br>` +
           (tgtOf(r) == null
             ? `Targeted${secTag()}: – ${inHnrp(r) ? "(no figure)" : "(not in an HNRP)"}<br>`
@@ -547,7 +611,7 @@
       // The trimester actually used, printed inside the bubble where it fits —
       // in auto mode different admins use different worst seasons, and that
       // should be visible without hovering.
-      if (sl && R(popOf(r)) >= 11) {
+      if (sl && R(popOf(r)) >= 11 && triSel.value.startsWith("auto")) {
         const darkFill = cat && /vsev/.test(cat);
         g("text", { x: xOf(r), y: yOf(r) + 3, "text-anchor": "middle", "font-size": 9,
                     "font-weight": 600, fill: darkFill ? "#ffffff" : "#333",
@@ -578,7 +642,7 @@
   const PIN_COLOR = "#9db1b3";
   const segsOf = (r) => (pinMode() ? null
     : ipcMode() ? (ipcComboOf(r)?.p ?? null)
-    : [r.s1, r.s2, r.s3, r.s4, r.s5]);
+    : (r.pb ?? null));
   const barsWrap = document.getElementById("hnrp-bars-wrap");
   const barsHint = document.getElementById("hnrp-bars-hint");
   const barsSvg = document.getElementById("hnrp-bars");
@@ -624,22 +688,25 @@
     const country = countrySel.value;
     const rows = country
       ? data.rows.filter((r) => r.country === country
-            && (pinMode() ? sevValOf(r) != null : sevTotOf(r) > 0 && segsOf(r)))
+            && (!droughtOnly() || isDrought(rawSlotOf(r)))
+            && (pinMode() ? sevValOf(r) != null
+              : ipcMode() ? sevTotOf(r) > 0 && segsOf(r) : !!segsOf(r)))
           .sort(BAR_SORTS[barSortSel.value] || BAR_SORTS.sev4)
       : [];
     barsWrap.hidden = rows.length === 0;
     barsHint.hidden = rows.length > 0;
     if (!rows.length) return;
     if (pinMode()) {
-      barsTitle.textContent = `${country} — PiN${secTag()} per admin 1` +
+      barsTitle.textContent = `${country} — PiN${secTag()} per ${ADM_LABEL[ADM]}` +
         ` (plan data ${planYrOf(rows[0]) ?? "–"})`;
     } else if (ipcMode()) {
       const c = ipcComboOf(rows[0]);
-      barsTitle.textContent = `${country} — population by IPC/CH phase, per admin 1` +
+      barsTitle.textContent = `${country} — population by IPC/CH phase, per ${ADM_LABEL[ADM]}` +
         (c ? ` (${comboDesc(c)})` : "");
     } else {
-      barsTitle.textContent = `${country} — population living in areas at each JIAF class, ` +
-        `per admin 1 (analysis year ${rows[0].sev_year ?? "–"})`;
+      barsTitle.textContent = `${country} — PiN by JIAF severity class, ` +
+        `per ${ADM_LABEL[ADM]} (${rows[0].pbs_yr ?? "–"} analysis` +
+        `${rows[0].pba ? ", classes from the area classification" : ""})`;
     }
 
     const W = barsSvg.parentElement.clientWidth || 900;
@@ -705,7 +772,7 @@
                                   height: ROW - 9, fill: SEV_COLORS[c] });
           const title = document.createElementNS(NS, "title");
           title.textContent = `${r.name ?? r.pcode} — ${ipcMode()
-            ? `IPC phase ${c + 1}` : `in class-${c + 1} areas`}: ${fmtN(v)}`;
+            ? `IPC phase ${c + 1}` : `PiN at severity ${c + 1}`}: ${fmtN(v)}`;
           seg.appendChild(title);
           acc += v;
         }
@@ -722,7 +789,7 @@
   // ── Table ────────────────────────────────────────────────────────────────────
   const COLS = [
     { key: "country", label: "Country", num: false },
-    { key: "name", label: "Admin 1", num: false },
+    { key: "name", label: ADM === "low" ? "Admin unit" : `Admin ${ADM}`, num: false },
     { key: "_plan_yr", label: "Plan", num: true },
     { key: "sev4", label: "Severity 4+ pop", num: true },
     { key: "pin", label: "PiN", num: true },
@@ -743,8 +810,8 @@
       let label = c.label + ((c.key === "pin" || c.key === "targeted") ? secTag() : "");
       if (c.key === "sev4") label = `${sevLabel()} pop`;
       if (c.key === "pin") {
-        th.title = "People in Need — the plan's total PiN for the selected caseload " +
-          "(Intersectoral or FSC). A headline planning figure, not a severity band: " +
+        th.title = "People in Need — the plan's total intersectoral PiN. " +
+          "A headline planning figure, not a severity band: " +
           "it is not broken down by JIAF class or IPC phase.";
       }
       th.textContent = label + (c.key === sortKey ? (sortDesc ? " ↓" : " ↑") : "");
@@ -774,7 +841,10 @@
     });
     tbody.innerHTML = "";
     emptyEl.hidden = rs.length > 0;
-    for (const r of rs) {
+    // DOM guard for adm2 (potentially thousands of qualifying rows): render the
+    // top 500 under the current sort, and say so.
+    const capped = rs.length > 500;
+    for (const r of rs.slice(0, 500)) {
       const tr = document.createElement("tr");
       const s = slotOf(r);
       // Pale wash of the forecast-category colour, tying rows to the map/scatter.
@@ -783,7 +853,7 @@
       const skillCls = s && s.r >= T.r_high ? "skill-high" : "skill-mod";
       tr.innerHTML =
         `<td>${r.country ?? r.iso3}</td>` +
-        `<td>${r.name ?? r.pcode}</td>` +
+        `<td>${dispName(r)}</td>` +
         `<td class="num">${planYrOf(r) ?? "–"}</td>` +
         `<td class="num">${fmtN(sevValOf(r))}</td>` +
         `<td class="num">${fmtN(pinOf(r))}</td>` +
@@ -793,6 +863,13 @@
         `<td class="num">${fmt(s?.rp, 1)}</td>` +
         `<td class="num">${fmt(s?.pct, 1)}</td>` +
         `<td class="num ${skillCls}">${fmt(s?.r, 2)}</td>`;
+      tbody.appendChild(tr);
+    }
+    if (capped) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td colspan="${COLS.length}" style="color:var(--muted);font-style:italic">` +
+        `Showing the top 500 of ${rs.length.toLocaleString("en-US")} matching areas — ` +
+        `narrow with the filters or sort to bring others into view.</td>`;
       tbody.appendChild(tr);
     }
   }
@@ -808,8 +885,27 @@
     // map.stop() first: an animated fit interrupted mid-flight wedges Leaflet's
     // zoom animation and every later fit silently no-ops (observed: Afghanistan
     // "not zooming"). Stopping any in-flight animation before starting the next
-    // keeps the smooth zoom safe.
-    if (bounds) { map.stop(); map.fitBounds(bounds, { padding: [10, 10], animate }); }
+    // keeps the smooth zoom safe — and because the wedge keeps finding new ways
+    // to happen, self-heal: if the view hasn't arrived once the animation should
+    // have finished, force the fit without animation.
+    if (!bounds) return;
+    map.stop();
+    map.fitBounds(bounds, { padding: [10, 10], animate });
+    if (animate) {
+      // The world view CONTAINS every country's centre, so a containment check
+      // can't detect a wedged animation (observed: Benin never zooming while
+      // the check passed). Compare against the target zoom instead.
+      const want = bounds;
+      const tz = map.getBoundsZoom(want, false, L.point(10, 10));
+      setTimeout(() => {
+        if (countrySel.value !== c) return; // selection moved on — don't fight it
+        if (Math.abs(map.getZoom() - tz) > 0.5
+            || !map.getBounds().contains(want.getCenter())) {
+          map.stop();
+          map.fitBounds(want, { padding: [10, 10], animate: false });
+        }
+      }, 700);
+    }
   }
   // Valid-season selector options: auto + each valid trimester at this issuance.
   for (const t of data.trimesters ?? []) {
@@ -821,11 +917,12 @@
   // The bar-sort "Severity" option follows the severity-source selector.
   const sortSevOpt = barSortSel.querySelector('option[value="sev4"]');
   function renderAll() {
+    syncURL(); // keep the URL an exact mirror of the controls at all times
     updateIpcPeriodUI();
     sortSevOpt.textContent = `Severity (${sevLabel()})`;
     renderMap(); renderScatter(); renderBars(); renderTable();
   }
-  for (const el of [skillSel, rpSel, sectorSel, srcTypeSel, srcLvlSel,
+  for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel,
                     droughtOnlyEl, triSel, ipcPeriodSel]) {
     el.addEventListener("change", renderAll);
   }
@@ -843,6 +940,8 @@
     fitCountry(false); // instant on reveal — the panel just appeared, nothing to glide from
     renderAll(); // paths may mount after the panel becomes visible — restyle then
   };
+  restoreControls(); // after options are populated, before the first render
   renderAll();
+  if (countrySel.value) fitCountry(false); // restored country: land on it directly
   requestAnimationFrame(renderMap); // catch paths that mounted after the first pass
 })();

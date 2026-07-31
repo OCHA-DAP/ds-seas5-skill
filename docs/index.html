@@ -157,16 +157,8 @@
           </select>
         </label>
         <label class="toggle">
-          <input type="checkbox" id="hnrp-drought-only" checked />
-          Drought signals only
-        </label>
-      </div>
-      <div class="ctl-row">
-        <span class="row-tag">Caseload</span>
-        <label class="ctl">Sector
-          <select id="hnrp-sector" class="map-select">
-            <option value="is" selected>Intersectoral</option>
-          </select>
+          <input type="checkbox" id="hnrp-drought-only" />
+          Show only drought signals
         </label>
       </div>
       <div class="ctl-row">
@@ -174,7 +166,7 @@
         <label class="ctl">Source
           <select id="hnrp-sev-type" class="map-select">
             <option value="ipc" selected>IPC/CH phases</option>
-            <option value="jiaf">JIAF severity</option>
+            <option value="jiaf">PiN by severity</option>
             <option value="pin">PiN (no severity)</option>
           </select>
         </label>
@@ -196,6 +188,14 @@
         <span class="row-tag">Country</span>
         <label class="ctl">
           <select id="hnrp-country" class="map-select"><option value="">All</option></select>
+        </label>
+        <label class="ctl">Admin level
+          <select id="hnrp-adm" class="map-select">
+            <option value="low" selected>Lowest available</option>
+            <option value="1">Admin 1</option>
+            <option value="2">Admin 2</option>
+            <option value="3">Admin 3</option>
+          </select>
         </label>
         <span id="hnrp-issued" class="lock-note"></span>
       </div>
@@ -240,7 +240,7 @@
       <div id="hnrp-bars-legend"></div>
     </div>
     <p id="hnrp-bars-hint" class="lock-note">Select a country above to see its per-admin
-      severity breakdown (population of areas at each severity class or IPC phase, targeted
+      severity breakdown (PiN at each JIAF severity class or population per IPC phase, targeted
       population, and the forecast category).</p>
 
     <h3 class="hnrp-h">Matching areas, ranked</h3>
@@ -285,10 +285,9 @@
         cycle is this year or last: Ethiopia (last subnational needs 2024, no newer
         plan) and Syria (last needs 2024; its 2025 severity analysis publishes no
         population figures) are absent entirely. PiN is the plan's headline total for
-        the selected caseload — <em>not</em> a severity band (it has no JIAF-class or
-        IPC-phase breakdown). The <strong>Caseload</strong> selector switches between
-        Intersectoral and any sector/cluster the plans publish (Food Security, Health,
-        Protection, …); not every plan publishes every sector — missing ones show a dash.
+        the intersectoral caseload — <em>not</em> a severity band (it has no JIAF-class or
+        IPC-phase breakdown). All PiN/targeted figures shown are the plans'
+        <strong>intersectoral</strong> ones.
         Each country shows its <strong>latest plan cycle</strong> (year in the country
         selector, the Plan column, and tooltips); where no newer plan exists the previous
         cycle is shown (e.g. Guatemala, latest 2025). Where the current cycle publishes a
@@ -306,13 +305,23 @@
         href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>), <strong>JIAF
         severity</strong> from the HNRP severity analysis (latest analysis year per country),
         or the plan's <strong>PiN</strong> itself (no severity level; shares then divide by
-        the plan's JIAF analysed population). A structural difference matters here:
-        <strong>IPC counts people</strong> (population in each phase, per area), while
-        <strong>JIAF classifies areas</strong> — each area (× population group) carries one
-        intersectoral severity class and one population figure, with no per-class people
-        breakdown. JIAF figures on this page are therefore the <em>population of areas
-        classified</em> at each level ("JIAF 4+ areas"), not headcounts of people in that
-        condition. IPC and JIAF figures also do <em>not</em> line up:
+        the plan's JIAF analysed population). JIAF figures are <em>people-level</em>:
+        the plan's <strong>PiN-by-Severity distribution</strong> (JIAF 2.0 PbS workbooks,
+        latest analysis cycle — mostly 2026), i.e. the number of people in need at each
+        intersectoral severity class per area ("JIAF PiN 3+" = PiN at classes 3–5). Note
+        the granularity: the PbS assigns each finest analysis unit (× population group)
+        <em>one</em> class and places that unit's whole PiN there — within-unit splits
+        exist only where plans publish them (Yemen and Syria, at most two classes). So at
+        admin-2 most units show a single class (matching the unit's area classification),
+        and a mixed distribution emerges only where sub-units or population groups sit at
+        different classes — admin-1 bars mix their districts; IPC, by contrast, publishes
+        genuine within-area phase distributions. Some
+        plans publish PiN without a usable class breakdown (Guatemala, El Salvador and
+        Venezuela publish no classes; South Sudan fills one constant class on every unit —
+        a template artifact) — there, each unit's PiN is placed at its <em>area
+        classification</em> from the severity analysis, the same one-class-per-unit
+        semantic the PbS encodes everywhere else (flagged in the bar-chart title).
+        IPC and JIAF figures do <em>not</em> line up:
         they measure different things (acute food insecurity vs inter-sectoral needs) over
         different analysed populations, scopes, and periods — compare shapes, not values.
         In IPC mode the map, scatter, and table also include IPC-covered areas
@@ -321,6 +330,33 @@
         later are included; countries whose series stalled earlier (Ethiopia 2021,
         Angola/El Salvador 2022, Burkina Faso Aug 2024, Timor-Leste 2024) carry no IPC
         here.
+      </p>
+
+      <h4>Admin levels</h4>
+      <p>
+        The <strong>Admin level</strong> selector switches the whole tab between four
+        views. <em>Lowest available</em> (the default) shows each country at the finest
+        level we can: admin-3 where plans publish it against boundaries we hold
+        (Burkina Faso communes, Myanmar townships, Syria sub-districts, and DR Congo's
+        519 zones de santé — via the SNIS/OCHA health-zone shapefile, which matches the
+        plan's zone codes exactly), admin-2 for the
+        21-country admin-2 scope, admin-1 elsewhere. Fixed admin-1/2/3 views show one
+        level only. Admin-2 covers ~4,900 units across 21 countries with admin-2
+        boundaries and zonal statistics in our database (AFG, BFA, CAF, CMR, COD, COL,
+        GTM, HND, HTI, MLI, MOZ, NER, NGA, SDN, SLV, SOM, SSD, TCD, UKR, VEN, YEM —
+        the rest lack admin-2 polygons on our side and are excluded on that basis;
+        Myanmar publishes admin-1/3 only). <strong>No admin-3 forecast exists</strong>: admin-3 units inherit
+        their parent admin-2's forecast (skill, return period, rainy season)
+        verbatim — only the humanitarian figures are finer. IPC is published at admin-1/2;
+        units finer than a country's published IPC level inherit the <em>parent</em>
+        analysis, prorated by each unit's population share — tooltips flag these as
+        "downscaled from admin-N", and they are shares of an area-level analysis, not
+        unit-level assessments. Admin-3 population denominators come from WorldPop 2020
+        (1&nbsp;km UN-adjusted, summed over the same admin-3 boundaries). Figures published only at admin-1 cannot be downscaled
+        and show dashes at admin-2. Forecast skill at admin-2 is computed identically,
+        per unit; smaller units are noisier, so treat marginal signals with extra
+        caution. The table shows at most 500 rows at a time; admin-2 unit names carry
+        their admin-1 parent in parentheses.
       </p>
 
       <h4>IPC estimate periods</h4>
@@ -489,6 +525,6 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js"></script>
+  <script src="hnrp.js?v=20260730"></script>
 </body>
 </html>
