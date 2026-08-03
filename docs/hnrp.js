@@ -349,7 +349,7 @@
       const cls = sevClassOf(r);
       if (cls) {
         rows += `<div>Severity class: <span style="display:inline-block;width:10px;` +
-          `height:10px;background:${SEV_COLORS[cls - 1]};border:1px solid #9db1b3;` +
+          `height:10px;background:${sevColors()[cls - 1]};border:1px solid #9db1b3;` +
           `vertical-align:baseline"></span> ${sevClassLabels()[cls - 1]}</div>`;
       }
     }
@@ -506,7 +506,7 @@
         // (dashed outline = moderate skill, standing in for the hatched fill).
         // cat==null (drought-only filtered / no forecast) falls through to the
         // muted look so the filter still visibly excludes units.
-        el.setAttribute("fill", SEV_COLORS[cls - 1]);
+        el.setAttribute("fill", sevColors()[cls - 1]);
         el.setAttribute("stroke", STYLE[cat][0]);
         el.setAttribute("stroke-width", 2);
         el.setAttribute("stroke-dasharray", cat.endsWith("_mod") ? "4 3" : "");
@@ -691,7 +691,12 @@
   // the unit's forecast category as a swatch beside its name. Severity uses the
   // IPC/CH-convention colours — a domain-standard scale this audience reads at a
   // glance, and far more separable than a single-hue ramp.
-  const SEV_COLORS = ["#cdfacd", "#fae61e", "#e67800", "#c80000", "#640000"];
+  // Two class ramps: IPC keeps the IPC convention; intersectoral (PbS/JIAF)
+  // uses the blue severity ramp from humanitarianaction.info's severity
+  // choropleths (Datawrapper stops on the Global HNO plan pages).
+  const IPC_COLORS = ["#cdfacd", "#fae61e", "#e67800", "#c80000", "#640000"];
+  const JIAF_COLORS = ["#e9f2fb", "#d4e5f7", "#82b5e9", "#418fde", "#1f69b3"];
+  const sevColors = () => (ipcMode() ? IPC_COLORS : JIAF_COLORS);
   const JIAF_LABELS = ["1 — minimal", "2 — stress", "3 — severe", "4 — extreme", "5 — catastrophic"];
   const IPC_LABELS = ["1 — minimal", "2 — stressed", "3 — crisis", "4 — emergency", "5 — catastrophe"];
   const sevClassLabels = () => (ipcMode() ? IPC_LABELS : JIAF_LABELS);
@@ -717,7 +722,7 @@
     barsLegend.innerHTML =
       (pinMode()
         ? `<span><i style="background:${PIN_COLOR}"></i> PiN${secTag()}</span>`
-        : SEV_COLORS.map((c, i) => (i < barC0() ? ""
+        : sevColors().map((c, i) => (i < barC0() ? ""
             : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("")) +
       `<span><i class="tick"></i> targeted</span>` +
       `<span>left swatch = forecast category</span>`;
@@ -811,7 +816,7 @@
         const cls = sevClassOf(r);
         if (cls) {
           const sq = g("rect", { x: M.l - 182, y: y + ROW / 2 - 7, width: 13, height: 13,
-                                 fill: SEV_COLORS[cls - 1], stroke: "#9db1b3",
+                                 fill: sevColors()[cls - 1], stroke: "#9db1b3",
                                  "stroke-width": 0.6 });
           const ti = document.createElementNS(NS, "title");
           ti.textContent = `severity class ${cls} — ${sevClassLabels()[cls - 1]}`;
@@ -842,7 +847,7 @@
           const v = segs[c] ?? 0;
           if (v <= 0) continue;
           const seg = g("rect", { x: X(acc), y: y + 4, width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
-                                  height: ROW - 9, fill: SEV_COLORS[c] });
+                                  height: ROW - 9, fill: sevColors()[c] });
           const title = document.createElementNS(NS, "title");
           title.textContent = `${r.name ?? r.pcode} — ${ipcMode()
             ? `IPC phase ${c + 1}` : `PiN at severity ${c + 1}`}: ${fmtN(v)}`;
@@ -933,7 +938,7 @@
         (ADM === "low" ? (() => {
           const cls = sevClassOf(r);
           return `<td class="num">${cls
-            ? `<span class="cls-chip" style="background:${SEV_COLORS[cls - 1]}"></span>${cls}`
+            ? `<span class="cls-chip" style="background:${sevColors()[cls - 1]}"></span>${cls}`
             : "–"}</td>`;
         })() : "") +
         `<td class="num">${fmtN(sevValOf(r))}</td>` +
@@ -1000,6 +1005,10 @@
   function renderAll() {
     syncURL(); // keep the URL an exact mirror of the controls at all times
     updateIpcPeriodUI();
+    // Legend severity ramp follows the active source (IPC vs intersectoral blue).
+    document.querySelectorAll("#hnrp-outline-legend .sev-ramp").forEach((el, i) => {
+      el.style.background = sevColors()[i];
+    });
     sortSevOpt.textContent = `Severity (${sevLabel()})`;
     renderMap(); renderScatter(); renderBars(); renderTable();
   }
