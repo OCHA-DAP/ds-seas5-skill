@@ -202,28 +202,7 @@
     </div>
 
     <div id="hnrp-map"></div>
-    <div id="hnrp-scatter-legend">
-      <span data-hl="drought_vsev"><i style="background:#7f5619"></i> Strongly below normal</span>
-      <span data-hl="drought_sev"><i style="background:#dda555"></i> Below normal</span>
-      <span data-hl="none"><i style="background:#e2e8e8"></i> Roughly normal</span>
-      <span data-hl="flood_sev"><i style="background:#74a1e8"></i> Above normal</span>
-      <span data-hl="flood_vsev"><i style="background:#134ead"></i> Strongly above</span>
-      <span data-hl="off_season"><i style="background:#b1c1c2"></i> Outside rainy season</span>
-      <span data-hl="skill_mod" id="hnrp-skill-legend"><i class="hatched"></i> hatched = moderate skill (solid = high)</span>
-      <span id="hnrp-outline-legend">map fill = severity class
-        <i class="sev-ramp"></i><i class="sev-ramp"></i><i class="sev-ramp"></i><i
-        class="sev-ramp"></i><i class="sev-ramp"></i> 1→5; outline = forecast category
-        (lowest level only)</span>
-    </div>
-
-    <h3 class="hnrp-h">Severity vs targeted, per admin 1</h3>
-    <div id="hnrp-scatter-wrap">
-      <svg id="hnrp-scatter"></svg>
-      <div id="hnrp-tip" hidden></div>
-    </div>
-    <div id="hnrp-scatter-note" class="lock-note">Bubble area = admin population
-      (largest analysed base); colours and hover-highlighting as in the map legend
-      above.</div>
+    <div id="hnrp-legend" class="legend-group"></div>
 
     <div id="hnrp-bars-wrap" hidden>
       <div id="hnrp-bars-head">
@@ -275,7 +254,7 @@
         forecast seasons; "incl. in-season" also scans trimesters already in progress (the
         worst signal is often a season underway), and picking a trimester (e.g. MJJ) shows
         that season's forecast for every area. The trimester actually used is shown as its
-        compact code (e.g. MJJ) — inside scatter bubbles where space allows, centred on
+        compact code (e.g. MJJ) — centred on
         each area when a country is selected on the map, and bold in every tooltip.
         Forecast data are detrended, matching the Map tab's defaults.
       </p>
@@ -330,8 +309,8 @@
         IPC and JIAF figures do <em>not</em> line up:
         they measure different things (acute food insecurity vs inter-sectoral needs) over
         different analysed populations, scopes, and periods — compare shapes, not values.
-        In IPC mode the map, scatter, and table also include IPC-covered areas
-        <strong>outside any HNRP</strong> (no PiN/severity/targeted; plotted at 0% targeted)
+        In IPC mode the map and table also include IPC-covered areas
+        <strong>outside any HNRP</strong> (no PiN/severity/targeted)
         — surfacing possible shocks beyond plan scope. Only IPC analyses valid in 2025 or
         later are included; countries whose series stalled earlier (Ethiopia 2021,
         Angola/El Salvador 2022, Burkina Faso Aug 2024, Timor-Leste 2024) carry no IPC
@@ -375,32 +354,20 @@
         otherwise — and every tooltip names the analysis used for that area.
       </p>
 
-      <h4>Reading the scatter</h4>
+      <h4>Reading the map</h4>
       <p>
         In the <em>Lowest available</em> view the map <strong>fills</strong> each unit
-        with its <strong>severity class colour</strong> (IPC convention, 1→5) and moves
-        the forecast category to the <strong>outline</strong> (dashed = moderate skill, solid = high) — PbS mode uses the class holding the unit's PiN; IPC mode applies
-        the IPC area-classification rule (highest phase reaching ≥20% of the analysed
-        population); PiN mode has no classes, so the classic colouring returns. Hovering
-        a forecast category in the legend highlights matching units and dims the rest.
-        The same class appears in map
-        tooltips, the table's Class column, and beside each bar-chart row. Both axes
-        divide by the <em>same</em> population base: the admin's total
-        population — the UNFPA COD-PS baseline via HDX HAPI where present and trusted,
-        else the plan's own HNO/JIAF baseline total (self-consistent with the
-        PiN/targeted figures; e.g. all of Yemen, which has no COD-PS in HAPI). The
-        tooltip names the source and reference year. Where neither exists, the fallback
-        is the larger of the IPC analysed base and the plan's JIAF analysed base — and
-        shares there can overstate against the true total where the analysis covers only
-        part of the population.
-        A shared denominator makes position compare absolute headcounts: above
-        the 45° line, more people sit in the severity band than the plan targets (a
-        possible coverage gap); below it, targeting exceeds it — and the base does not
-        change when the severity source switches. Axes are fixed 0–100%. Every admin with
-        a displayable forecast plots, regardless of HNRP or IPC membership — areas with no
-        figure for an axis sit at 0%, at the origin if they have neither. The severity
-        bars plot classes 3–5 by default (classes 1–2 dominate populous areas and drown
-        the signal — a checkbox restores them).
+        with its <strong>severity class colour</strong> (1→5; IPC convention colours in
+        IPC mode, the humanitarianaction.info blue ramp for intersectoral severity) and
+        draws the <strong>forecast category</strong> as each unit's boundary line
+        (dashed = moderate skill, solid = high) — PbS mode uses the class holding the
+        unit's PiN; IPC mode applies the IPC area-classification rule (highest phase
+        reaching ≥20% of the analysed population); PiN mode has no classes, so the
+        classic colouring returns. Hovering a legend entry highlights matching units
+        and dims the rest. The same class appears in map tooltips, the table's Class
+        column, and beside each bar-chart row. The severity bars plot classes 3–5 by
+        default (classes 1–2 dominate populous areas and drown the signal — a checkbox
+        restores them).
       </p>
     </details>
   </section>
@@ -539,6 +506,6 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260803m"></script>
+  <script src="hnrp.js?v=20260803n"></script>
 </body>
 </html>

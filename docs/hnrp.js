@@ -600,173 +600,65 @@
       if (info && l._path) l._path.setAttribute("stroke-opacity", info.dim ? "0.2" : "1");
     });
   }
-  // Legend hover wiring (spans carry data-hl keys; severity chips by index).
+  // ── Legend (main-page style: titled strips, hover = highlight on the map) ────
   let hlKey = null, hlCls = null;
-  for (const el of document.querySelectorAll("#hnrp-scatter-legend span[data-hl]")) {
-    el.addEventListener("mouseenter", () => { hlKey = el.dataset.hl; renderMap(); });
-    el.addEventListener("mouseleave", () => { hlKey = null; renderMap(); });
-  }
-  document.querySelectorAll("#hnrp-outline-legend .sev-ramp").forEach((el, i) => {
-    // Class fills exist only in the lowest view — the hover matches that.
-    el.addEventListener("mouseenter", () => {
-      if (ADM !== "low") return;
-      hlCls = i + 1; renderMap();
-    });
-    el.addEventListener("mouseleave", () => { hlCls = null; renderMap(); });
-  });
-
-  // ── Scatter ──────────────────────────────────────────────────────────────────
-  const svg = document.getElementById("hnrp-scatter");
-  const tip = document.getElementById("hnrp-tip");
-  const NS = "http://www.w3.org/2000/svg";
-  const M = { l: 58, r: 16, t: 12, b: 46 };
-
-  function scatterRows() {
-    // EVERY admin with a displayable forecast plots, regardless of HNRP/IPC
-    // membership or severity source — areas with no figure for an axis sit at 0%
-    // (origin if both are missing), so nothing silently drops out of view.
-    return data.rows.filter((r) =>
-      (!countrySel.value || r.country === countrySel.value) && slotOfAny(r) != null);
-  }
-  // Scatter denominator, layered per unit: (1) COD-PS total-population baseline
-  // (ds-population-mirror), (2) the plan's own HNO/JIAF baseline total where
-  // COD-PS is missing or distrusted (r.pop_src says which; e.g. all of Yemen is
-  // HNO — no COD-PS in HAPI), (3) the analysed-population proxy — the larger of
-  // the IPC analysed base and the plan's JIAF analysed base. The SAME value
-  // divides both axes, so above/below the 45° line compares absolute headcounts
-  // correctly, and it does not change when the severity source switches.
-  const popOf = (r) =>
-    r.pop ?? (Math.max(ipcComboOf(r)?.tot ?? 0, r.sev_total ?? 0) || null);
-  const popSrcOf = (r) => {
-    if (r.pop) {
-      const srcName = { HNO: "HNO baseline", WorldPop: "WorldPop" }[r.pop_src] ?? "COD-PS";
-      return `total population, ${srcName}` +
-        (r.pop_year ? ` ${r.pop_year}` : "");
-    }
-    const ipc = ipcComboOf(r)?.tot ?? 0, jiaf = r.sev_total ?? 0;
-    return !ipc && !jiaf ? null : ipc >= jiaf ? "IPC analysed" : "JIAF analysed";
-  };
-
-  function renderScatter() {
-    // Square: both axes are population shares, so equal visual weight per axis.
-    const W = Math.min(svg.parentElement.clientWidth || 640, 640), H = W;
-    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-    svg.style.height = H + "px";
-    svg.innerHTML = "";
-    const rows = scatterRows();
-    const g = (tag, attrs, parent = svg) => {
-      const el = document.createElementNS(NS, tag);
-      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-      parent.appendChild(el);
-      return el;
+  function buildHnrpLegend() {
+    const root = document.getElementById("hnrp-legend");
+    root.innerHTML = "";
+    const hover = (el, enter) => {
+      el.addEventListener("mouseenter", () => { enter(); renderMap(); });
+      el.addEventListener("mouseleave", () => { hlKey = null; hlCls = null; renderMap(); });
     };
-    if (!rows.length) {
-      g("text", { x: W / 2, y: H / 2, "text-anchor": "middle", fill: "#888", "font-size": 13 })
-        .textContent = "No admin-1 units match the current filters.";
-      return;
-    }
-    // Fixed 0–100% axes: shares stay visually comparable across filters and sources.
-    const xmax = 100, ymax = 100;
-    const clamp = (v) => Math.min(v ?? 0, 100);
-    const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
-    const Y = (v) => H - M.b - (v / ymax) * (H - M.t - M.b);
-    const pmax = Math.max(...rows.map((r) => popOf(r) ?? 0), 1);
-    const R = (p) => 4 + 22 * Math.sqrt((p ?? 0) / pmax);
-
-    // Recessive grid + axes.
-    const ticks = (max) => { const s = max > 50 ? 20 : max > 20 ? 10 : 5; const o = []; for (let v = 0; v <= max; v += s) o.push(v); return o; };
-    for (const v of ticks(xmax)) {
-      g("line", { x1: X(v), x2: X(v), y1: M.t, y2: H - M.b, stroke: "#eef1f1" });
-      g("text", { x: X(v), y: H - M.b + 16, "text-anchor": "middle", "font-size": 10, fill: "#888" }).textContent = v + "%";
-    }
-    for (const v of ticks(ymax)) {
-      g("line", { x1: M.l, x2: W - M.r, y1: Y(v), y2: Y(v), stroke: "#eef1f1" });
-      g("text", { x: M.l - 6, y: Y(v) + 3, "text-anchor": "end", "font-size": 10, fill: "#888" }).textContent = v + "%";
-    }
-    // Severity on y, targeted on x. Both shares divide by the SAME population
-    // base (named in the axis labels), so position compares absolute
-    // headcounts too: above the 45° line = more people in the severity band than
-    // the plan targets (a coverage gap); below = targeting exceeds it.
-    const denom = "% of total population";
-    g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 13, fill: "#555" })
-      .textContent = `Targeted${secTag()} (${denom})`;
-    const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 13, fill: "#555" });
-    // "Population in IPC 3+" reads well; "Population in PiN 3+" doesn't — PiN is
-    // already a population.
-    yl.textContent = `${ipcMode() ? `Population in ${sevLabel()}` : sevLabel()} (${denom})`;
-    yl.setAttribute("transform", `rotate(-90 14 ${(M.t + H - M.b) / 2})`);
-    g("line", { x1: X(0), y1: Y(0), x2: X(100), y2: Y(100),
-                stroke: "#c4d0d1", "stroke-width": 1, "stroke-dasharray": "5 4" });
-    // Half-plane labels sit ON the diagonal, rotated along it; the arrow glyphs
-    // rotate with the text, so they point perpendicularly away from the line.
-    const ang = Math.atan2(Y(100) - Y(0), X(100) - X(0)) * 180 / Math.PI;
-    const diagLabel = (v, dy, txt) => {
-      const lx = X(v), ly = Y(v) + dy;
-      g("text", { x: lx, y: ly, "text-anchor": "middle", "font-size": 11, fill: "#9db1b3",
-                  transform: `rotate(${ang} ${lx} ${ly})` }).textContent = txt;
-    };
-    diagLabel(80, -8, `↑ more people in ${sevLabel()} than targeted`);
-    diagLabel(80, 16, `↓ more people targeted than in ${sevLabel()}`);
-
-    if (ADM === "low" && countrySel.value && rows.length) {
-      g("text", { x: W - M.r - 6, y: M.t + 12, "text-anchor": "end",
-                  "font-size": 11, fill: "#9db1b3" })
-        .textContent = `shown at admin ${rows[0].lvl ?? "?"}`;
-    }
-    const xOf = (r) => X(clamp(pctOf(tgtOf(r), popOf(r))));
-    const yOf = (r) => Y(clamp(pctOf(sevValOf(r), popOf(r))));
-    // Bubbles: big ones first so small ones stay hoverable; 2px surface ring.
-    const sorted = [...rows].sort((a, b) => (popOf(b) ?? 0) - (popOf(a) ?? 0));
-    for (const r of sorted) {
-      const sl = slotOfAny(r);
-      const cat = sl ? classify({ pct: sl.pct, r: sl.r, rainy: sl.rainy }, false) : null;
-      const c = g("circle", {
-        cx: xOf(r), cy: yOf(r),
-        r: R(popOf(r)), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
-      });
-      g("circle", {
-        cx: c.getAttribute("cx"), cy: c.getAttribute("cy"), r: R(popOf(r)),
-        fill: "none", stroke: STYLE[cat][1], "stroke-width": 1,
-      });
-      c.style.cursor = "pointer";
-      c.addEventListener("mouseenter", (ev) => {
-        const s = slotOfAny(r);
-        tip.hidden = false;
-        const combo = ipcMode() ? ipcComboOf(r) : null;
-        tip.innerHTML = `<strong>${dispName(r)}</strong> — ${r.country ?? r.iso3}<br>` +
-          `${sevLabel()}${combo ? ` (${comboDesc(combo)})` : ""}: ${fmtN(sevValOf(r))} (${fmt(pctOf(sevValOf(r), popOf(r)), 1)}%)<br>` +
-          (tgtOf(r) == null
-            ? `Targeted${secTag()}: – ${inHnrp(r) ? "(no figure)" : "(not in an HNRP)"}<br>`
-            : `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), popOf(r)), 1)}%)${tgtFlag(r)}<br>`) +
-          `Population base: ${fmtN(popOf(r))}${popSrcOf(r) ? ` (${popSrcOf(r)})` : ""}<br>` +
-          (s ? `<strong>${s.key}</strong>${s.lead < 0 ? " · in season" : ""}: RP ${fmt(s.rp, 1)} yr, pct ${fmt(s.pct, 1)}, r ${fmt(s.r, 2)}` : "");
-      });
-      c.addEventListener("mousemove", (ev) => {
-        const b = svg.parentElement.getBoundingClientRect();
-        tip.style.left = Math.min(ev.clientX - b.left + 14, b.width - 240) + "px";
-        tip.style.top = (ev.clientY - b.top + 14) + "px";
-      });
-      c.addEventListener("mouseleave", () => { tip.hidden = true; });
-
-      // The trimester actually used, printed inside the bubble where it fits —
-      // in auto mode different admins use different worst seasons, and that
-      // should be visible without hovering.
-      if (sl && R(popOf(r)) >= 11 && triSel.value.startsWith("auto")) {
-        const darkFill = cat && /vsev/.test(cat);
-        g("text", { x: xOf(r), y: yOf(r) + 3, "text-anchor": "middle", "font-size": 9,
-                    "font-weight": 600, fill: darkFill ? "#ffffff" : "#333",
-                    "pointer-events": "none" }).textContent = sl.key;
+    function strip(title, segs, segWidth, interactive = true) {
+      const block = document.createElement("div");
+      block.className = "legend-block";
+      const t = document.createElement("span");
+      t.className = "lb-title"; t.textContent = title;
+      const row = document.createElement("div");
+      row.className = "legend-strip" + (interactive ? " interactive" : "");
+      for (const sg of segs) {
+        const seg = document.createElement("span");
+        seg.className = "ls-seg"; seg.style.width = segWidth + "px";
+        const cell = document.createElement("span");
+        cell.className = "ls-cell"; cell.style.background = sg.fill;
+        if (sg.hatch) cell.style.backgroundImage = hatchBg(sg.hatch);
+        if (sg.dashed) cell.style.backgroundImage =
+          "repeating-linear-gradient(90deg, transparent 0 4px, #ffffff 4px 10px)";
+        if (sg.border) cell.style.boxShadow = "inset 0 0 0 1px #c4d0d1";
+        if (sg.ramp != null) cell.dataset.ramp = sg.ramp;
+        const lbl = document.createElement("span");
+        lbl.className = "ls-lbl"; lbl.textContent = sg.label;
+        seg.append(cell, lbl);
+        if (sg.enter) hover(seg, sg.enter);
+        row.appendChild(seg);
       }
+      block.append(t, row);
+      root.appendChild(block);
     }
-
-    // Selective direct labels: the 6 largest population bases.
-    for (const r of sorted.slice(0, 6)) {
-      g("text", {
-        x: xOf(r), y: yOf(r) - R(popOf(r)) - 4,
-        "text-anchor": "middle", "font-size": 10, fill: "#333",
-      }).textContent = r.name ?? r.pcode;
+    strip(ADM === "low" ? "Forecast category (boundary line; dashed = moderate skill)"
+                        : "Forecast category (fill)", [
+      { fill: "#7f5619", label: "strongly below", enter: () => { hlKey = "drought_vsev"; } },
+      { fill: "#dda555", label: "below normal", enter: () => { hlKey = "drought_sev"; } },
+      { fill: "#e2e8e8", label: "normal", border: true, enter: () => { hlKey = "none"; } },
+      { fill: "#74a1e8", label: "above normal", enter: () => { hlKey = "flood_sev"; } },
+      { fill: "#134ead", label: "strongly above", enter: () => { hlKey = "flood_vsev"; } },
+      { fill: "#b1c1c2", label: "off season", enter: () => { hlKey = "off_season"; } },
+      { fill: "#dda555", hatch: "white", label: "moderate skill",
+        enter: () => { hlKey = "skill_mod"; } },
+    ], 86);
+    if (ADM === "low") {
+      strip("Severity class (fill)", [1, 2, 3, 4, 5].map((c) => ({
+        fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
+        border: c <= 2, enter: () => { hlCls = c; },
+      })), 44);
     }
   }
+  buildHnrpLegend();
+
+  // ── Scatter (REMOVED 2026-08) ────────────────────────────────────────────────
+  // The severity-vs-targeted scatter was dropped as more confusing than useful.
+  // Full implementation + revival notes: docs/dev-notes/hnrp-scatter.md
+  // (last live at commit d7140e9, docs/hnrp.js renderScatter/scatterRows/popOf).
 
   // ── Severity-breakdown bars (per admin, when a country is selected) ──────────
   // Population by JIAF class 1–5 (stacked), a tick for the targeted population, and
@@ -1088,11 +980,11 @@
     syncURL(); // keep the URL an exact mirror of the controls at all times
     updateIpcPeriodUI();
     // Legend severity ramp follows the active source (IPC vs intersectoral blue).
-    document.querySelectorAll("#hnrp-outline-legend .sev-ramp").forEach((el, i) => {
-      el.style.background = sevColors()[i];
+    document.querySelectorAll("#hnrp-legend [data-ramp]").forEach((el) => {
+      el.style.background = sevColors()[+el.dataset.ramp];
     });
     sortSevOpt.textContent = `Severity (${sevLabel()})`;
-    renderMap(); renderScatter(); renderBars(); renderTable();
+    renderMap(); renderBars(); renderTable();
   }
   for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel,
                     droughtOnlyEl, triSel, ipcPeriodSel]) {
