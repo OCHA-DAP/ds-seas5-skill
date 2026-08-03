@@ -217,6 +217,10 @@
       <span><i style="background:#b1c1c2"></i> Outside rainy season</span>
       <span><i class="hatched"></i> hatched = moderate skill (solid = high)</span>
       <span>bubble area = admin population (largest analysed base)</span>
+      <span id="hnrp-outline-legend">map outline = severity class
+        <i style="background:#cdfacd"></i><i style="background:#fae61e"></i><i
+        style="background:#e67800"></i><i style="background:#c80000"></i><i
+        style="background:#640000"></i> 1→5 (lowest level only)</span>
     </div>
 
     <div id="hnrp-bars-wrap" hidden>
@@ -371,7 +375,12 @@
 
       <h4>Reading the scatter</h4>
       <p>
-        Both axes divide by the <em>same</em> population base: the admin's total
+        In the <em>Lowest available</em> view the map also outlines each unit in its
+        <strong>severity class colour</strong> (IPC convention, 1→5) while the fill keeps
+        the forecast category — PbS mode outlines the class holding the unit's PiN; IPC
+        mode applies the IPC area-classification rule (highest phase reaching ≥20% of the
+        analysed population); PiN mode has no classes, so outlines revert. Both axes
+        divide by the <em>same</em> population base: the admin's total
         population — the UNFPA COD-PS baseline via HDX HAPI where present and trusted,
         else the plan's own HNO/JIAF baseline total (self-consistent with the
         PiN/targeted figures; e.g. all of Yemen, which has no COD-PS in HAPI). The
@@ -525,6 +534,6 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260730"></script>
+  <script src="hnrp.js?v=20260803"></script>
 </body>
 </html>

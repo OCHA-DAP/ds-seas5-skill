@@ -447,6 +447,28 @@
       }));
     });
   }
+  // The unit's severity class, for the outline (lowest view only — the finest
+  // level is where the one-class-per-unit classification is native):
+  // PbS mode = the class holding the most PiN (single class for most plans);
+  // IPC mode = the IPC area-classification rule (highest phase reaching ≥20%
+  // of the analysed population); PiN mode = none.
+  function sevClassOf(r) {
+    if (pinMode()) return null;
+    if (ipcMode()) {
+      const c = ipcComboOf(r);
+      if (!c || !c.tot) return null;
+      let cum = 0;
+      for (let i = 4; i >= 0; i--) {
+        cum += c.p[i] ?? 0;
+        if (cum / c.tot >= 0.2) return i + 1;
+      }
+      return 1;
+    }
+    if (!r.pb) return null;
+    let best = 0, bi = null;
+    r.pb.forEach((v, i) => { if ((v ?? 0) >= best && (v ?? 0) > 0) { best = v; bi = i + 1; } });
+    return bi;
+  }
   function renderMap() {
     renderOutline();
     renderTriLabels();
@@ -471,7 +493,14 @@
       }
       const cat = catOf(r);
       el.setAttribute("fill", cat ? fillOf(cat) : HNRP_MUTED.fill);
-      el.setAttribute("stroke", cat ? STYLE[cat][1] : HNRP_MUTED.edge);
+      const cls = ADM === "low" ? sevClassOf(r) : null;
+      if (cls) {
+        el.setAttribute("stroke", SEV_COLORS[cls - 1]);
+        el.setAttribute("stroke-width", 1.6);
+      } else {
+        el.setAttribute("stroke", cat ? STYLE[cat][1] : HNRP_MUTED.edge);
+        el.setAttribute("stroke-width", 0.6);
+      }
     });
   }
 
