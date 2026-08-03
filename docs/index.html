@@ -209,7 +209,7 @@
       <span data-hl="flood_sev"><i style="background:#74a1e8"></i> Above normal</span>
       <span data-hl="flood_vsev"><i style="background:#134ead"></i> Strongly above</span>
       <span data-hl="off_season"><i style="background:#b1c1c2"></i> Outside rainy season</span>
-      <span data-hl="skill_mod" id="hnrp-skill-legend"><i class="hatched"></i> hatched = moderate skill (solid = high)</span>
+      <span data-hl="skill_mod" id="hnrp-skill-legend"><i class="hatched"></i> hatched/ticked = moderate skill (solid = high)</span>
       <span id="hnrp-outline-legend">map fill = severity class
         <i class="sev-ramp"></i><i class="sev-ramp"></i><i class="sev-ramp"></i><i
         class="sev-ramp"></i><i class="sev-ramp"></i> 1→5; outline = forecast category
@@ -379,8 +379,8 @@
       <p>
         In the <em>Lowest available</em> view the map <strong>fills</strong> each unit
         with its <strong>severity class colour</strong> (IPC convention, 1→5) and moves
-        the forecast category to the <strong>outline</strong> (dashed = moderate skill,
-        solid = high) — PbS mode uses the class holding the unit's PiN; IPC mode applies
+        the forecast category to the <strong>outline</strong> (white-ticked = moderate
+        skill, solid = high) — PbS mode uses the class holding the unit's PiN; IPC mode applies
         the IPC area-classification rule (highest phase reaching ≥20% of the analysed
         population); PiN mode has no classes, so the classic colouring returns. Hovering
         a forecast category in the legend highlights matching units and dims the rest.
@@ -540,6 +540,6 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260803h"></script>
+  <script src="hnrp.js?v=20260803i"></script>
 </body>
 </html>

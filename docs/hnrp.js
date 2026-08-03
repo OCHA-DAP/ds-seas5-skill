@@ -415,13 +415,15 @@
   // double the stroke width so only the inner half renders — an outline fully
   // inside the unit. A second, narrower "gap" ring in the unit's fill colour is
   // drawn on top, standing the category ring off the shared boundary.
-  const RING_W = 2.6; // visible ring width, px (flush: neighbours touch)
+  const RING_W = 3.4; // visible ring width, px (flush: neighbours touch)
   const SVGNS = "http://www.w3.org/2000/svg";
-  const ringCat = L.geoJSON(geo, {
+  const mkRingLayer = () => L.geoJSON(geo, {
     filter: (f) => /Polygon/.test(f.geometry.type),
     interactive: false,
     style: () => ({ weight: 0, fill: false, opacity: 1 }),
   }).addTo(map);
+  const ringCat = mkRingLayer();  // solid category band
+  const ringTick = mkRingLayer(); // white ticks over it = moderate skill
   const clipPaths = {};
   function setClipped(l, pcode, stroke, w, dash) {
     const el = l._path;
@@ -593,11 +595,20 @@
   // Inset category rings + their standoff gap, driven by the main pass above.
   const ringInfo = new Map();
   function renderRings() {
+    // Solid band always; moderate skill adds white ticks ON the band (the ring
+    // equivalent of the white hatch on fills). Self-contained, so two touching
+    // neighbours can't blend into a fake solid line whatever their skill mix.
     ringCat.eachLayer((l) => {
       const info = ringInfo.get(l.feature.properties.pcode);
       setClipped(l, l.feature.properties.pcode,
-        info ? STYLE[info.cat][0] : null, RING_W, info && info.dash);
+        info ? STYLE[info.cat][0] : null, RING_W, null);
       if (info && l._path) l._path.setAttribute("stroke-opacity", info.dim ? "0.2" : "1");
+    });
+    ringTick.eachLayer((l) => {
+      const info = ringInfo.get(l.feature.properties.pcode);
+      const mod = info && info.dash;
+      setClipped(l, l.feature.properties.pcode, mod ? "#ffffff" : null, RING_W, "4 5");
+      if (mod && l._path) l._path.setAttribute("stroke-opacity", info.dim ? "0.15" : "0.85");
     });
   }
   // Legend hover wiring (spans carry data-hl keys; severity chips by index).
