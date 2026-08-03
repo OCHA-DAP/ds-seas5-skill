@@ -579,8 +579,8 @@
         // the filter visibly excludes units.
         fill = !cat ? HNRP_MUTED.fill : cls ? sevColors()[cls - 1] : HNRP_MUTED.fill;
         el.setAttribute("fill", fill);
-        el.setAttribute("stroke", "#b8c4c6"); // subtle true boundary
-        el.setAttribute("stroke-width", 0.5);
+        el.setAttribute("stroke", "#000000"); // true admin boundary
+        el.setAttribute("stroke-width", 0.8);
         el.setAttribute("stroke-dasharray", "");
       } else {
         fill = cat ? fillOf(cat) : HNRP_MUTED.fill;
@@ -613,13 +613,40 @@
     });
   }
   // ── Legend (main-page style: titled strips, hover = highlight on the map) ────
+  // hlKey/hlCls are the ACTIVE highlight (what the map dims against); they follow
+  // the mouse, but a CLICK pins the value (stickKey/stickCls) so the highlight
+  // survives mouseleave. Click again to unpin. Legend entries whose dimension has
+  // an active highlight and don't match it go pale, mirroring the map.
   let hlKey = null, hlCls = null;
+  let stickKey = null, stickCls = null;
+  function setHl(type, val) {
+    hlKey = stickKey; hlCls = stickCls;
+    if (type === "cat") hlKey = val;
+    if (type === "cls") hlCls = val;
+    refreshLegendDim();
+    renderMap();
+  }
+  function refreshLegendDim() {
+    document.querySelectorAll("#hnrp-legend .ls-seg[data-hl-type]").forEach((seg) => {
+      const isCat = seg.dataset.hlType === "cat";
+      const active = isCat ? hlKey : hlCls;
+      const stuck = isCat ? stickKey : stickCls;
+      seg.style.opacity = active != null && String(active) !== seg.dataset.hlVal ? "0.3" : "1";
+      seg.classList.toggle("sel", stuck != null && String(stuck) === seg.dataset.hlVal);
+    });
+  }
   function buildHnrpLegend() {
     const root = document.getElementById("hnrp-legend");
     root.innerHTML = "";
-    const hover = (el, enter) => {
-      el.addEventListener("mouseenter", () => { enter(); renderMap(); });
-      el.addEventListener("mouseleave", () => { hlKey = null; hlCls = null; renderMap(); });
+    const wire = (el, type, val) => {
+      el.dataset.hlType = type; el.dataset.hlVal = String(val);
+      el.addEventListener("mouseenter", () => setHl(type, val));
+      el.addEventListener("mouseleave", () => setHl(null));
+      el.addEventListener("click", () => {
+        if (type === "cat") stickKey = stickKey === val ? null : val;
+        else stickCls = stickCls === val ? null : val;
+        setHl(type, val); // cursor is still on the seg — keep its hover highlight
+      });
     };
     function strip(title, segs, segWidth, interactive = true) {
       const block = document.createElement("div");
@@ -641,7 +668,8 @@
         const lbl = document.createElement("span");
         lbl.className = "ls-lbl"; lbl.textContent = sg.label;
         seg.append(cell, lbl);
-        if (sg.enter) hover(seg, sg.enter);
+        if (sg.key) wire(seg, "cat", sg.key);
+        else if (sg.cls) wire(seg, "cls", sg.cls);
         row.appendChild(seg);
       }
       block.append(t, row);
@@ -649,19 +677,19 @@
     }
     strip(ADM === "low" ? "Forecast category (boundary line; dashed = moderate skill)"
                         : "Forecast category (fill)", [
-      { fill: "#7f5619", label: "strongly below", enter: () => { hlKey = "drought_vsev"; } },
-      { fill: "#dda555", label: "below normal", enter: () => { hlKey = "drought_sev"; } },
-      { fill: "#e2e8e8", label: "normal", border: true, enter: () => { hlKey = "none"; } },
-      { fill: "#74a1e8", label: "above normal", enter: () => { hlKey = "flood_sev"; } },
-      { fill: "#134ead", label: "strongly above", enter: () => { hlKey = "flood_vsev"; } },
+      { fill: "#7f5619", label: "strongly below", key: "drought_vsev" },
+      { fill: "#dda555", label: "below normal", key: "drought_sev" },
+      { fill: "#e2e8e8", label: "normal", border: true, key: "none" },
+      { fill: "#74a1e8", label: "above normal", key: "flood_sev" },
+      { fill: "#134ead", label: "strongly above", key: "flood_vsev" },
     ], 86);
     strip("\u00a0", [
-      { fill: "#b1c1c2", label: "off season", enter: () => { hlKey = "off_season"; } },
+      { fill: "#b1c1c2", label: "off season", key: "off_season" },
     ], 86);
     if (ADM === "low") {
       strip("Severity class (fill)", [1, 2, 3, 4, 5].map((c) => ({
         fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
-        border: c <= 2, enter: () => { hlCls = c; },
+        border: c <= 2, cls: c,
       })), 44);
     }
   }

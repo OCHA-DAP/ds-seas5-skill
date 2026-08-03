@@ -173,8 +173,11 @@ h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 .legend-strip .ls-seg:first-child .ls-cell { border-radius: var(--hdx-radius-sm) 0 0 var(--hdx-radius-sm); }
 .legend-strip .ls-seg:last-child .ls-cell { border-radius: 0 var(--hdx-radius-sm) var(--hdx-radius-sm) 0; }
 .legend-strip .ls-lbl { font-size: 0.72rem; color: var(--hdx-neutral-7); text-align: center; line-height: 1.15; padding: 0 2px; }
-.legend-strip.interactive .ls-seg { cursor: pointer; }
+.legend-strip.interactive .ls-seg { cursor: pointer; transition: opacity 0.15s; }
 .legend-strip.interactive .ls-seg:hover .ls-lbl { color: var(--hdx-neutral-95); font-weight: 500; }
+.legend-strip.interactive .ls-seg.sel .ls-lbl { color: var(--hdx-neutral-95); font-weight: 600; }
+/* outline, not box-shadow: border:true cells carry an inline inset box-shadow that would win */
+.legend-strip.interactive .ls-seg.sel .ls-cell { outline: 1.5px solid var(--hdx-neutral-95); outline-offset: -0.5px; }
 .legend-item.interactive { cursor: pointer; }
 
 /* Leaflet zoom control — HDX-flavoured */
