@@ -54,6 +54,7 @@
     for (const [k, id] of Object.entries(CTLS)) {
       const el = document.getElementById(id);
       if (el && el.value) u.searchParams.set(k, el.value);
+      else u.searchParams.delete(k); // deselected (e.g. country "") must clear too
     }
     u.searchParams.set("dro", document.getElementById("hnrp-drought-only").checked ? "1" : "0");
     u.hash = "hnrp";
@@ -501,8 +502,9 @@
       // Markers, not standalone tooltips: DivOverlay tooltips mis-anchor after
       // interrupted/fractional zoom animations (labels drifting west, wedged
       // zooms); markers track the view exactly.
+      const dimmed = isDimmed(catOf(r), ADM === "low" ? sevClassOf(r) : null);
       triLabels.addLayer(L.marker(l.getBounds().getCenter(), {
-        interactive: false, keyboard: false,
+        interactive: false, keyboard: false, opacity: dimmed ? 0.15 : 1,
         icon: L.divIcon({
           className: "tri-map-label-wrap", iconSize: null,
           html: `<span class="tri-map-label">${s.key}</span>`,
@@ -531,6 +533,14 @@
     let best = 0, bi = null;
     r.pb.forEach((v, i) => { if ((v ?? 0) >= best && (v ?? 0) > 0) { best = v; bi = i + 1; } });
     return bi;
+  }
+  function isDimmed(cat, cls) {
+    const dimCat = hlKey && !(cat && (hlKey === "skill_mod"
+      ? cat.endsWith("_mod")
+      : catBase(cat) === hlKey
+        || (hlKey === "none" && (cat === "high_none" || cat === "mid_none"))));
+    const dimCls = hlCls && cls !== hlCls;
+    return dimCat || dimCls;
   }
   function renderMap() {
     renderOutline();
@@ -581,12 +591,7 @@
       }
       // Legend hover: dim everything that doesn't match the hovered forecast
       // category or severity class (same interaction as the main Map tab).
-      const dimCat = hlKey && !(cat && (hlKey === "skill_mod"
-        ? cat.endsWith("_mod")
-        : catBase(cat) === hlKey
-          || (hlKey === "none" && (cat === "high_none" || cat === "mid_none"))));
-      const dimCls = hlCls && cls !== hlCls;
-      const dim = dimCat || dimCls;
+      const dim = isDimmed(cat, cls);
       el.setAttribute("fill-opacity", dim ? "0.12" : "1");
       el.setAttribute("stroke-opacity", dim ? "0.2" : "1");
       ringInfo.set(l.feature.properties.pcode,
