@@ -409,7 +409,60 @@
       style: { color: "#1d2021", weight: 1, opacity: 0.65, fill: false } },
   ).addTo(map);
   map.fitBounds(layer.getBounds(), { animate: false });
-  bordersLayer.bringToFront(); // country borders above the unit strokes
+
+  // ── Inset forecast-category rings (lowest view) ──────────────────────────────
+  // Same clip-path trick as the CBPF page: clip each path to its own shape and
+  // double the stroke width so only the inner half renders — an outline fully
+  // inside the unit. A second, narrower "gap" ring in the unit's fill colour is
+  // drawn on top, standing the category ring off the shared boundary.
+  const RING_W = 2.8; // visible ring width, px (flush: neighbours touch)
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const ringCat = L.geoJSON(geo, {
+    filter: (f) => /Polygon/.test(f.geometry.type),
+    interactive: false,
+    style: () => ({ weight: 0, fill: false, opacity: 1 }),
+  }).addTo(map);
+  const clipPaths = {};
+  function setClipped(l, pcode, stroke, w, dash) {
+    const el = l._path;
+    const svg = el && el.ownerSVGElement;
+    if (!svg) return;
+    if (!stroke) {
+      el.setAttribute("stroke", "none");
+      el.removeAttribute("clip-path");
+      return;
+    }
+    let cp = clipPaths[pcode];
+    if (!cp) {
+      let defs = svg.querySelector("defs.hnrp-clips");
+      if (!defs) {
+        defs = document.createElementNS(SVGNS, "defs");
+        defs.setAttribute("class", "hnrp-clips");
+        svg.appendChild(defs);
+      }
+      const clip = document.createElementNS(SVGNS, "clipPath");
+      clip.setAttribute("id", "hnrp-clip-" + pcode);
+      cp = document.createElementNS(SVGNS, "path");
+      clip.appendChild(cp);
+      defs.appendChild(clip);
+      clipPaths[pcode] = cp;
+    }
+    cp.setAttribute("d", el.getAttribute("d") || "");
+    el.setAttribute("clip-path", `url(#hnrp-clip-${pcode})`);
+    el.setAttribute("stroke", stroke);
+    el.setAttribute("stroke-width", String(w * 2)); // clipped: visible half == w
+    if (dash) el.setAttribute("stroke-dasharray", dash);
+    else el.removeAttribute("stroke-dasharray");
+  }
+  // Clip geometry must track the projected paths after every zoom/move.
+  function syncClips() {
+    ringCat.eachLayer((l) => {
+      const cp = clipPaths[l.feature.properties.pcode];
+      if (cp && l._path) cp.setAttribute("d", l._path.getAttribute("d") || "");
+    });
+  }
+  map.on("zoomend moveend", () => { syncClips(); });
+  bordersLayer.bringToFront(); // country borders sit above the inset rings
 
   // Selected-country outline: admin-1 borders alone make the country edge hard to
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
@@ -506,21 +559,20 @@
       let fill;
       if (ADM === "low") {
         // Lowest view: the BODY is ALWAYS severity (muted when the unit has no
-        // class — never the forecast category, which lives on the outline).
+        // class — never the forecast category, which lives on the inset ring).
         // cat==null (drought-only filtered / no forecast) stays fully muted so
         // the filter visibly excludes units.
         fill = !cat ? HNRP_MUTED.fill : cls ? sevColors()[cls - 1] : HNRP_MUTED.fill;
         el.setAttribute("fill", fill);
-        el.setAttribute("stroke", cat ? STYLE[cat][0] : HNRP_MUTED.edge);
-        el.setAttribute("stroke-width", cat ? 2.4 : 0.6);
-        if (cat && cat.endsWith("_mod")) el.setAttribute("stroke-dasharray", "6 4");
-        else el.removeAttribute("stroke-dasharray");
+        el.setAttribute("stroke", "#b8c4c6"); // subtle true boundary
+        el.setAttribute("stroke-width", 0.5);
+        el.setAttribute("stroke-dasharray", "");
       } else {
         fill = cat ? fillOf(cat) : HNRP_MUTED.fill;
         el.setAttribute("fill", fill);
         el.setAttribute("stroke", cat ? STYLE[cat][1] : HNRP_MUTED.edge);
         el.setAttribute("stroke-width", 0.6);
-        el.removeAttribute("stroke-dasharray");
+        el.setAttribute("stroke-dasharray", "");
       }
       // Legend hover: dim everything that doesn't match the hovered forecast
       // category or severity class (same interaction as the main Map tab).
@@ -532,6 +584,20 @@
       const dim = dimCat || dimCls;
       el.setAttribute("fill-opacity", dim ? "0.12" : "1");
       el.setAttribute("stroke-opacity", dim ? "0.2" : "1");
+      ringInfo.set(l.feature.properties.pcode,
+        ADM === "low" && cat && !offCountry
+          ? { cat, fill, dim, dash: cat.endsWith("_mod") ? "4 7" : null } : null);
+    });
+    renderRings();
+  }
+  // Inset category rings + their standoff gap, driven by the main pass above.
+  const ringInfo = new Map();
+  function renderRings() {
+    ringCat.eachLayer((l) => {
+      const info = ringInfo.get(l.feature.properties.pcode);
+      setClipped(l, l.feature.properties.pcode,
+        info ? STYLE[info.cat][0] : null, RING_W, info && info.dash);
+      if (info && l._path) l._path.setAttribute("stroke-opacity", info.dim ? "0.2" : "1");
     });
   }
   // Legend hover wiring (spans carry data-hl keys; severity chips by index).
