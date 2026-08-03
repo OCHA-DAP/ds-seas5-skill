@@ -207,6 +207,8 @@ footer p { margin: 4px 0; }
 .leaflet-container:focus { outline: none; }
 .hnrp-h { margin: 28px 0 8px; font-size: 1rem; }
 .stale-flag { color: var(--hdx-primary-5); cursor: help; font-weight: 700; }
+.cls-chip { display: inline-block; width: 10px; height: 10px; margin-right: 5px;
+  border: 1px solid var(--hdx-neutral-4); vertical-align: baseline; }
 /* Per-admin trimester codes on the map (selected-country view): bare text with a
    white halo, centred on the anchor point (the divIcon anchors top-left). */
 .tri-map-label-wrap { background: none; border: none; }

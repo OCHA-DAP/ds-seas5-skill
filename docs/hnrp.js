@@ -345,6 +345,14 @@
     if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}${tgtFlag(r)}</div>`;
     const py = planYrOf(r);
     if (py) rows += `<div>Plan data: ${py}</div>`;
+    if (ADM === "low") {
+      const cls = sevClassOf(r);
+      if (cls) {
+        rows += `<div>Severity class: <span style="display:inline-block;width:10px;` +
+          `height:10px;background:${SEV_COLORS[cls - 1]};border:1px solid #9db1b3;` +
+          `vertical-align:baseline"></span> ${sevClassLabels()[cls - 1]}</div>`;
+      }
+    }
     // Membership must be per-unit, never assumed from scope: in IPC mode most of a
     // country's states can be in view yet outside its HNRP (Nigeria covers only
     // Borno/Adamawa/Yobe).
@@ -777,8 +785,23 @@
       g("rect", { x: M.l - 199, y: y + ROW / 2 - 7, width: 13, height: 13,
                   fill: cat ? fillOf(cat) : HNRP_MUTED.fill,
                   stroke: cat ? STYLE[cat][1] : HNRP_MUTED.edge, "stroke-width": 1 });
-      const name = (r.name ?? r.pcode).length > 24 ? (r.name ?? r.pcode).slice(0, 23) + "…" : (r.name ?? r.pcode);
-      g("text", { x: M.l - 180, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" }).textContent = name;
+      let nameX = M.l - 180;
+      if (ADM === "low") {
+        const cls = sevClassOf(r);
+        if (cls) {
+          const sq = g("rect", { x: M.l - 182, y: y + ROW / 2 - 7, width: 13, height: 13,
+                                 fill: SEV_COLORS[cls - 1], stroke: "#9db1b3",
+                                 "stroke-width": 0.6 });
+          const ti = document.createElementNS(NS, "title");
+          ti.textContent = `severity class ${cls} — ${sevClassLabels()[cls - 1]}`;
+          sq.appendChild(ti);
+        }
+        nameX = M.l - 165;
+      }
+      const nm0 = r.name ?? r.pcode;
+      const maxLen = ADM === "low" ? 22 : 24;
+      const name = nm0.length > maxLen ? nm0.slice(0, maxLen - 1) + "…" : nm0;
+      g("text", { x: nameX, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" }).textContent = name;
 
       // Stacked class segments with a white spacer between them (single PiN
       // segment in PiN mode — no class breakdown exists).
@@ -820,6 +843,7 @@
     { key: "country", label: "Country", num: false },
     { key: "name", label: ADM === "low" ? "Admin unit" : `Admin ${ADM}`, num: false },
     { key: "_plan_yr", label: "Plan", num: true },
+    ...(ADM === "low" ? [{ key: "sclass", label: "Class", num: true }] : []),
     { key: "sev4", label: "Severity 4+ pop", num: true },
     { key: "pin", label: "PiN", num: true },
     { key: "targeted", label: "Targeted", num: true },
@@ -856,6 +880,7 @@
 
     const SLOT_KEYS = { tri_label: "key", rp: "rp", pct: "pct", r: "r" };
     const kv = (row) => (sortKey === "_plan_yr" ? planYrOf(row)
+      : sortKey === "sclass" ? sevClassOf(row)
       : sortKey === "sev4" ? sevValOf(row)
       : sortKey === "pin" ? pinOf(row)
       : sortKey === "targeted" ? tgtOf(row)
@@ -884,6 +909,12 @@
         `<td>${r.country ?? r.iso3}</td>` +
         `<td>${dispName(r)}</td>` +
         `<td class="num">${planYrOf(r) ?? "–"}</td>` +
+        (ADM === "low" ? (() => {
+          const cls = sevClassOf(r);
+          return `<td class="num">${cls
+            ? `<span class="cls-chip" style="background:${SEV_COLORS[cls - 1]}"></span>${cls}`
+            : "–"}</td>`;
+        })() : "") +
         `<td class="num">${fmtN(sevValOf(r))}</td>` +
         `<td class="num">${fmtN(pinOf(r))}</td>` +
         `<td class="num">${fmtN(tgtOf(r))}${tgtYrOf(r)
