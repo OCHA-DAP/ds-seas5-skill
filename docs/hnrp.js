@@ -607,8 +607,10 @@
     ringTick.eachLayer((l) => {
       const info = ringInfo.get(l.feature.properties.pcode);
       const mod = info && info.dash;
-      setClipped(l, l.feature.properties.pcode, mod ? "#ffffff" : null, RING_W, "4 5");
-      if (mod && l._path) l._path.setAttribute("stroke-opacity", info.dim ? "0.15" : "0.85");
+      // Sparse dark stitches: enough to read "moderate" at country zoom without
+      // paling the band's hue at world zoom (white ticks blended ~half white).
+      setClipped(l, l.feature.properties.pcode, mod ? "#1d2021" : null, RING_W, "2.5 7");
+      if (mod && l._path) l._path.setAttribute("stroke-opacity", info.dim ? "0.1" : "0.45");
     });
   }
   // Legend hover wiring (spans carry data-hl keys; severity chips by index).
