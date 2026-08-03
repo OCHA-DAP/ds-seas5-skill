@@ -534,6 +534,21 @@
       el.setAttribute("stroke-opacity", dim ? "0.2" : "1");
     });
   }
+  // Legend hover wiring (spans carry data-hl keys; severity chips by index).
+  let hlKey = null, hlCls = null;
+  for (const el of document.querySelectorAll("#hnrp-scatter-legend span[data-hl]")) {
+    el.addEventListener("mouseenter", () => { hlKey = el.dataset.hl; renderMap(); });
+    el.addEventListener("mouseleave", () => { hlKey = null; renderMap(); });
+  }
+  document.querySelectorAll("#hnrp-outline-legend .sev-ramp").forEach((el, i) => {
+    // Class fills exist only in the lowest view — the hover matches that.
+    el.addEventListener("mouseenter", () => {
+      if (ADM !== "low") return;
+      hlCls = i + 1; renderMap();
+    });
+    el.addEventListener("mouseleave", () => { hlCls = null; renderMap(); });
+  });
+
   // ── Scatter ──────────────────────────────────────────────────────────────────
   const svg = document.getElementById("hnrp-scatter");
   const tip = document.getElementById("hnrp-tip");
