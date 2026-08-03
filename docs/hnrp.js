@@ -660,6 +660,8 @@
   // Full implementation + revival notes: docs/dev-notes/hnrp-scatter.md
   // (last live at commit d7140e9, docs/hnrp.js renderScatter/scatterRows/popOf).
 
+  const NS = SVGNS; // SVG namespace for the bar chart's elements
+
   // ── Severity-breakdown bars (per admin, when a country is selected) ──────────
   // Population by JIAF class 1–5 (stacked), a tick for the targeted population, and
   // the unit's forecast category as a swatch beside its name. Severity uses the
