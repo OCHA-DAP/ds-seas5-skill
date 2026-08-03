@@ -409,62 +409,7 @@
       style: { color: "#1d2021", weight: 1, opacity: 0.65, fill: false } },
   ).addTo(map);
   map.fitBounds(layer.getBounds(), { animate: false });
-
-  // ── Inset forecast-category rings (lowest view) ──────────────────────────────
-  // Same clip-path trick as the CBPF page: clip each path to its own shape and
-  // double the stroke width so only the inner half renders — an outline fully
-  // inside the unit. A second, narrower "gap" ring in the unit's fill colour is
-  // drawn on top, standing the category ring off the shared boundary.
-  const RING_W = 3.4; // visible ring width, px (flush: neighbours touch)
-  const SVGNS = "http://www.w3.org/2000/svg";
-  const mkRingLayer = () => L.geoJSON(geo, {
-    filter: (f) => /Polygon/.test(f.geometry.type),
-    interactive: false,
-    style: () => ({ weight: 0, fill: false, opacity: 1 }),
-  }).addTo(map);
-  const ringCat = mkRingLayer();  // solid category band
-  const ringTick = mkRingLayer(); // white ticks over it = moderate skill
-  const clipPaths = {};
-  function setClipped(l, pcode, stroke, w, dash) {
-    const el = l._path;
-    const svg = el && el.ownerSVGElement;
-    if (!svg) return;
-    if (!stroke) {
-      el.setAttribute("stroke", "none");
-      el.removeAttribute("clip-path");
-      return;
-    }
-    let cp = clipPaths[pcode];
-    if (!cp) {
-      let defs = svg.querySelector("defs.hnrp-clips");
-      if (!defs) {
-        defs = document.createElementNS(SVGNS, "defs");
-        defs.setAttribute("class", "hnrp-clips");
-        svg.appendChild(defs);
-      }
-      const clip = document.createElementNS(SVGNS, "clipPath");
-      clip.setAttribute("id", "hnrp-clip-" + pcode);
-      cp = document.createElementNS(SVGNS, "path");
-      clip.appendChild(cp);
-      defs.appendChild(clip);
-      clipPaths[pcode] = cp;
-    }
-    cp.setAttribute("d", el.getAttribute("d") || "");
-    el.setAttribute("clip-path", `url(#hnrp-clip-${pcode})`);
-    el.setAttribute("stroke", stroke);
-    el.setAttribute("stroke-width", String(w * 2)); // clipped: visible half == w
-    if (dash) el.setAttribute("stroke-dasharray", dash);
-    else el.removeAttribute("stroke-dasharray");
-  }
-  // Clip geometry must track the projected paths after every zoom/move.
-  function syncClips() {
-    ringCat.eachLayer((l) => {
-      const cp = clipPaths[l.feature.properties.pcode];
-      if (cp && l._path) cp.setAttribute("d", l._path.getAttribute("d") || "");
-    });
-  }
-  map.on("zoomend moveend", () => { syncClips(); });
-  bordersLayer.bringToFront(); // country borders sit above the inset rings
+  bordersLayer.bringToFront(); // country borders above the unit strokes
 
   // Selected-country outline: admin-1 borders alone make the country edge hard to
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
@@ -561,20 +506,21 @@
       let fill;
       if (ADM === "low") {
         // Lowest view: the BODY is ALWAYS severity (muted when the unit has no
-        // class — never the forecast category, which lives on the inset ring).
+        // class — never the forecast category, which lives on the outline).
         // cat==null (drought-only filtered / no forecast) stays fully muted so
         // the filter visibly excludes units.
         fill = !cat ? HNRP_MUTED.fill : cls ? sevColors()[cls - 1] : HNRP_MUTED.fill;
         el.setAttribute("fill", fill);
-        el.setAttribute("stroke", "#b8c4c6"); // subtle true boundary
-        el.setAttribute("stroke-width", 0.5);
-        el.setAttribute("stroke-dasharray", "");
+        el.setAttribute("stroke", cat ? STYLE[cat][0] : HNRP_MUTED.edge);
+        el.setAttribute("stroke-width", cat ? 2.4 : 0.6);
+        if (cat && cat.endsWith("_mod")) el.setAttribute("stroke-dasharray", "6 4");
+        else el.removeAttribute("stroke-dasharray");
       } else {
         fill = cat ? fillOf(cat) : HNRP_MUTED.fill;
         el.setAttribute("fill", fill);
         el.setAttribute("stroke", cat ? STYLE[cat][1] : HNRP_MUTED.edge);
         el.setAttribute("stroke-width", 0.6);
-        el.setAttribute("stroke-dasharray", "");
+        el.removeAttribute("stroke-dasharray");
       }
       // Legend hover: dim everything that doesn't match the hovered forecast
       // category or severity class (same interaction as the main Map tab).
@@ -586,48 +532,8 @@
       const dim = dimCat || dimCls;
       el.setAttribute("fill-opacity", dim ? "0.12" : "1");
       el.setAttribute("stroke-opacity", dim ? "0.2" : "1");
-      ringInfo.set(l.feature.properties.pcode,
-        ADM === "low" && cat && !offCountry
-          ? { cat, fill, dim, dash: cat.endsWith("_mod") ? "5 4" : null } : null);
-    });
-    renderRings();
-  }
-  // Inset category rings + their standoff gap, driven by the main pass above.
-  const ringInfo = new Map();
-  function renderRings() {
-    // Solid band always; moderate skill adds white ticks ON the band (the ring
-    // equivalent of the white hatch on fills). Self-contained, so two touching
-    // neighbours can't blend into a fake solid line whatever their skill mix.
-    ringCat.eachLayer((l) => {
-      const info = ringInfo.get(l.feature.properties.pcode);
-      setClipped(l, l.feature.properties.pcode,
-        info ? STYLE[info.cat][0] : null, RING_W, null);
-      if (info && l._path) l._path.setAttribute("stroke-opacity", info.dim ? "0.2" : "1");
-    });
-    ringTick.eachLayer((l) => {
-      const info = ringInfo.get(l.feature.properties.pcode);
-      const mod = info && info.dash;
-      // Sparse dark stitches: enough to read "moderate" at country zoom without
-      // paling the band's hue at world zoom (white ticks blended ~half white).
-      setClipped(l, l.feature.properties.pcode, mod ? "#1d2021" : null, RING_W, "2.5 7");
-      if (mod && l._path) l._path.setAttribute("stroke-opacity", info.dim ? "0.1" : "0.45");
     });
   }
-  // Legend hover wiring (spans carry data-hl keys; severity chips by index).
-  let hlKey = null, hlCls = null;
-  for (const el of document.querySelectorAll("#hnrp-scatter-legend span[data-hl]")) {
-    el.addEventListener("mouseenter", () => { hlKey = el.dataset.hl; renderMap(); });
-    el.addEventListener("mouseleave", () => { hlKey = null; renderMap(); });
-  }
-  document.querySelectorAll("#hnrp-outline-legend .sev-ramp").forEach((el, i) => {
-    // Class fills exist only in the lowest view — the hover matches that.
-    el.addEventListener("mouseenter", () => {
-      if (ADM !== "low") return;
-      hlCls = i + 1; renderMap();
-    });
-    el.addEventListener("mouseleave", () => { hlCls = null; renderMap(); });
-  });
-
   // ── Scatter ──────────────────────────────────────────────────────────────────
   const svg = document.getElementById("hnrp-scatter");
   const tip = document.getElementById("hnrp-tip");
