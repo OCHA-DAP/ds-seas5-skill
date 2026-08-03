@@ -415,15 +415,13 @@
   // double the stroke width so only the inner half renders — an outline fully
   // inside the unit. A second, narrower "gap" ring in the unit's fill colour is
   // drawn on top, standing the category ring off the shared boundary.
-  const RING_W = 2.4, RING_GAP = 1.6; // visible ring width / standoff, px
+  const RING_W = 2.6; // visible ring width, px (flush: neighbours touch)
   const SVGNS = "http://www.w3.org/2000/svg";
-  const mkRingLayer = () => L.geoJSON(geo, {
+  const ringCat = L.geoJSON(geo, {
     filter: (f) => /Polygon/.test(f.geometry.type),
     interactive: false,
     style: () => ({ weight: 0, fill: false, opacity: 1 }),
   }).addTo(map);
-  const ringCat = mkRingLayer();   // category colour, wide
-  const ringGap = mkRingLayer();   // fill-coloured eraser, narrow (on top)
   const clipPaths = {};
   function setClipped(l, pcode, stroke, w, dash) {
     const el = l._path;
@@ -588,7 +586,7 @@
       el.setAttribute("stroke-opacity", dim ? "0.2" : "1");
       ringInfo.set(l.feature.properties.pcode,
         ADM === "low" && cat && !offCountry
-          ? { cat, fill, dim, dash: cat.endsWith("_mod") ? "6 4" : null } : null);
+          ? { cat, fill, dim, dash: cat.endsWith("_mod") ? "5 4" : null } : null);
     });
     renderRings();
   }
@@ -598,15 +596,8 @@
     ringCat.eachLayer((l) => {
       const info = ringInfo.get(l.feature.properties.pcode);
       setClipped(l, l.feature.properties.pcode,
-        info ? STYLE[info.cat][0] : null, RING_GAP + RING_W, info && info.dash);
+        info ? STYLE[info.cat][0] : null, RING_W, info && info.dash);
       if (info && l._path) l._path.setAttribute("stroke-opacity", info.dim ? "0.2" : "1");
-    });
-    ringGap.eachLayer((l) => {
-      const info = ringInfo.get(l.feature.properties.pcode);
-      setClipped(l, l.feature.properties.pcode, info ? info.fill : null, RING_GAP, null);
-      if (info && l._path) {
-        l._path.setAttribute("stroke-opacity", info.dim ? "0.12" : "1");
-      }
     });
   }
   // Legend hover wiring (spans carry data-hl keys; severity chips by index).
