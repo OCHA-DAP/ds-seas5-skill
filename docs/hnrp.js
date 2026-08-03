@@ -516,22 +516,32 @@
         el.setAttribute("stroke-width", 0.6);
         el.setAttribute("stroke-dasharray", "");
       }
-      // Legend hover: dim everything that doesn't match the hovered category
-      // (same interaction as the main Map tab's legend).
-      const dim = hlKey && !(cat && (hlKey === "skill_mod"
+      // Legend hover: dim everything that doesn't match the hovered forecast
+      // category or severity class (same interaction as the main Map tab).
+      const dimCat = hlKey && !(cat && (hlKey === "skill_mod"
         ? cat.endsWith("_mod")
         : catBase(cat) === hlKey
           || (hlKey === "none" && (cat === "high_none" || cat === "mid_none"))));
+      const dimCls = hlCls && cls !== hlCls;
+      const dim = dimCat || dimCls;
       el.setAttribute("fill-opacity", dim ? "0.12" : "1");
       el.setAttribute("stroke-opacity", dim ? "0.2" : "1");
     });
   }
-  // Legend hover wiring (spans carry data-hl keys).
-  let hlKey = null;
+  // Legend hover wiring (spans carry data-hl keys; severity chips by index).
+  let hlKey = null, hlCls = null;
   for (const el of document.querySelectorAll("#hnrp-scatter-legend span[data-hl]")) {
     el.addEventListener("mouseenter", () => { hlKey = el.dataset.hl; renderMap(); });
     el.addEventListener("mouseleave", () => { hlKey = null; renderMap(); });
   }
+  document.querySelectorAll("#hnrp-outline-legend .sev-ramp").forEach((el, i) => {
+    // Class fills exist only in the lowest view — the hover matches that.
+    el.addEventListener("mouseenter", () => {
+      if (ADM !== "low") return;
+      hlCls = i + 1; renderMap();
+    });
+    el.addEventListener("mouseleave", () => { hlCls = null; renderMap(); });
+  });
 
   // ── Scatter ──────────────────────────────────────────────────────────────────
   const svg = document.getElementById("hnrp-scatter");
