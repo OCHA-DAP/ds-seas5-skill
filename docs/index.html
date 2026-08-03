@@ -376,11 +376,14 @@
 
       <h4>Reading the scatter</h4>
       <p>
-        In the <em>Lowest available</em> view the map also outlines each unit in its
-        <strong>severity class colour</strong> (IPC convention, 1→5) while the fill keeps
-        the forecast category — PbS mode outlines the class holding the unit's PiN; IPC
-        mode applies the IPC area-classification rule (highest phase reaching ≥20% of the
-        analysed population); PiN mode has no classes, so outlines revert. The same class appears in map
+        In the <em>Lowest available</em> view the map <strong>fills</strong> each unit
+        with its <strong>severity class colour</strong> (IPC convention, 1→5) and moves
+        the forecast category to the <strong>outline</strong> (dashed = moderate skill,
+        solid = high) — PbS mode uses the class holding the unit's PiN; IPC mode applies
+        the IPC area-classification rule (highest phase reaching ≥20% of the analysed
+        population); PiN mode has no classes, so the classic colouring returns. Hovering
+        a forecast category in the legend highlights matching units and dims the rest.
+        The same class appears in map
         tooltips, the table's Class column, and beside each bar-chart row. Both axes
         divide by the <em>same</em> population base: the admin's total
         population — the UNFPA COD-PS baseline via HDX HAPI where present and trusted,
