@@ -594,8 +594,10 @@
       const dim = isDimmed(cat, cls);
       el.setAttribute("fill-opacity", dim ? "0.12" : "1");
       el.setAttribute("stroke-opacity", dim ? "0.2" : "1");
+      // low_skill's STYLE colour is white — as a ring that reads as a hole;
+      // no category ring at all is the honest encoding for "no usable skill".
       ringInfo.set(l.feature.properties.pcode,
-        ADM === "low" && cat && !offCountry
+        ADM === "low" && cat && cat !== "low_skill" && !offCountry
           ? { cat, fill, dim, dash: cat.endsWith("_mod") ? "4 7" : null } : null);
     });
     renderRings();
