@@ -653,7 +653,7 @@
       })), 44);
     }
   }
-  buildHnrpLegend();
+  // (built at the end of setup — it reads sevColors(), declared further down)
 
   // ── Scatter (REMOVED 2026-08) ────────────────────────────────────────────────
   // The severity-vs-targeted scatter was dropped as more confusing than useful.
@@ -1006,6 +1006,7 @@
     fitCountry(false); // instant on reveal — the panel just appeared, nothing to glide from
     renderAll(); // paths may mount after the panel becomes visible — restyle then
   };
+  buildHnrpLegend(); // safe here: every const it reads is initialised by now
   restoreControls(); // after options are populated, before the first render
   renderAll();
   if (countrySel.value) fitCountry(false); // restored country: land on it directly
