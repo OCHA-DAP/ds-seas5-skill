@@ -500,16 +500,37 @@
         return;
       }
       const cat = catOf(r);
-      el.setAttribute("fill", cat ? fillOf(cat) : HNRP_MUTED.fill);
       const cls = ADM === "low" ? sevClassOf(r) : null;
-      if (cls) {
-        el.setAttribute("stroke", SEV_COLORS[cls - 1]);
-        el.setAttribute("stroke-width", 1.6);
+      if (cls && cat) {
+        // Lowest view: BODY = severity class, OUTLINE = forecast category
+        // (dashed outline = moderate skill, standing in for the hatched fill).
+        // cat==null (drought-only filtered / no forecast) falls through to the
+        // muted look so the filter still visibly excludes units.
+        el.setAttribute("fill", SEV_COLORS[cls - 1]);
+        el.setAttribute("stroke", STYLE[cat][0]);
+        el.setAttribute("stroke-width", 2);
+        el.setAttribute("stroke-dasharray", cat.endsWith("_mod") ? "4 3" : "");
       } else {
+        el.setAttribute("fill", cat ? fillOf(cat) : HNRP_MUTED.fill);
         el.setAttribute("stroke", cat ? STYLE[cat][1] : HNRP_MUTED.edge);
         el.setAttribute("stroke-width", 0.6);
+        el.setAttribute("stroke-dasharray", "");
       }
+      // Legend hover: dim everything that doesn't match the hovered category
+      // (same interaction as the main Map tab's legend).
+      const dim = hlKey && !(cat && (hlKey === "skill_mod"
+        ? cat.endsWith("_mod")
+        : catBase(cat) === hlKey
+          || (hlKey === "none" && (cat === "high_none" || cat === "mid_none"))));
+      el.setAttribute("fill-opacity", dim ? "0.12" : "1");
+      el.setAttribute("stroke-opacity", dim ? "0.2" : "1");
     });
+  }
+  // Legend hover wiring (spans carry data-hl keys).
+  let hlKey = null;
+  for (const el of document.querySelectorAll("#hnrp-scatter-legend span[data-hl]")) {
+    el.addEventListener("mouseenter", () => { hlKey = el.dataset.hl; renderMap(); });
+    el.addEventListener("mouseleave", () => { hlKey = null; renderMap(); });
   }
 
   // ── Scatter ──────────────────────────────────────────────────────────────────
