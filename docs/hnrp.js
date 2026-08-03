@@ -325,8 +325,31 @@
   // Bottom-left: the sticky filter bar overlays the top of the viewport, and a
   // top-left zoom control slides under it as the page scrolls, eating its clicks.
   map.zoomControl.setPosition("bottomleft");
+  // Global view: per-admin figures at world zoom are noise. One line per country —
+  // name, plan year, and which datasets we hold — until the country is clicked open.
+  const countryTipCache = new Map();
+  function countryTip(country) {
+    if (!countryTipCache.has(country)) {
+      const rs = data.rows.filter((x) => x.country === country);
+      const has = (k) => rs.some((x) => x[k] != null);
+      const ds = [];
+      if (has("pct") || has("fb_pct")) ds.push("SEAS5 forecast");
+      if (has("pin")) ds.push("PiN");
+      if (has("targeted")) ds.push("targeted");
+      if (has("pb") || has("pba")) ds.push("PiN by severity");
+      if (has("ipc")) ds.push("IPC");
+      const py = planYrByCountry.get(country);
+      countryTipCache.set(country,
+        `<div class="name">${country}</div>` +
+        `<div>${py ? `Plan data ${py} · ` : ""}${ds.join(", ")}</div>` +
+        `<div class="cat" style="color:#9db1b3">Click to explore</div>`);
+    }
+    return countryTipCache.get(country);
+  }
   const tipHtml = (f) => {
     const p = f.properties, r = byPcode.get(p.pcode);
+    if (!countrySel.value) return r ? countryTip(r.country)
+      : `<div class="name">${p.name ?? p.pcode}</div>`;
     // No PiN/severity row = not part of the plan's admin-level analysis (e.g. Nigeria's
     // HNRP covers only Borno/Adamawa/Yobe) — context only, never labelled "in HNRP".
     if (!r || (!ipcMode() && !inHnrp(r))) {
@@ -534,12 +557,16 @@
     r.pb.forEach((v, i) => { if ((v ?? 0) >= best && (v ?? 0) > 0) { best = v; bi = i + 1; } });
     return bi;
   }
-  function isDimmed(cat, cls) {
-    const dimCat = hlKey && !(cat && (hlKey === "skill_mod"
+  function catMatches(cat, key) {
+    return !!cat && (key === "skill_mod"
       ? cat.endsWith("_mod")
-      : catBase(cat) === hlKey
-        || (hlKey === "none" && (cat === "high_none" || cat === "mid_none"))));
-    const dimCls = hlCls && cls !== hlCls;
+      : catBase(cat) === key
+        || (key === "none" && (cat === "high_none" || cat === "mid_none")));
+  }
+  function isDimmed(cat, cls) {
+    const ks = activeKeys(), cs = activeClss();
+    const dimCat = ks.size > 0 && ![...ks].some((k) => catMatches(cat, k));
+    const dimCls = cs.size > 0 && !cs.has(cls);
     return dimCat || dimCls;
   }
   function renderMap() {
@@ -580,7 +607,7 @@
         fill = !cat ? HNRP_MUTED.fill : cls ? sevColors()[cls - 1] : HNRP_MUTED.fill;
         el.setAttribute("fill", fill);
         el.setAttribute("stroke", "#000000"); // true admin boundary
-        el.setAttribute("stroke-width", 0.8);
+        el.setAttribute("stroke-width", 0.4);
         el.setAttribute("stroke-dasharray", "");
       } else {
         fill = cat ? fillOf(cat) : HNRP_MUTED.fill;
@@ -613,26 +640,22 @@
     });
   }
   // ── Legend (main-page style: titled strips, hover = highlight on the map) ────
-  // hlKey/hlCls are the ACTIVE highlight (what the map dims against); they follow
-  // the mouse, but a CLICK pins the value (stickKey/stickCls) so the highlight
-  // survives mouseleave. Click again to unpin. Legend entries whose dimension has
-  // an active highlight and don't match it go pale, mirroring the map.
-  let hlKey = null, hlCls = null;
-  let stickKey = null, stickCls = null;
-  function setHl(type, val) {
-    hlKey = stickKey; hlCls = stickCls;
-    if (type === "cat") hlKey = val;
-    if (type === "cls") hlCls = val;
-    refreshLegendDim();
-    renderMap();
-  }
+  // The active highlight is the PINNED (clicked) entries plus, transiently, the
+  // hovered one. Any number of entries may be pinned per strip (click again to
+  // unpin); a unit stays bright if it matches ANY active category AND ANY active
+  // class. Non-matching legend entries pale to mirror the map dim.
+  const stickKeys = new Set(), stickClss = new Set();
+  let hoverKey = null, hoverCls = null;
+  const activeKeys = () => (hoverKey ? new Set(stickKeys).add(hoverKey) : stickKeys);
+  const activeClss = () => (hoverCls != null ? new Set(stickClss).add(hoverCls) : stickClss);
   function refreshLegendDim() {
     document.querySelectorAll("#hnrp-legend .ls-seg[data-hl-type]").forEach((seg) => {
       const isCat = seg.dataset.hlType === "cat";
-      const active = isCat ? hlKey : hlCls;
-      const stuck = isCat ? stickKey : stickCls;
-      seg.style.opacity = active != null && String(active) !== seg.dataset.hlVal ? "0.3" : "1";
-      seg.classList.toggle("sel", stuck != null && String(stuck) === seg.dataset.hlVal);
+      const act = isCat ? activeKeys() : activeClss();
+      const stuck = isCat ? stickKeys : stickClss;
+      const v = seg.dataset.hlVal;
+      seg.style.opacity = act.size && ![...act].some((x) => String(x) === v) ? "0.3" : "1";
+      seg.classList.toggle("sel", [...stuck].some((x) => String(x) === v));
     });
   }
   function buildHnrpLegend() {
@@ -640,12 +663,16 @@
     root.innerHTML = "";
     const wire = (el, type, val) => {
       el.dataset.hlType = type; el.dataset.hlVal = String(val);
-      el.addEventListener("mouseenter", () => setHl(type, val));
-      el.addEventListener("mouseleave", () => setHl(null));
+      const paint = () => { refreshLegendDim(); renderMap(); };
+      el.addEventListener("mouseenter", () => {
+        if (type === "cat") hoverKey = val; else hoverCls = val;
+        paint();
+      });
+      el.addEventListener("mouseleave", () => { hoverKey = null; hoverCls = null; paint(); });
       el.addEventListener("click", () => {
-        if (type === "cat") stickKey = stickKey === val ? null : val;
-        else stickCls = stickCls === val ? null : val;
-        setHl(type, val); // cursor is still on the seg — keep its hover highlight
+        const set = type === "cat" ? stickKeys : stickClss;
+        set.has(val) ? set.delete(val) : set.add(val);
+        paint();
       });
     };
     function strip(title, segs, segWidth, interactive = true) {
