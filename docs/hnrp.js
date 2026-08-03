@@ -549,9 +549,14 @@
         l.bindTooltip(() => tipHtml(l.feature), { sticky: true });
       }
       if (offCountry || !r || (!ipcMode() && !inHnrp(r))) {
-        // Out of scope for the current mode: blend into the world backdrop.
+        // Out of scope for the current mode: blend into the world backdrop —
+        // and clear any ring left from a previous render, or other countries'
+        // category outlines linger when one country is selected.
         el.setAttribute("fill", "#f7f9f9");
         el.setAttribute("stroke", "#d9dedf");
+        el.setAttribute("stroke-width", 0.5);
+        el.removeAttribute("stroke-dasharray");
+        ringInfo.set(l.feature.properties.pcode, null);
         return;
       }
       const cat = catOf(r);
@@ -642,9 +647,9 @@
       { fill: "#e2e8e8", label: "normal", border: true, enter: () => { hlKey = "none"; } },
       { fill: "#74a1e8", label: "above normal", enter: () => { hlKey = "flood_sev"; } },
       { fill: "#134ead", label: "strongly above", enter: () => { hlKey = "flood_vsev"; } },
+    ], 86);
+    strip("\u00a0", [
       { fill: "#b1c1c2", label: "off season", enter: () => { hlKey = "off_season"; } },
-      { fill: "#dda555", hatch: "white", label: "moderate skill",
-        enter: () => { hlKey = "skill_mod"; } },
     ], 86);
     if (ADM === "low") {
       strip("Severity class (fill)", [1, 2, 3, 4, 5].map((c) => ({
