@@ -202,12 +202,6 @@
     </div>
 
     <div id="hnrp-map"></div>
-
-    <h3 class="hnrp-h">Severity vs targeted, per admin 1</h3>
-    <div id="hnrp-scatter-wrap">
-      <svg id="hnrp-scatter"></svg>
-      <div id="hnrp-tip" hidden></div>
-    </div>
     <div id="hnrp-scatter-legend">
       <span data-hl="drought_vsev"><i style="background:#7f5619"></i> Strongly below normal</span>
       <span data-hl="drought_sev"><i style="background:#dda555"></i> Below normal</span>
@@ -216,13 +210,21 @@
       <span data-hl="flood_vsev"><i style="background:#134ead"></i> Strongly above</span>
       <span data-hl="off_season"><i style="background:#b1c1c2"></i> Outside rainy season</span>
       <span data-hl="skill_mod" id="hnrp-skill-legend"><i class="hatched"></i> hatched = moderate skill (solid = high)</span>
-      <span>bubble area = admin population (largest analysed base)</span>
       <span id="hnrp-outline-legend">map fill = severity class
         <i style="background:#cdfacd"></i><i style="background:#fae61e"></i><i
         style="background:#e67800"></i><i style="background:#c80000"></i><i
         style="background:#640000"></i> 1→5; outline = forecast category
         (lowest level only)</span>
     </div>
+
+    <h3 class="hnrp-h">Severity vs targeted, per admin 1</h3>
+    <div id="hnrp-scatter-wrap">
+      <svg id="hnrp-scatter"></svg>
+      <div id="hnrp-tip" hidden></div>
+    </div>
+    <div id="hnrp-scatter-note" class="lock-note">Bubble area = admin population
+      (largest analysed base); colours and hover-highlighting as in the map legend
+      above.</div>
 
     <div id="hnrp-bars-wrap" hidden>
       <div id="hnrp-bars-head">
@@ -539,6 +541,6 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260803c"></script>
+  <script src="hnrp.js?v=20260803d"></script>
 </body>
 </html>
