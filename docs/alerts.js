@@ -47,7 +47,16 @@
   // Worst signal per country × hazard under the CURRENT skill/severity filters
   // (the filters change which cells qualify, so "worst" must be recomputed —
   // under high-skill-only a country's best may fall to a weaker-severity cell).
-  // "Worst" ranks severity band, then skill band, then raw return period.
+  // "Worst" ranks severity band, then skill band; among ties a season still
+  // ahead beats one already in progress (in-season trimesters are shown only
+  // when nothing else qualifies at that tier), then raw return period.
+  function beats(a, b) {
+    if (a.sev !== b.sev) return a.sev > b.sev;
+    if (a.skill !== b.skill) return a.skill > b.skill;
+    const af = a.lead >= 0, bf = b.lead >= 0;
+    if (af !== bf) return af;
+    return a.rp > b.rp;
+  }
   function bestSignals() {
     const rMin = skillSel.value === "high" ? TH.r_high : TH.r_mod;
     const highOnly = sevSel.value === "high";
@@ -63,10 +72,7 @@
                        rp: t.rp ?? 0, r: t.r, tri, lead: t.lead, unit: r.name };
         const k = r.country + "|" + hazard;
         const cur = best.get(k);
-        const better = !cur || cand.sev > cur.sev
-          || (cand.sev === cur.sev && (cand.skill > cur.skill
-              || (cand.skill === cur.skill && cand.rp > cur.rp)));
-        if (better) best.set(k, cand);
+        if (!cur || beats(cand, cur)) best.set(k, cand);
       }
     }
     return best;
