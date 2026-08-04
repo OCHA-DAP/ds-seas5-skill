@@ -22,6 +22,8 @@
     <button class="tab" data-tab="skill">Skill by country</button>
     <!-- Unlisted for now: reachable only via the #hnrp hash link -->
     <button class="tab" data-tab="hnrp" hidden>Forecast × HNRP</button>
+    <!-- Unlisted for now: reachable only via the #alerts hash link -->
+    <button class="tab" data-tab="alerts" hidden>Country alerts</button>
     <button class="tab" data-tab="methods">Methodology</button>
   </nav>
 
@@ -372,6 +374,26 @@
     </details>
   </section>
 
+  <section id="tab-alerts" class="tab-panel" hidden>
+    <h3 class="hnrp-h" id="alerts-title">Country alerts — loading…</h3>
+    <table id="alerts-table">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+    <p class="note">
+      One line per country and hazard: the <strong>worst</strong> SEAS5 signal across all
+      valid rainy-season trimesters — including seasons already in progress — over the
+      country's admin-1 units (skill r&nbsp;≥&nbsp;0.30). Severity High = return period
+      ≥&nbsp;10&nbsp;yr, Moderate = 3–10&nbsp;yr; forecast skill High means r&nbsp;≥&nbsp;0.50.
+      Hover a severity cell for the trimester, return period, and the admin-1 unit behind it.
+      PiN is the HNRP intersectoral People in Need summed over the plan's admin-1 analysis;
+      a "–" means the country has IPC coverage here but no HNRP admin-level PiN. The
+      population share is computed over the admin-1 units that carry both a PiN and a
+      population figure (population is missing for some units), so partial-coverage plans
+      (e.g. Nigeria) are relative to the analysed area only.
+    </p>
+  </section>
+
   <section id="tab-methods" class="tab-panel" hidden>
     <div class="prose">
       <h2>How the forecast alerts are calculated</h2>
@@ -507,5 +529,6 @@
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
   <script src="hnrp.js?v=20260803u"></script>
+  <script src="alerts.js?v=20260804a"></script>
 </body>
 </html>
