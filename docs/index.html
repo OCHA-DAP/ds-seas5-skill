@@ -416,14 +416,16 @@
     <p id="alerts-star-note" class="lock-note">* also has a qualifying signal in the opposite
       direction (under the current skill/severity filters).</p>
     <p class="note">
-      One line per country and direction: the <strong>worst</strong> SEAS5 signal across all
-      valid trimesters — rainy-season ones by default (untick "Include only rainy season"
-      to scan the rest too), including seasons already in progress — over the
-      country's admin-1 units. When several trimesters tie on severity and skill, a season
+      One line per country and direction: the <strong>worst</strong> SEAS5 signal among the
+      <strong>country-level</strong> trimester stats — the same numbers as the Map tab's
+      country view (the percentile of the country-mean rainfall; subnational extremes that
+      wash out of the national average do not set a row here). Rainy-season trimesters by
+      default (untick "Include only rainy season" to scan the rest too), including seasons
+      already in progress. When several trimesters tie on severity and skill, a season
       still ahead is shown in preference to one already in progress. Strongly above/below normal = return period
       ≥&nbsp;10&nbsp;yr; above/below normal = 3–10&nbsp;yr. Forecast skill High means
       r&nbsp;≥&nbsp;0.50, Moderate 0.30–0.50. Hover a severity cell for the return period
-      and the admin-1 unit behind it.
+      and correlation behind it.
       PiN and the population share are the country plan's <strong>headline</strong> figures
       from the HPC API — the same numbers behind humanitarianaction.info's GHO dashboard —
       using each country's latest released HNRP (2026 for most; a small year mark flags
@@ -568,6 +570,6 @@
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
   <script src="hnrp.js?v=20260804d"></script>
-  <script src="alerts.js?v=20260804f"></script>
+  <script src="alerts.js?v=20260804g"></script>
 </body>
 </html>

@@ -1,27 +1,41 @@
 // Country alerts tab (#alerts, unlisted): one summary line per country × hazard —
-// the worst SEAS5 signal across ALL valid rainy-season trimesters (in-season
-// included) over the country's admin-1 units, with the country's HNRP PiN for
-// scale. Pure table, no map; reads the same adm1 payload as the HNRP tab.
+// the worst SEAS5 signal among the COUNTRY-LEVEL trimesters (data/forecast.json,
+// the exact stats behind the Map tab's country view — NOT aggregated from admin
+// units, which flags a country on one extreme state), with the country's HNRP
+// plan-headline PiN for scale. Pure table, no map.
 (async function () {
-  let data, planCl;
+  let fc, planCl, world;
   try {
-    [data, planCl] = await Promise.all([
-      fetch("data/hnrp_drought.json", { cache: "no-cache" })
+    [fc, planCl, world] = await Promise.all([
+      fetch("data/forecast.json", { cache: "no-cache" })
         .then((r) => (r.ok ? r.json() : Promise.reject(r))),
       // Country PiN comes from the HPC plan HEADLINES (export_plan_caseloads.py):
       // the admin-level mirror lags the plan cycle (2025 while 2026 plans are
-      // out), so summed admin PiN is a year stale. Optional — the table falls
-      // back to the mirror sums if this file is missing.
+      // out). Optional — PiN shows "–" if this file is missing.
       fetch("data/plan_caseloads.json", { cache: "no-cache" })
         .then((r) => (r.ok ? r.json() : { plans: {} }))
         .then((d) => d.plans ?? {})
         .catch(() => ({})),
+      fetch("data/countries.geojson") // fallback display names for non-HNRP countries
+        .then((r) => (r.ok ? r.json() : { features: [] }))
+        .catch(() => ({ features: [] })),
     ]);
   } catch {
-    return; // payload not built yet — leave the tab empty
+    return; // data files not built yet — leave the tab empty
   }
-  const TH = data.thresholds; // don't lean on app.js's global T (set async from index.json)
+  const TH = fc.thresholds;
   const vsevM = 100 / TH.vsev_rp, sevM = 100 / TH.sev_rp;
+  const geoName = new Map(world.features.map((f) => [f.properties.iso3, f.properties.name]));
+  const nameOf = (iso3) => planCl[iso3]?.plan_name ?? geoName.get(iso3) ?? iso3;
+
+  // Signed lead from the issue month (matches src/skill.py trimester_lead):
+  // MJJ issued July -> -2 (in season), JAS -> 0, NDJ -> 4.
+  const TRI_START = { JFM: 1, FMA: 2, MAM: 3, AMJ: 4, MJJ: 5, JJA: 6,
+                      JAS: 7, ASO: 8, SON: 9, OND: 10, NDJ: 11, DJF: 12 };
+  const leadOf = (tri) => {
+    const o = (TRI_START[tri] - fc.issued_month + 12) % 12;
+    return o >= 10 ? o - 12 : o;
+  };
 
   const skillSel = document.getElementById("alerts-skill");
   const sevSel = document.getElementById("alerts-sev");
@@ -30,24 +44,9 @@
   const rainyChk = document.getElementById("alerts-rainy");
   const hnrpChk = document.getElementById("alerts-hnrp");
 
-  // Country PiN/population, summed over adm1 units, computed once. pin = full
-  // PiN sum; the % denominator is coverage-matched (units carrying BOTH pin and
-  // pop) — population is missing for many adm1 units (Somalia has it on 6 of
-  // 18), and an all-units ratio overstates wildly (147% of pop).
-  const agg = new Map();
-  for (const r of data.rows) {
-    const a = agg.get(r.country) ?? { iso3: r.iso3, pin: null, pairPin: 0, pairPop: 0 };
-    if (r.pin != null) a.pin = (a.pin ?? 0) + r.pin;
-    if (r.pin != null && r.pop != null) { a.pairPin += r.pin; a.pairPop += r.pop; }
-    agg.set(r.country, a);
-  }
-  // Latest plan year across the headline caseloads: rows on an OLDER plan get a
-  // visible year mark so mixed vintages are never silent.
-  const latestPlanYr = Math.max(0, ...Object.values(planCl).map((c) => c.plan_year));
-
-  // Worst signal per country × hazard under the CURRENT skill/severity filters
-  // (the filters change which cells qualify, so "worst" must be recomputed —
-  // under high-skill-only a country's best may fall to a weaker-severity cell).
+  // Worst signal per country × hazard under the CURRENT filters (the filters
+  // change which trimesters qualify, so "worst" must be recomputed — under
+  // high-skill-only a country's best may fall to a weaker-severity trimester).
   // "Worst" ranks severity band, then skill band; among ties a season still
   // ahead beats one already in progress (in-season trimesters are shown only
   // when nothing else qualifies at that tier), then raw return period.
@@ -61,9 +60,9 @@
   function bestSignals() {
     const rMin = skillSel.value === "high" ? TH.r_high : TH.r_mod;
     const highOnly = sevSel.value === "high";
-    const best = new Map(); // "country|hazard" -> candidate
-    for (const r of data.rows) {
-      for (const [tri, t] of Object.entries(r.tris ?? {})) {
+    const best = new Map(); // "iso3|hazard" -> candidate
+    for (const [iso3, tris] of Object.entries(fc.data)) {
+      for (const [tri, t] of Object.entries(tris)) {
         if (t.pct == null || t.r == null || t.r < rMin) continue;
         if (rainyChk.checked && !t.rainy) continue;
         const high = t.pct <= vsevM || t.pct >= 100 - vsevM;
@@ -71,8 +70,8 @@
         if (!high && (highOnly || !modr)) continue;
         const hazard = t.pct < 50 ? "drought" : "flood";
         const cand = { sev: high ? 2 : 1, skill: t.r >= TH.r_high ? 2 : 1,
-                       rp: t.rp ?? 0, r: t.r, tri, lead: t.lead, unit: r.name };
-        const k = r.country + "|" + hazard;
+                       rp: t.rp ?? 0, r: t.r, tri, lead: leadOf(tri) };
+        const k = iso3 + "|" + hazard;
         const cur = best.get(k);
         if (!cur || beats(cand, cur)) best.set(k, cand);
       }
@@ -90,9 +89,13 @@
   const fmtN = (v) => (v == null ? "–" : Math.round(v).toLocaleString("en-US"));
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
+  // Latest plan year across the headline caseloads: rows on an OLDER plan get a
+  // visible year mark so mixed vintages are never silent.
+  const latestPlanYr = Math.max(0, ...Object.values(planCl).map((c) => c.plan_year));
+
   document.getElementById("alerts-title").textContent =
-    `SEAS5 precipitation alerts — forecast issued ${data.issued_label}, ` +
-    `worst signal per country (in-season included)`;
+    `SEAS5 precipitation alerts — forecast issued ${fc.issued_label}, ` +
+    `worst country-level signal (in-season included)`;
   const thead = document.querySelector("#alerts-table thead");
   thead.innerHTML = `<tr><th>Country</th><th>Forecast severity</th><th>Valid trimester</th>` +
     `<th>Forecast skill</th><th class="num">PiN</th><th class="num">PiN (% of pop.)</th></tr>`;
@@ -101,37 +104,31 @@
   function render() {
     const best = bestSignals();
     const rows = [...best.entries()].map(([k, c]) => {
-      const [country, hazard] = k.split("|");
+      const [iso3, hazard] = k.split("|");
       // * = the same country ALSO has a qualifying signal in the opposite
       // direction (under the current skill/severity filters, regardless of
       // which direction checkboxes are ticked).
-      const opp = best.has(country + "|" + (hazard === "drought" ? "flood" : "drought"));
-      const a = agg.get(country);
-      const cl = planCl[a.iso3]; // plan headline (latest year) beats the mirror sum
-      return { country, hazard, opp, ...c, ...a, cl, pinShow: cl ? cl.pin : a.pin };
+      const opp = best.has(iso3 + "|" + (hazard === "drought" ? "flood" : "drought"));
+      const cl = planCl[iso3];
+      return { iso3, hazard, opp, ...c, cl, pinShow: cl ? cl.pin : null };
     }).filter((r) =>
       (r.hazard === "drought" ? belowChk.checked : aboveChk.checked)
-      && (!hnrpChk.checked || r.pinShow != null));
+      && (!hnrpChk.checked || r.cl));
     rows.sort((a, b) => b.sev - a.sev || b.skill - a.skill
-      || (b.pinShow ?? -1) - (a.pinShow ?? -1));
+      || (b.pinShow ?? -1) - (a.pinShow ?? -1) || a.iso3.localeCompare(b.iso3));
 
     tbody.innerHTML = "";
     for (const r of rows) {
       const [label, bg, ink] = SEV_CHIP[r.hazard][r.sev];
-      const detail = `RP ${r.rp.toFixed(1)} yr, r ${r.r.toFixed(2)} — worst unit: ${r.unit}`;
-      // % of population: the plan's own headline denominator when we have it;
-      // else the mirror's coverage-matched adm1 ratio.
-      const pct = r.cl && r.cl.pop ? `${((100 * r.cl.pin) / r.cl.pop).toFixed(1)}%`
-        : r.pin != null && r.pairPop ? `${((100 * r.pairPin) / r.pairPop).toFixed(1)}%` : "–";
-      const pinTip = r.cl ? `${r.cl.plan_name} ${r.cl.plan_year} plan headline (HPC API)`
-        : "Sum of admin-1 PiN (mirror)";
+      const detail = `Country-mean forecast percentile ` +
+        `— RP ${r.rp.toFixed(1)} yr, r ${r.r.toFixed(2)}`;
+      const pct = r.cl && r.cl.pop ? `${((100 * r.cl.pin) / r.cl.pop).toFixed(1)}%` : "–";
+      const pinTip = r.cl ? `${r.cl.plan_name} ${r.cl.plan_year} plan headline (HPC API)` : "";
       const yrTag = r.cl && r.cl.plan_year < latestPlanYr
         ? ` <span class="in-season-tag">${r.cl.plan_year}</span>` : "";
-      // "Sudan (the)", "Mali (le)": HPC plan names carry the article — drop it.
-      const cname = r.country.replace(/\s*\((the|la|le|el|los|las)\)$/i, "");
       const tr = document.createElement("tr");
       tr.insertAdjacentHTML("beforeend",
-        `<td>${esc(cname)}${r.opp ? "*" : ""}</td>` +
+        `<td>${esc(nameOf(r.iso3))}${r.opp ? "*" : ""}</td>` +
         `<td><span class="sev-chip" style="background:${bg};color:${ink}" title="${esc(detail)}">` +
         `${label}</span></td>` +
         `<td>${r.tri}${r.lead < 0 ? ` <span class="in-season-tag">in season</span>` : ""}</td>` +
