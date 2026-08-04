@@ -13,13 +13,20 @@ per-admin views keep the mirror's (older) admin PiN until the mirror refreshes
 
 Selection rules, validated against humanitarianaction.info's GHO dashboard
 (plan-level figures reconcile exactly — see the #alerts tab work, Aug 2026):
-- single-country plans only (one distinct adminLevel-0 location);
-- plan category "Humanitarian needs and response plan" or "Humanitarian response
-  plan" — flash appeals (e.g. Mozambique (Drought) 2025) and regional RRP/RMRP/
-  3RP/JRP/MRP plans are NOT the country's headline HNRP;
+- released, GHO, single-country plans (one distinct adminLevel-0 location), any
+  type EXCEPT "Regional response plan" (Uganda (RRP) and Iran (RRP) are single-
+  country but still refugee-response plans, not the country's own plan) — flash
+  appeals and "Other" ARE included (Pakistan, Cuba, Sri Lanka, Viet Nam, OPT
+  appear on the GHO dashboard with only those);
 - headline caseload = the BP1 attachment (else the largest inNeed);
-- per country, the newest plan year wins, but only if its inNeed is non-null —
-  a released plan with no published caseload must not erase last year's figure.
+- per country the best plan wins by (year, plan-type, PiN): the newest year
+  first (only if its inNeed is non-null — a released plan with no published
+  caseload must not erase last year's figure); within a year an HNRP/HRP beats
+  a flash appeal (Mozambique 2025: HNRP vs (Drought)), then the larger caseload
+  (Myanmar 2025: (Original) vs (Earthquake));
+- the scan starts two years back: some GHO countries' latest own plan is old
+  (Ethiopia's last standalone HRP is 2024 — 2025/2026 cover it only via
+  regional plans). The table year-marks anything older than the newest year.
 """
 
 import json
@@ -30,7 +37,7 @@ from datetime import date
 from pathlib import Path
 
 API = "https://api.hpc.tools"
-PLAN_TYPES = {"Humanitarian needs and response plan", "Humanitarian response plan"}
+CORE_TYPES = {"Humanitarian needs and response plan", "Humanitarian response plan"}
 OUT = Path(__file__).parent.parent / "docs" / "data" / "plan_caseloads.json"
 
 
@@ -38,6 +45,19 @@ def get(url):
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.load(r)
+
+
+def to_num(v):
+    """Caseload values are USUALLY numbers, but some plans publish strings."""
+    if isinstance(v, str):
+        v = v.replace(",", "").strip()
+        if not v:
+            return None
+        try:
+            return float(v)
+        except ValueError:
+            return None
+    return v
 
 
 def headline_caseload(plan_id):
@@ -48,7 +68,7 @@ def headline_caseload(plan_id):
             totals = a["attachmentVersion"]["value"]["metrics"]["values"]["totals"]
         except (KeyError, TypeError):
             continue  # disaggregation-only attachment, no plan totals
-        tot = {t["type"]: t["value"] for t in totals}
+        tot = {t["type"]: to_num(t["value"]) for t in totals}
         cls.append((a.get("composedReference", ""), tot))
     if not cls:
         return None
@@ -60,18 +80,18 @@ def headline_caseload(plan_id):
 
 def main():
     this_year = date.today().year
-    out = {}
-    for year in (this_year - 1, this_year, this_year + 1):  # next year's plans appear ~Nov
+    out, ranks = {}, {}
+    for year in range(this_year - 2, this_year + 2):  # next year's plans appear ~Nov
         try:
             plans = get(f"{API}/v1/public/plan/year/{year}")["data"]
         except Exception as e:  # noqa: BLE001 — a missing year must not kill the run
             print(f"  {year}: plan list unavailable ({e})", file=sys.stderr)
             continue
         for p in plans:
-            if not p.get("isReleased"):
+            if not p.get("isReleased") or not p["planVersion"].get("isPartOfGHO"):
                 continue
             cats = {c["name"] for c in p.get("categories", [])}
-            if not cats & PLAN_TYPES:
+            if "Regional response plan" in cats:
                 continue
             iso3s = {l["iso3"] for l in p.get("locations", [])
                      if l.get("adminLevel") == 0 and l.get("iso3")}
@@ -87,11 +107,10 @@ def main():
             time.sleep(0.2)
             if not tot or tot.get("inNeed") is None:
                 continue  # never let an empty newer plan erase an older figure
-            prev = out.get(iso3)
-            # Same-year siblings (Myanmar 2025: (Original) + (Earthquake)): the
-            # country headline is the LARGER caseload, not the last one listed.
-            if prev and prev["plan_year"] == year and prev["pin"] >= tot["inNeed"]:
+            rank = (year, 1 if cats & CORE_TYPES else 0, tot["inNeed"])
+            if iso3 in ranks and ranks[iso3] >= rank:
                 continue
+            ranks[iso3] = rank
             out[iso3] = {
                 "plan_year": year,
                 "plan_name": name,
