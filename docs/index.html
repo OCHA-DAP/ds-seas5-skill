@@ -399,6 +399,10 @@
           Above normal
         </label>
         <label class="toggle">
+          <input type="checkbox" id="alerts-rainy" checked />
+          Include only rainy season
+        </label>
+        <label class="toggle">
           <input type="checkbox" id="alerts-hnrp" checked />
           HNRP countries only
         </label>
@@ -413,7 +417,8 @@
       direction (under the current skill/severity filters).</p>
     <p class="note">
       One line per country and direction: the <strong>worst</strong> SEAS5 signal across all
-      valid rainy-season trimesters — including seasons already in progress — over the
+      valid trimesters — rainy-season ones by default (untick "Include only rainy season"
+      to scan the rest too), including seasons already in progress — over the
       country's admin-1 units. When several trimesters tie on severity and skill, a season
       still ahead is shown in preference to one already in progress. Strongly above/below normal = return period
       ≥&nbsp;10&nbsp;yr; above/below normal = 3–10&nbsp;yr. Forecast skill High means
@@ -563,6 +568,6 @@
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
   <script src="hnrp.js?v=20260804d"></script>
-  <script src="alerts.js?v=20260804e"></script>
+  <script src="alerts.js?v=20260804f"></script>
 </body>
 </html>

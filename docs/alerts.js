@@ -27,6 +27,7 @@
   const sevSel = document.getElementById("alerts-sev");
   const belowChk = document.getElementById("alerts-below");
   const aboveChk = document.getElementById("alerts-above");
+  const rainyChk = document.getElementById("alerts-rainy");
   const hnrpChk = document.getElementById("alerts-hnrp");
 
   // Country PiN/population, summed over adm1 units, computed once. pin = full
@@ -63,7 +64,8 @@
     const best = new Map(); // "country|hazard" -> candidate
     for (const r of data.rows) {
       for (const [tri, t] of Object.entries(r.tris ?? {})) {
-        if (t.pct == null || t.r == null || !t.rainy || t.r < rMin) continue;
+        if (t.pct == null || t.r == null || t.r < rMin) continue;
+        if (rainyChk.checked && !t.rainy) continue;
         const high = t.pct <= vsevM || t.pct >= 100 - vsevM;
         const modr = !high && (t.pct <= sevM || t.pct >= 100 - sevM);
         if (!high && (highOnly || !modr)) continue;
@@ -142,7 +144,7 @@
     document.getElementById("alerts-star-note").hidden = !rows.some((r) => r.opp);
   }
 
-  for (const el of [skillSel, sevSel, belowChk, aboveChk, hnrpChk]) {
+  for (const el of [skillSel, sevSel, belowChk, aboveChk, rainyChk, hnrpChk]) {
     el.addEventListener("change", render);
   }
   render();
