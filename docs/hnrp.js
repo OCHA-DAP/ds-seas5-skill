@@ -60,7 +60,14 @@
     u.hash = "hnrp";
     return u;
   }
-  function syncURL() { history.replaceState(null, "", stateURL().toString()); }
+  function syncURL() {
+    // Only mirror state while the HNRP tab owns the URL. This script runs on
+    // EVERY page load, and stateURL() stamps #hnrp — unconditional mirroring
+    // rewrote the address bar out from under whichever tab was actually open,
+    // so the next hard refresh landed on HNRP instead.
+    if (location.hash.replace("#", "") !== "hnrp") return;
+    history.replaceState(null, "", stateURL().toString());
+  }
   admSel.addEventListener("change", () => { location.href = stateURL().toString(); });
   function restoreControls() {
     const q = new URLSearchParams(location.search);
