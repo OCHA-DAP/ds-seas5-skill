@@ -27,6 +27,9 @@
   const vsevM = 100 / TH.vsev_rp, sevM = 100 / TH.sev_rp;
   const geoName = new Map(world.features.map((f) => [f.properties.iso3, f.properties.name]));
   const nameOf = (iso3) => planCl[iso3]?.plan_name ?? geoName.get(iso3) ?? iso3;
+  // Compact display name: appeal qualifiers ("Viet Nam (Multiple Typhoons
+  // 2025-2026)") blow up row height — the full plan name stays in the tooltip.
+  const dispName = (iso3) => nameOf(iso3).replace(/\s*\(.+\)$/, "");
 
   // Signed lead from the issue month (matches src/skill.py trimester_lead):
   // MJJ issued July -> -2 (in season), JAS -> 0, NDJ -> 4.
@@ -45,12 +48,10 @@
   const hnrpChk = document.getElementById("alerts-hnrp");
   const oldChk = document.getElementById("alerts-old");
 
-  // Worst signal per country × hazard under the CURRENT filters (the filters
-  // change which trimesters qualify, so "worst" must be recomputed — under
-  // high-skill-only a country's best may fall to a weaker-severity trimester).
-  // "Worst" ranks severity band, then skill band; among ties a season still
-  // ahead beats one already in progress (in-season trimesters are shown only
-  // when nothing else qualifies at that tier), then raw return period.
+  // ALL qualifying trimesters per country × hazard under the CURRENT filters,
+  // plus the worst one. "Worst" ranks severity band, then skill band; among
+  // ties a season still ahead beats one already in progress, then raw return
+  // period. The row displays the worst tier and LISTS every trimester in it.
   function beats(a, b) {
     if (a.sev !== b.sev) return a.sev > b.sev;
     if (a.skill !== b.skill) return a.skill > b.skill;
@@ -58,10 +59,10 @@
     if (af !== bf) return af;
     return a.rp > b.rp;
   }
-  function bestSignals() {
+  function qualSignals() {
     const rMin = skillSel.value === "high" ? TH.r_high : TH.r_mod;
     const highOnly = sevSel.value === "high";
-    const best = new Map(); // "iso3|hazard" -> candidate
+    const best = new Map(), all = new Map(); // "iso3|hazard" -> cand / [cands]
     for (const [iso3, tris] of Object.entries(fc.data)) {
       for (const [tri, t] of Object.entries(tris)) {
         if (t.pct == null || t.r == null || t.r < rMin) continue;
@@ -73,11 +74,11 @@
         const cand = { sev: high ? 2 : 1, skill: t.r >= TH.r_high ? 2 : 1,
                        rp: t.rp ?? 0, r: t.r, tri, lead: leadOf(tri) };
         const k = iso3 + "|" + hazard;
-        const cur = best.get(k);
-        if (!cur || beats(cand, cur)) best.set(k, cand);
+        (all.get(k) ?? all.set(k, []).get(k)).push(cand);
+        if (!best.has(k) || beats(cand, best.get(k))) best.set(k, cand);
       }
     }
-    return best;
+    return { best, all };
   }
 
   // Severity chips wear the map's category labels and palette (dark = strong).
@@ -113,13 +114,32 @@
   document.getElementById("alerts-title").textContent =
     `SEAS5 precipitation alerts — forecast issued ${fc.issued_label}, ` +
     `worst country-level signal (in-season included)`;
+
+  // ── Sortable header ──────────────────────────────────────────────────────────
+  // Default order is the alert ranking (severity, skill, PiN); clicking a header
+  // sorts by that column (numeric columns start descending), clicking again flips.
+  const COLS = [
+    ["country", "Country", (r) => r.name, 1],
+    ["sev", "Forecast severity", (r) => r.sev * 4 + r.skill, -1],
+    ["tri", "Valid trimesters", (r) => r.tier[0].lead, 1],
+    ["skill", "Forecast skill", (r) => r.skill * 4 + r.sev, -1],
+    ["pin", "PiN", (r) => r.pinShow ?? -1, -1],
+    ["pct", "PiN (% of pop.)", (r) => r.frac ?? -1, -1],
+  ];
+  let sortKey = null, sortDir = -1;
   const thead = document.querySelector("#alerts-table thead");
-  thead.innerHTML = `<tr><th>Country</th><th>Forecast severity</th><th>Valid trimester</th>` +
-    `<th>Forecast skill</th><th class="num">PiN</th><th class="num">PiN (% of pop.)</th></tr>`;
+  thead.innerHTML = `<tr>${COLS.map(([k, label]) =>
+    `<th data-key="${k}" class="${k === "pin" || k === "pct" ? "num" : ""}">${label}</th>`).join("")}</tr>`;
+  thead.querySelectorAll("th").forEach((th) => th.addEventListener("click", () => {
+    const k = th.dataset.key;
+    if (sortKey === k) sortDir = -sortDir;
+    else { sortKey = k; sortDir = COLS.find((c) => c[0] === k)[3]; }
+    render();
+  }));
   const tbody = document.querySelector("#alerts-table tbody");
 
   function render() {
-    const best = bestSignals();
+    const { best, all } = qualSignals();
     const rows = [...best.entries()].map(([k, c]) => {
       const [iso3, hazard] = k.split("|");
       // * = the same country ALSO has a qualifying signal in the opposite
@@ -129,35 +149,53 @@
       let cl = planCl[iso3];
       // Older-than-last-cycle plans don't count as "having a plan" unless opted in.
       if (cl && cl.plan_year < latestPlanYr - 1 && !oldChk.checked) cl = undefined;
-      return { iso3, hazard, opp, ...c, cl, pinShow: cl ? cl.pin : null };
+      // Every qualifying trimester in the row's tier, chronological.
+      const tier = all.get(k).filter((x) => x.sev === c.sev && x.skill === c.skill)
+        .sort((a, b) => a.lead - b.lead);
+      return { iso3, hazard, opp, ...c, cl, tier, name: dispName(iso3),
+               pinShow: cl ? cl.pin : null, frac: cl && cl.pop ? cl.pin / cl.pop : null };
     }).filter((r) =>
       (r.hazard === "drought" ? belowChk.checked : aboveChk.checked)
       && (!hnrpChk.checked || r.cl));
-    rows.sort((a, b) => b.sev - a.sev || b.skill - a.skill
-      || (b.pinShow ?? -1) - (a.pinShow ?? -1) || a.iso3.localeCompare(b.iso3));
+
+    const byDefault = (a, b) => b.sev - a.sev || b.skill - a.skill
+      || (b.pinShow ?? -1) - (a.pinShow ?? -1) || a.iso3.localeCompare(b.iso3);
+    if (sortKey) {
+      const val = COLS.find((c) => c[0] === sortKey)[2];
+      rows.sort((a, b) => {
+        const va = val(a), vb = val(b);
+        const d = typeof va === "string" ? va.localeCompare(vb) : va - vb;
+        return d ? d * sortDir : byDefault(a, b);
+      });
+    } else rows.sort(byDefault);
+    thead.querySelectorAll("th").forEach((th) => {
+      const on = th.dataset.key === sortKey;
+      th.classList.toggle("sorted", on);
+      th.textContent = COLS.find((c) => c[0] === th.dataset.key)[1]
+        + (on ? (sortDir > 0 ? " ▲" : " ▼") : "");
+    });
 
     tbody.innerHTML = "";
     const maxPin = Math.max(1, ...rows.map((r) => r.pinShow ?? 0)); // bar scale
     for (const r of rows) {
       const [label, bg, ink] = SEV_CHIP[r.hazard][r.sev];
-      const detail = `Country-mean forecast percentile ` +
-        `— RP ${r.rp.toFixed(1)} yr, r ${r.r.toFixed(2)}`;
-      const frac = r.cl && r.cl.pop ? r.cl.pin / r.cl.pop : null;
+      const tris = r.tier.map((t) =>
+        `<span class="tri-code${t.lead < 0 ? " tri-ongoing" : ""}" title="${esc(
+          `${t.lead < 0 ? "in season — " : ""}RP ${t.rp.toFixed(1)} yr, r ${t.r.toFixed(2)}`)}">${t.tri}</span>`).join(" ");
       const pinTip = r.cl
         ? `${fmtN(r.cl.pin)} — ${r.cl.plan_name} ${r.cl.plan_year} plan headline (HPC API)` : "";
       const yrTag = r.cl && r.cl.plan_year < latestPlanYr
         ? ` <span class="in-season-tag">${r.cl.plan_year}</span>` : "";
       const tr = document.createElement("tr");
       tr.insertAdjacentHTML("beforeend",
-        `<td>${esc(nameOf(r.iso3))}${r.opp ? "*" : ""}</td>` +
-        `<td><span class="sev-chip" style="background:${bg};color:${ink}" title="${esc(detail)}">` +
-        `${label}</span></td>` +
-        `<td>${r.tri}${r.lead < 0 ? ` <span class="in-season-tag">in season</span>` : ""}</td>` +
+        `<td class="cname" title="${esc(nameOf(r.iso3))}">${esc(r.name)}${r.opp ? "*" : ""}</td>` +
+        `<td><span class="sev-chip" style="background:${bg};color:${ink}">${label}</span></td>` +
+        `<td class="tris">${tris}</td>` +
         `<td class="${r.skill === 2 ? "skill-hi" : "skill-mod"}">${r.skill === 2 ? "High" : "Moderate"}</td>` +
         (r.pinShow == null ? `<td class="num">–</td>`
           : barCell(r.pinShow / maxPin, fmtM(r.pinShow) + yrTag, "#418fde", pinTip)) +
-        (frac == null ? `<td class="num">–</td>`
-          : barCell(frac, `${(100 * frac).toFixed(1)}%`, "#ef7a93")));
+        (r.frac == null ? `<td class="num">–</td>`
+          : barCell(r.frac, `${(100 * r.frac).toFixed(1)}%`, "#ef7a93")));
       tbody.appendChild(tr);
     }
     document.getElementById("alerts-empty").hidden = rows.length > 0;

@@ -425,11 +425,12 @@
       country view (the percentile of the country-mean rainfall; subnational extremes that
       wash out of the national average do not set a row here). Rainy-season trimesters by
       default (untick "Include only rainy season" to scan the rest too), including seasons
-      already in progress. When several trimesters tie on severity and skill, a season
-      still ahead is shown in preference to one already in progress. Strongly above/below normal = return period
+      already in progress. The trimester column lists <em>every</em> season at the row's
+      severity and skill level, chronologically; <span style="color:#9db1b3">pale codes</span>
+      are seasons already in progress. Strongly above/below normal = return period
       ≥&nbsp;10&nbsp;yr; above/below normal = 3–10&nbsp;yr. Forecast skill High means
-      r&nbsp;≥&nbsp;0.50, Moderate 0.30–0.50. Hover a severity cell for the return period
-      and correlation behind it.
+      r&nbsp;≥&nbsp;0.50, Moderate 0.30–0.50. Hover a trimester code for the return period
+      and correlation behind it; click a column header to sort.
       PiN and the population share are the country plan's <strong>headline</strong> figures
       from the HPC API — the same numbers behind humanitarianaction.info's GHO dashboard —
       using each country's latest released HNRP (2026 for most; a small year mark flags
@@ -576,6 +577,6 @@
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
   <script src="hnrp.js?v=20260804d"></script>
-  <script src="alerts.js?v=20260804h"></script>
+  <script src="alerts.js?v=20260804i"></script>
 </body>
 </html>
