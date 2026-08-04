@@ -3,10 +3,20 @@
 // included) over the country's admin-1 units, with the country's HNRP PiN for
 // scale. Pure table, no map; reads the same adm1 payload as the HNRP tab.
 (async function () {
-  let data;
+  let data, planCl;
   try {
-    data = await fetch("data/hnrp_drought.json", { cache: "no-cache" })
-      .then((r) => (r.ok ? r.json() : Promise.reject(r)));
+    [data, planCl] = await Promise.all([
+      fetch("data/hnrp_drought.json", { cache: "no-cache" })
+        .then((r) => (r.ok ? r.json() : Promise.reject(r))),
+      // Country PiN comes from the HPC plan HEADLINES (export_plan_caseloads.py):
+      // the admin-level mirror lags the plan cycle (2025 while 2026 plans are
+      // out), so summed admin PiN is a year stale. Optional — the table falls
+      // back to the mirror sums if this file is missing.
+      fetch("data/plan_caseloads.json", { cache: "no-cache" })
+        .then((r) => (r.ok ? r.json() : { plans: {} }))
+        .then((d) => d.plans ?? {})
+        .catch(() => ({})),
+    ]);
   } catch {
     return; // payload not built yet — leave the tab empty
   }
@@ -25,11 +35,14 @@
   // 18), and an all-units ratio overstates wildly (147% of pop).
   const agg = new Map();
   for (const r of data.rows) {
-    const a = agg.get(r.country) ?? { pin: null, pairPin: 0, pairPop: 0 };
+    const a = agg.get(r.country) ?? { iso3: r.iso3, pin: null, pairPin: 0, pairPop: 0 };
     if (r.pin != null) a.pin = (a.pin ?? 0) + r.pin;
     if (r.pin != null && r.pop != null) { a.pairPin += r.pin; a.pairPop += r.pop; }
     agg.set(r.country, a);
   }
+  // Latest plan year across the headline caseloads: rows on an OLDER plan get a
+  // visible year mark so mixed vintages are never silent.
+  const latestPlanYr = Math.max(0, ...Object.values(planCl).map((c) => c.plan_year));
 
   // Worst signal per country × hazard under the CURRENT skill/severity filters
   // (the filters change which cells qualify, so "worst" must be recomputed —
@@ -85,17 +98,27 @@
       // direction (under the current skill/severity filters, regardless of
       // which direction checkboxes are ticked).
       const opp = best.has(country + "|" + (hazard === "drought" ? "flood" : "drought"));
-      return { country, hazard, opp, ...c, ...agg.get(country) };
+      const a = agg.get(country);
+      const cl = planCl[a.iso3]; // plan headline (latest year) beats the mirror sum
+      return { country, hazard, opp, ...c, ...a, cl, pinShow: cl ? cl.pin : a.pin };
     }).filter((r) =>
       (r.hazard === "drought" ? belowChk.checked : aboveChk.checked)
-      && (!hnrpChk.checked || r.pin != null));
-    rows.sort((a, b) => b.sev - a.sev || b.skill - a.skill || (b.pin ?? -1) - (a.pin ?? -1));
+      && (!hnrpChk.checked || r.pinShow != null));
+    rows.sort((a, b) => b.sev - a.sev || b.skill - a.skill
+      || (b.pinShow ?? -1) - (a.pinShow ?? -1));
 
     tbody.innerHTML = "";
     for (const r of rows) {
       const [label, bg, ink] = SEV_CHIP[r.hazard][r.sev];
       const detail = `RP ${r.rp.toFixed(1)} yr, r ${r.r.toFixed(2)} — worst unit: ${r.unit}`;
-      const pct = r.pin != null && r.pairPop ? `${((100 * r.pairPin) / r.pairPop).toFixed(1)}%` : "–";
+      // % of population: the plan's own headline denominator when we have it;
+      // else the mirror's coverage-matched adm1 ratio.
+      const pct = r.cl && r.cl.pop ? `${((100 * r.cl.pin) / r.cl.pop).toFixed(1)}%`
+        : r.pin != null && r.pairPop ? `${((100 * r.pairPin) / r.pairPop).toFixed(1)}%` : "–";
+      const pinTip = r.cl ? `${r.cl.plan_name} ${r.cl.plan_year} plan headline (HPC API)`
+        : "Sum of admin-1 PiN (mirror)";
+      const yrTag = r.cl && r.cl.plan_year < latestPlanYr
+        ? ` <span class="in-season-tag">${r.cl.plan_year}</span>` : "";
       // "Sudan (the)", "Mali (le)": HPC plan names carry the article — drop it.
       const cname = r.country.replace(/\s*\((the|la|le|el|los|las)\)$/i, "");
       const tr = document.createElement("tr");
@@ -105,7 +128,7 @@
         `${label}</span></td>` +
         `<td>${r.tri}${r.lead < 0 ? ` <span class="in-season-tag">in season</span>` : ""}</td>` +
         `<td class="${r.skill === 2 ? "skill-hi" : "skill-mod"}">${r.skill === 2 ? "High" : "Moderate"}</td>` +
-        `<td class="num">${fmtN(r.pin)}</td>` +
+        `<td class="num" title="${esc(pinTip)}">${fmtN(r.pinShow)}${yrTag}</td>` +
         `<td class="num">${pct}</td>`);
       tbody.appendChild(tr);
     }

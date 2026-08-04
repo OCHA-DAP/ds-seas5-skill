@@ -87,6 +87,11 @@ jobs:
       - name: Combine per-country lowest-level view (hnrp_drought_low.json)
         run: uv run python pipeline/export_hnrp_drought.py --level low
 
+      # Country-level plan headline caseloads straight from the public HPC API —
+      # the admin-level mirror lags the plan cycle, this does not.
+      - name: Export plan headline caseloads (plan_caseloads.json)
+        run: uv run python pipeline/export_plan_caseloads.py
+
       - name: Commit updated data
         run: |
           git config user.name "github-actions[bot]"
