@@ -104,7 +104,7 @@
 
   // Latest plan year across the headline caseloads: rows on an OLDER plan get a
   // visible year mark so mixed vintages are never silent. Plans older than the
-  // previous cycle (e.g. Ethiopia's 2024 HRP) are hidden entirely unless the
+  // current cycle (2025 HNRPs, Ethiopia's 2024 HRP) are hidden entirely unless the
   // "include older plans" box is ticked.
   const latestPlanYr = Math.max(0, ...Object.values(planCl).map((c) => c.plan_year));
   const oldestPlanYr = Math.min(latestPlanYr, ...Object.values(planCl).map((c) => c.plan_year));
@@ -147,8 +147,10 @@
       // which direction checkboxes are ticked).
       const opp = best.has(iso3 + "|" + (hazard === "drought" ? "flood" : "drought"));
       let cl = planCl[iso3];
-      // Older-than-last-cycle plans don't count as "having a plan" unless opted in.
-      if (cl && cl.plan_year < latestPlanYr - 1 && !oldChk.checked) cl = undefined;
+      // Only CURRENT-cycle plans count as "having a plan" unless opted in —
+      // ticking the box brings in every older vintage (2025 HNRPs, Ethiopia's
+      // 2024 HRP), each year-marked.
+      if (cl && cl.plan_year < latestPlanYr && !oldChk.checked) cl = undefined;
       // Every qualifying trimester in the row's tier, chronological.
       const tier = all.get(k).filter((x) => x.sev === c.sev && x.skill === c.skill)
         .sort((a, b) => a.lead - b.lead);
