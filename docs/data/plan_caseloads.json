@@ -1,0 +1,292 @@
+{
+ "generated": "2026-08-04",
+ "plans": {
+  "PSE": {
+   "plan_year": 2026,
+   "plan_name": "Occupied Palestinian Territory",
+   "pin": 3618110,
+   "target": 2970096,
+   "pop": 5564858
+  },
+  "VEN": {
+   "plan_year": 2026,
+   "plan_name": "Venezuela",
+   "pin": 7943720,
+   "target": 6200000,
+   "pop": 28500000
+  },
+  "SSD": {
+   "plan_year": 2026,
+   "plan_name": "South Sudan",
+   "pin": 9913863,
+   "target": 4343435,
+   "pop": 14363363
+  },
+  "CMR": {
+   "plan_year": 2026,
+   "plan_name": "Cameroon",
+   "pin": 2875515,
+   "target": 1880879,
+   "pop": 29900000
+  },
+  "MMR": {
+   "plan_year": 2026,
+   "plan_name": "Myanmar",
+   "pin": 16229050,
+   "target": 4868096,
+   "pop": 54900000
+  },
+  "CAF": {
+   "plan_year": 2026,
+   "plan_name": "Central African Republic",
+   "pin": 2286959,
+   "target": 1265483,
+   "pop": 6567382
+  },
+  "SLV": {
+   "plan_year": 2025,
+   "plan_name": "El Salvador",
+   "pin": 818700,
+   "target": 407500,
+   "pop": 6400000
+  },
+  "GTM": {
+   "plan_year": 2025,
+   "plan_name": "Guatemala",
+   "pin": 2163953,
+   "target": 1000000,
+   "pop": 18400000
+  },
+  "HND": {
+   "plan_year": 2025,
+   "plan_name": "Honduras",
+   "pin": 1640224,
+   "target": 796974,
+   "pop": 10800000
+  },
+  "SYR": {
+   "plan_year": 2026,
+   "plan_name": "Syrian Arab Republic",
+   "pin": 15598267,
+   "target": 8561766,
+   "pop": 25600000
+  },
+  "UKR": {
+   "plan_year": 2026,
+   "plan_name": "Ukraine",
+   "pin": 10849697,
+   "target": 4118954,
+   "pop": 34200000
+  },
+  "HTI": {
+   "plan_year": 2026,
+   "plan_name": "Haiti",
+   "pin": 6414193,
+   "target": 4162202,
+   "pop": 11899555
+  },
+  "BFA": {
+   "plan_year": 2026,
+   "plan_name": "Burkina Faso",
+   "pin": 4474321,
+   "target": 2651923,
+   "pop": 24100000
+  },
+  "SOM": {
+   "plan_year": 2026,
+   "plan_name": "Somalia",
+   "pin": 4796040,
+   "target": 2430751,
+   "pop": 19700000
+  },
+  "COL": {
+   "plan_year": 2026,
+   "plan_name": "Colombia",
+   "pin": 6927007,
+   "target": 2656763,
+   "pop": 53400000
+  },
+  "MOZ": {
+   "plan_year": 2026,
+   "plan_name": "Mozambique",
+   "pin": 2356162,
+   "target": 1745582,
+   "pop": 35600000
+  },
+  "AFG": {
+   "plan_year": 2026,
+   "plan_name": "Afghanistan",
+   "pin": 21889283,
+   "target": 17479657,
+   "pop": 48595632
+  },
+  "COD": {
+   "plan_year": 2026,
+   "plan_name": "Democratic Republic of the Congo",
+   "pin": 18488689,
+   "target": 10735805,
+   "pop": 112800000
+  },
+  "SDN": {
+   "plan_year": 2026,
+   "plan_name": "Sudan",
+   "pin": 33699770,
+   "target": 20419163,
+   "pop": 47500000
+  },
+  "NER": {
+   "plan_year": 2026,
+   "plan_name": "Niger",
+   "pin": 3081200,
+   "target": 1983640,
+   "pop": 27900000
+  },
+  "NGA": {
+   "plan_year": 2026,
+   "plan_name": "Nigeria",
+   "pin": 5929291,
+   "target": 2527178,
+   "pop": 237500000
+  },
+  "MDG": {
+   "plan_year": 2026,
+   "plan_name": "Madagascar",
+   "pin": 632461,
+   "target": 454975,
+   "pop": 33522052
+  },
+  "TCD": {
+   "plan_year": 2026,
+   "plan_name": "Chad",
+   "pin": 4509014,
+   "target": 3352810,
+   "pop": 21000000
+  },
+  "YEM": {
+   "plan_year": 2026,
+   "plan_name": "Yemen",
+   "pin": 22325198,
+   "target": 12004155,
+   "pop": 41800000
+  },
+  "MLI": {
+   "plan_year": 2026,
+   "plan_name": "Mali",
+   "pin": 5083155,
+   "target": 3808385,
+   "pop": 25200000
+  },
+  "ETH": {
+   "plan_year": 2024,
+   "plan_name": "Ethiopia",
+   "pin": 21360484,
+   "target": 15467955,
+   "pop": 126500000
+  },
+  "LBY": {
+   "plan_year": 2024,
+   "plan_name": "Libya",
+   "pin": 250000,
+   "target": 250000,
+   "pop": 6900000
+  },
+  "ZMB": {
+   "plan_year": 2025,
+   "plan_name": "Zambia",
+   "pin": 5471773,
+   "target": 3280157,
+   "pop": 21100000
+  },
+  "ZWE": {
+   "plan_year": 2025,
+   "plan_name": "Zimbabwe",
+   "pin": 7611301,
+   "target": 3063939,
+   "pop": 17000000
+  },
+  "BDI": {
+   "plan_year": 2024,
+   "plan_name": "Burundi",
+   "pin": 614874,
+   "target": 306000,
+   "pop": 13600000
+  },
+  "BGD": {
+   "plan_year": 2025,
+   "plan_name": "Bangladesh",
+   "pin": 1838513,
+   "target": 942413,
+   "pop": 174700000
+  },
+  "GRD": {
+   "plan_year": 2024,
+   "plan_name": "Grenada",
+   "pin": 34000,
+   "target": 40644,
+   "pop": 100000
+  },
+  "VCT": {
+   "plan_year": 2024,
+   "plan_name": "Saint Vincent and The Grenadines",
+   "pin": 25000,
+   "target": 16000,
+   "pop": 100000
+  },
+  "MWI": {
+   "plan_year": 2025,
+   "plan_name": "Malawi",
+   "pin": 6124766,
+   "target": 3837209,
+   "pop": 21500000
+  },
+  "VNM": {
+   "plan_year": 2026,
+   "plan_name": "Viet Nam (Multiple Typhoons 2025-2026)",
+   "pin": 1443903,
+   "target": 658761,
+   "pop": 101344000
+  },
+  "LBN": {
+   "plan_year": 2026,
+   "plan_name": "Lebanon",
+   "pin": 1390000,
+   "target": 1390000,
+   "pop": null
+  },
+  "NPL": {
+   "plan_year": 2024,
+   "plan_name": "Nepal",
+   "pin": 192000,
+   "target": 192000,
+   "pop": 31200000
+  },
+  "PHL": {
+   "plan_year": 2025,
+   "plan_name": "Philippines",
+   "pin": 2600000,
+   "target": 535000,
+   "pop": 119100000
+  },
+  "PAK": {
+   "plan_year": 2026,
+   "plan_name": "Pakistan",
+   "pin": 2800000,
+   "target": 1900000,
+   "pop": 249336000
+  },
+  "CUB": {
+   "plan_year": 2026,
+   "plan_name": "Cuba",
+   "pin": 4200000,
+   "target": 2000000,
+   "pop": 11309345
+  },
+  "LKA": {
+   "plan_year": 2026,
+   "plan_name": "Sri Lanka",
+   "pin": 1200000,
+   "target": 658370,
+   "pop": 23200000
+  }
+ }
+}

@@ -54,12 +54,20 @@
     for (const [k, id] of Object.entries(CTLS)) {
       const el = document.getElementById(id);
       if (el && el.value) u.searchParams.set(k, el.value);
+      else u.searchParams.delete(k); // deselected (e.g. country "") must clear too
     }
     u.searchParams.set("dro", document.getElementById("hnrp-drought-only").checked ? "1" : "0");
     u.hash = "hnrp";
     return u;
   }
-  function syncURL() { history.replaceState(null, "", stateURL().toString()); }
+  function syncURL() {
+    // Only mirror state while the HNRP tab owns the URL. This script runs on
+    // EVERY page load, and stateURL() stamps #hnrp — unconditional mirroring
+    // rewrote the address bar out from under whichever tab was actually open,
+    // so the next hard refresh landed on HNRP instead.
+    if (location.hash.replace("#", "") !== "hnrp") return;
+    history.replaceState(null, "", stateURL().toString());
+  }
   admSel.addEventListener("change", () => { location.href = stateURL().toString(); });
   function restoreControls() {
     const q = new URLSearchParams(location.search);
@@ -324,8 +332,31 @@
   // Bottom-left: the sticky filter bar overlays the top of the viewport, and a
   // top-left zoom control slides under it as the page scrolls, eating its clicks.
   map.zoomControl.setPosition("bottomleft");
+  // Global view: per-admin figures at world zoom are noise. One line per country —
+  // name, plan year, and which datasets we hold — until the country is clicked open.
+  const countryTipCache = new Map();
+  function countryTip(country) {
+    if (!countryTipCache.has(country)) {
+      const rs = data.rows.filter((x) => x.country === country);
+      const has = (k) => rs.some((x) => x[k] != null);
+      const ds = [];
+      if (has("pct") || has("fb_pct")) ds.push("SEAS5 forecast");
+      if (has("pin")) ds.push("PiN");
+      if (has("targeted")) ds.push("targeted");
+      if (has("pb") || has("pba")) ds.push("PiN by severity");
+      if (has("ipc")) ds.push("IPC");
+      const py = planYrByCountry.get(country);
+      countryTipCache.set(country,
+        `<div class="name">${country}</div>` +
+        `<div>${py ? `Plan data ${py} · ` : ""}${ds.join(", ")}</div>` +
+        `<div class="cat" style="color:#9db1b3">Click to explore</div>`);
+    }
+    return countryTipCache.get(country);
+  }
   const tipHtml = (f) => {
     const p = f.properties, r = byPcode.get(p.pcode);
+    if (!countrySel.value) return r ? countryTip(r.country)
+      : `<div class="name">${p.name ?? p.pcode}</div>`;
     // No PiN/severity row = not part of the plan's admin-level analysis (e.g. Nigeria's
     // HNRP covers only Borno/Adamawa/Yobe) — context only, never labelled "in HNRP".
     if (!r || (!ipcMode() && !inHnrp(r))) {
@@ -345,6 +376,14 @@
     if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}${tgtFlag(r)}</div>`;
     const py = planYrOf(r);
     if (py) rows += `<div>Plan data: ${py}</div>`;
+    if (ADM === "low") {
+      const cls = sevClassOf(r);
+      if (cls) {
+        rows += `<div>Severity class: <span style="display:inline-block;width:10px;` +
+          `height:10px;background:${sevColors()[cls - 1]};border:1px solid #9db1b3;` +
+          `vertical-align:baseline"></span> ${sevClassLabels()[cls - 1]}</div>`;
+      }
+    }
     // Membership must be per-unit, never assumed from scope: in IPC mode most of a
     // country's states can be in view yet outside its HNRP (Nigeria covers only
     // Borno/Adamawa/Yobe).
@@ -394,13 +433,68 @@
   // the selected-country outline (edge misalignments vs the COD adm1 polygons
   // are cosmetic).
   const dataIsos = new Set(data.rows.map((r) => r.iso3).filter(Boolean));
-  L.geoJSON(
+  const bordersLayer = L.geoJSON(
     { type: "FeatureCollection",
       features: world.features.filter((f) => dataIsos.has(f.properties.iso3)) },
     { interactive: false,
       style: { color: "#1d2021", weight: 1, opacity: 0.65, fill: false } },
   ).addTo(map);
   map.fitBounds(layer.getBounds(), { animate: false });
+
+  // ── Inset forecast-category rings (lowest view) ──────────────────────────────
+  // Same clip-path trick as the CBPF page: clip each path to its own shape and
+  // double the stroke width so only the inner half renders — an outline fully
+  // inside the unit. A second, narrower "gap" ring in the unit's fill colour is
+  // drawn on top, standing the category ring off the shared boundary.
+  const RING_W = 2.8; // visible ring width, px (flush: neighbours touch)
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const ringCat = L.geoJSON(geo, {
+    filter: (f) => /Polygon/.test(f.geometry.type),
+    interactive: false,
+    style: () => ({ weight: 0, fill: false, opacity: 1 }),
+  }).addTo(map);
+  const clipPaths = {};
+  function setClipped(l, pcode, stroke, w, dash) {
+    const el = l._path;
+    const svg = el && el.ownerSVGElement;
+    if (!svg) return;
+    if (!stroke) {
+      el.setAttribute("stroke", "none");
+      el.removeAttribute("clip-path");
+      return;
+    }
+    let cp = clipPaths[pcode];
+    if (!cp) {
+      let defs = svg.querySelector("defs.hnrp-clips");
+      if (!defs) {
+        defs = document.createElementNS(SVGNS, "defs");
+        defs.setAttribute("class", "hnrp-clips");
+        svg.appendChild(defs);
+      }
+      const clip = document.createElementNS(SVGNS, "clipPath");
+      clip.setAttribute("id", "hnrp-clip-" + pcode);
+      cp = document.createElementNS(SVGNS, "path");
+      clip.appendChild(cp);
+      defs.appendChild(clip);
+      clipPaths[pcode] = cp;
+    }
+    cp.setAttribute("d", el.getAttribute("d") || "");
+    el.setAttribute("clip-path", `url(#hnrp-clip-${pcode})`);
+    el.setAttribute("stroke", stroke);
+    el.setAttribute("stroke-width", String(w * 2)); // clipped: visible half == w
+    if (dash) el.setAttribute("stroke-dasharray", dash);
+    else el.removeAttribute("stroke-dasharray");
+  }
+  // Clip geometry must track the projected paths after every zoom/move.
+  function syncClips() {
+    ringCat.eachLayer((l) => {
+      const cp = clipPaths[l.feature.properties.pcode];
+      if (cp && l._path) cp.setAttribute("d", l._path.getAttribute("d") || "");
+    });
+  }
+  map.on("zoomend moveend", () => { syncClips(); });
+  bordersLayer.bringToFront(); // country borders sit above the inset rings
+
   // Selected-country outline: admin-1 borders alone make the country edge hard to
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
   // so tiny misalignments at the edge are cosmetic only).
@@ -438,14 +532,49 @@
       // Markers, not standalone tooltips: DivOverlay tooltips mis-anchor after
       // interrupted/fractional zoom animations (labels drifting west, wedged
       // zooms); markers track the view exactly.
+      const dimmed = isDimmed(catOf(r), ADM === "low" ? sevClassOf(r) : null);
       triLabels.addLayer(L.marker(l.getBounds().getCenter(), {
-        interactive: false, keyboard: false,
+        interactive: false, keyboard: false, opacity: dimmed ? 0.15 : 1,
         icon: L.divIcon({
           className: "tri-map-label-wrap", iconSize: null,
           html: `<span class="tri-map-label">${s.key}</span>`,
         }),
       }));
     });
+  }
+  // The unit's severity class, for the outline (lowest view only — the finest
+  // level is where the one-class-per-unit classification is native):
+  // PbS mode = the class holding the most PiN (single class for most plans);
+  // IPC mode = the IPC area-classification rule (highest phase reaching ≥20%
+  // of the analysed population); PiN mode = none.
+  function sevClassOf(r) {
+    if (pinMode()) return null;
+    if (ipcMode()) {
+      const c = ipcComboOf(r);
+      if (!c || !c.tot) return null;
+      let cum = 0;
+      for (let i = 4; i >= 0; i--) {
+        cum += c.p[i] ?? 0;
+        if (cum / c.tot >= 0.2) return i + 1;
+      }
+      return 1;
+    }
+    if (!r.pb) return null;
+    let best = 0, bi = null;
+    r.pb.forEach((v, i) => { if ((v ?? 0) >= best && (v ?? 0) > 0) { best = v; bi = i + 1; } });
+    return bi;
+  }
+  function catMatches(cat, key) {
+    return !!cat && (key === "skill_mod"
+      ? cat.endsWith("_mod")
+      : catBase(cat) === key
+        || (key === "none" && (cat === "high_none" || cat === "mid_none")));
+  }
+  function isDimmed(cat, cls) {
+    const ks = activeKeys(), cs = activeClss();
+    const dimCat = ks.size > 0 && ![...ks].some((k) => catMatches(cat, k));
+    const dimCls = cs.size > 0 && !cs.has(cls);
+    return dimCat || dimCls;
   }
   function renderMap() {
     renderOutline();
@@ -464,176 +593,160 @@
         l.bindTooltip(() => tipHtml(l.feature), { sticky: true });
       }
       if (offCountry || !r || (!ipcMode() && !inHnrp(r))) {
-        // Out of scope for the current mode: blend into the world backdrop.
+        // Out of scope for the current mode: blend into the world backdrop —
+        // and clear any ring left from a previous render, or other countries'
+        // category outlines linger when one country is selected.
         el.setAttribute("fill", "#f7f9f9");
         el.setAttribute("stroke", "#d9dedf");
+        el.setAttribute("stroke-width", 0.5);
+        el.removeAttribute("stroke-dasharray");
+        ringInfo.set(l.feature.properties.pcode, null);
         return;
       }
       const cat = catOf(r);
-      el.setAttribute("fill", cat ? fillOf(cat) : HNRP_MUTED.fill);
-      el.setAttribute("stroke", cat ? STYLE[cat][1] : HNRP_MUTED.edge);
+      const cls = ADM === "low" ? sevClassOf(r) : null;
+      let fill;
+      if (ADM === "low") {
+        // Lowest view: the BODY is ALWAYS severity (muted when the unit has no
+        // class — never the forecast category, which lives on the inset ring).
+        // cat==null (drought-only filtered / no forecast) stays fully muted so
+        // the filter visibly excludes units.
+        fill = !cat ? HNRP_MUTED.fill : cls ? sevColors()[cls - 1] : HNRP_MUTED.fill;
+        el.setAttribute("fill", fill);
+        el.setAttribute("stroke", "#000000"); // true admin boundary
+        el.setAttribute("stroke-width", 0.4);
+        el.setAttribute("stroke-dasharray", "");
+      } else {
+        fill = cat ? fillOf(cat) : HNRP_MUTED.fill;
+        el.setAttribute("fill", fill);
+        el.setAttribute("stroke", cat ? STYLE[cat][1] : HNRP_MUTED.edge);
+        el.setAttribute("stroke-width", 0.6);
+        el.setAttribute("stroke-dasharray", "");
+      }
+      // Legend hover: dim everything that doesn't match the hovered forecast
+      // category or severity class (same interaction as the main Map tab).
+      const dim = isDimmed(cat, cls);
+      el.setAttribute("fill-opacity", dim ? "0.12" : "1");
+      el.setAttribute("stroke-opacity", dim ? "0.2" : "1");
+      // low_skill's STYLE colour is white — as a ring that reads as a hole;
+      // no category ring at all is the honest encoding for "no usable skill".
+      ringInfo.set(l.feature.properties.pcode,
+        ADM === "low" && cat && cat !== "low_skill" && !offCountry
+          ? { cat, fill, dim, dash: cat.endsWith("_mod") ? "4 7" : null } : null);
+    });
+    renderRings();
+  }
+  // Inset category rings + their standoff gap, driven by the main pass above.
+  const ringInfo = new Map();
+  function renderRings() {
+    ringCat.eachLayer((l) => {
+      const info = ringInfo.get(l.feature.properties.pcode);
+      setClipped(l, l.feature.properties.pcode,
+        info ? STYLE[info.cat][0] : null, RING_W, info && info.dash);
+      if (info && l._path) l._path.setAttribute("stroke-opacity", info.dim ? "0.2" : "1");
     });
   }
-
-  // ── Scatter ──────────────────────────────────────────────────────────────────
-  const svg = document.getElementById("hnrp-scatter");
-  const tip = document.getElementById("hnrp-tip");
-  const NS = "http://www.w3.org/2000/svg";
-  const M = { l: 58, r: 16, t: 12, b: 46 };
-
-  function scatterRows() {
-    // EVERY admin with a displayable forecast plots, regardless of HNRP/IPC
-    // membership or severity source — areas with no figure for an axis sit at 0%
-    // (origin if both are missing), so nothing silently drops out of view.
-    return data.rows.filter((r) =>
-      (!countrySel.value || r.country === countrySel.value) && slotOfAny(r) != null);
+  // ── Legend (main-page style: titled strips, hover = highlight on the map) ────
+  // The active highlight is the PINNED (clicked) entries plus, transiently, the
+  // hovered one. Any number of entries may be pinned per strip (click again to
+  // unpin); a unit stays bright if it matches ANY active category AND ANY active
+  // class. Non-matching legend entries pale to mirror the map dim.
+  const stickKeys = new Set(), stickClss = new Set();
+  let hoverKey = null, hoverCls = null;
+  const activeKeys = () => (hoverKey ? new Set(stickKeys).add(hoverKey) : stickKeys);
+  const activeClss = () => (hoverCls != null ? new Set(stickClss).add(hoverCls) : stickClss);
+  function refreshLegendDim() {
+    document.querySelectorAll("#hnrp-legend .ls-seg[data-hl-type]").forEach((seg) => {
+      const isCat = seg.dataset.hlType === "cat";
+      const act = isCat ? activeKeys() : activeClss();
+      const stuck = isCat ? stickKeys : stickClss;
+      const v = seg.dataset.hlVal;
+      seg.style.opacity = act.size && ![...act].some((x) => String(x) === v) ? "0.3" : "1";
+      seg.classList.toggle("sel", [...stuck].some((x) => String(x) === v));
+    });
   }
-  // Scatter denominator, layered per unit: (1) COD-PS total-population baseline
-  // (ds-population-mirror), (2) the plan's own HNO/JIAF baseline total where
-  // COD-PS is missing or distrusted (r.pop_src says which; e.g. all of Yemen is
-  // HNO — no COD-PS in HAPI), (3) the analysed-population proxy — the larger of
-  // the IPC analysed base and the plan's JIAF analysed base. The SAME value
-  // divides both axes, so above/below the 45° line compares absolute headcounts
-  // correctly, and it does not change when the severity source switches.
-  const popOf = (r) =>
-    r.pop ?? (Math.max(ipcComboOf(r)?.tot ?? 0, r.sev_total ?? 0) || null);
-  const popSrcOf = (r) => {
-    if (r.pop) {
-      const srcName = { HNO: "HNO baseline", WorldPop: "WorldPop" }[r.pop_src] ?? "COD-PS";
-      return `total population, ${srcName}` +
-        (r.pop_year ? ` ${r.pop_year}` : "");
-    }
-    const ipc = ipcComboOf(r)?.tot ?? 0, jiaf = r.sev_total ?? 0;
-    return !ipc && !jiaf ? null : ipc >= jiaf ? "IPC analysed" : "JIAF analysed";
-  };
-
-  function renderScatter() {
-    // Square: both axes are population shares, so equal visual weight per axis.
-    const W = Math.min(svg.parentElement.clientWidth || 640, 640), H = W;
-    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-    svg.style.height = H + "px";
-    svg.innerHTML = "";
-    const rows = scatterRows();
-    const g = (tag, attrs, parent = svg) => {
-      const el = document.createElementNS(NS, tag);
-      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-      parent.appendChild(el);
-      return el;
+  function buildHnrpLegend() {
+    const root = document.getElementById("hnrp-legend");
+    root.innerHTML = "";
+    const wire = (el, type, val) => {
+      el.dataset.hlType = type; el.dataset.hlVal = String(val);
+      const paint = () => { refreshLegendDim(); renderMap(); };
+      el.addEventListener("mouseenter", () => {
+        if (type === "cat") hoverKey = val; else hoverCls = val;
+        paint();
+      });
+      el.addEventListener("mouseleave", () => { hoverKey = null; hoverCls = null; paint(); });
+      el.addEventListener("click", () => {
+        const set = type === "cat" ? stickKeys : stickClss;
+        set.has(val) ? set.delete(val) : set.add(val);
+        paint();
+      });
     };
-    if (!rows.length) {
-      g("text", { x: W / 2, y: H / 2, "text-anchor": "middle", fill: "#888", "font-size": 13 })
-        .textContent = "No admin-1 units match the current filters.";
-      return;
-    }
-    // Fixed 0–100% axes: shares stay visually comparable across filters and sources.
-    const xmax = 100, ymax = 100;
-    const clamp = (v) => Math.min(v ?? 0, 100);
-    const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
-    const Y = (v) => H - M.b - (v / ymax) * (H - M.t - M.b);
-    const pmax = Math.max(...rows.map((r) => popOf(r) ?? 0), 1);
-    const R = (p) => 4 + 22 * Math.sqrt((p ?? 0) / pmax);
-
-    // Recessive grid + axes.
-    const ticks = (max) => { const s = max > 50 ? 20 : max > 20 ? 10 : 5; const o = []; for (let v = 0; v <= max; v += s) o.push(v); return o; };
-    for (const v of ticks(xmax)) {
-      g("line", { x1: X(v), x2: X(v), y1: M.t, y2: H - M.b, stroke: "#eef1f1" });
-      g("text", { x: X(v), y: H - M.b + 16, "text-anchor": "middle", "font-size": 10, fill: "#888" }).textContent = v + "%";
-    }
-    for (const v of ticks(ymax)) {
-      g("line", { x1: M.l, x2: W - M.r, y1: Y(v), y2: Y(v), stroke: "#eef1f1" });
-      g("text", { x: M.l - 6, y: Y(v) + 3, "text-anchor": "end", "font-size": 10, fill: "#888" }).textContent = v + "%";
-    }
-    // Severity on y, targeted on x. Both shares divide by the SAME population
-    // base (named in the axis labels), so position compares absolute
-    // headcounts too: above the 45° line = more people in the severity band than
-    // the plan targets (a coverage gap); below = targeting exceeds it.
-    const denom = "% of total population";
-    g("text", { x: (M.l + W - M.r) / 2, y: H - 8, "text-anchor": "middle", "font-size": 13, fill: "#555" })
-      .textContent = `Targeted${secTag()} (${denom})`;
-    const yl = g("text", { x: 14, y: (M.t + H - M.b) / 2, "text-anchor": "middle", "font-size": 13, fill: "#555" });
-    // "Population in IPC 3+" reads well; "Population in PiN 3+" doesn't — PiN is
-    // already a population.
-    yl.textContent = `${ipcMode() ? `Population in ${sevLabel()}` : sevLabel()} (${denom})`;
-    yl.setAttribute("transform", `rotate(-90 14 ${(M.t + H - M.b) / 2})`);
-    g("line", { x1: X(0), y1: Y(0), x2: X(100), y2: Y(100),
-                stroke: "#c4d0d1", "stroke-width": 1, "stroke-dasharray": "5 4" });
-    // Half-plane labels sit ON the diagonal, rotated along it; the arrow glyphs
-    // rotate with the text, so they point perpendicularly away from the line.
-    const ang = Math.atan2(Y(100) - Y(0), X(100) - X(0)) * 180 / Math.PI;
-    const diagLabel = (v, dy, txt) => {
-      const lx = X(v), ly = Y(v) + dy;
-      g("text", { x: lx, y: ly, "text-anchor": "middle", "font-size": 11, fill: "#9db1b3",
-                  transform: `rotate(${ang} ${lx} ${ly})` }).textContent = txt;
-    };
-    diagLabel(80, -8, `↑ more people in ${sevLabel()} than targeted`);
-    diagLabel(80, 16, `↓ more people targeted than in ${sevLabel()}`);
-
-    if (ADM === "low" && countrySel.value && rows.length) {
-      g("text", { x: W - M.r - 6, y: M.t + 12, "text-anchor": "end",
-                  "font-size": 11, fill: "#9db1b3" })
-        .textContent = `shown at admin ${rows[0].lvl ?? "?"}`;
-    }
-    const xOf = (r) => X(clamp(pctOf(tgtOf(r), popOf(r))));
-    const yOf = (r) => Y(clamp(pctOf(sevValOf(r), popOf(r))));
-    // Bubbles: big ones first so small ones stay hoverable; 2px surface ring.
-    const sorted = [...rows].sort((a, b) => (popOf(b) ?? 0) - (popOf(a) ?? 0));
-    for (const r of sorted) {
-      const sl = slotOfAny(r);
-      const cat = sl ? classify({ pct: sl.pct, r: sl.r, rainy: sl.rainy }, false) : null;
-      const c = g("circle", {
-        cx: xOf(r), cy: yOf(r),
-        r: R(popOf(r)), fill: fillOf(cat), stroke: "#ffffff", "stroke-width": 2,
-      });
-      g("circle", {
-        cx: c.getAttribute("cx"), cy: c.getAttribute("cy"), r: R(popOf(r)),
-        fill: "none", stroke: STYLE[cat][1], "stroke-width": 1,
-      });
-      c.style.cursor = "pointer";
-      c.addEventListener("mouseenter", (ev) => {
-        const s = slotOfAny(r);
-        tip.hidden = false;
-        const combo = ipcMode() ? ipcComboOf(r) : null;
-        tip.innerHTML = `<strong>${dispName(r)}</strong> — ${r.country ?? r.iso3}<br>` +
-          `${sevLabel()}${combo ? ` (${comboDesc(combo)})` : ""}: ${fmtN(sevValOf(r))} (${fmt(pctOf(sevValOf(r), popOf(r)), 1)}%)<br>` +
-          (tgtOf(r) == null
-            ? `Targeted${secTag()}: – ${inHnrp(r) ? "(no figure)" : "(not in an HNRP)"}<br>`
-            : `Targeted${secTag()}: ${fmtN(tgtOf(r))} (${fmt(pctOf(tgtOf(r), popOf(r)), 1)}%)${tgtFlag(r)}<br>`) +
-          `Population base: ${fmtN(popOf(r))}${popSrcOf(r) ? ` (${popSrcOf(r)})` : ""}<br>` +
-          (s ? `<strong>${s.key}</strong>${s.lead < 0 ? " · in season" : ""}: RP ${fmt(s.rp, 1)} yr, pct ${fmt(s.pct, 1)}, r ${fmt(s.r, 2)}` : "");
-      });
-      c.addEventListener("mousemove", (ev) => {
-        const b = svg.parentElement.getBoundingClientRect();
-        tip.style.left = Math.min(ev.clientX - b.left + 14, b.width - 240) + "px";
-        tip.style.top = (ev.clientY - b.top + 14) + "px";
-      });
-      c.addEventListener("mouseleave", () => { tip.hidden = true; });
-
-      // The trimester actually used, printed inside the bubble where it fits —
-      // in auto mode different admins use different worst seasons, and that
-      // should be visible without hovering.
-      if (sl && R(popOf(r)) >= 11 && triSel.value.startsWith("auto")) {
-        const darkFill = cat && /vsev/.test(cat);
-        g("text", { x: xOf(r), y: yOf(r) + 3, "text-anchor": "middle", "font-size": 9,
-                    "font-weight": 600, fill: darkFill ? "#ffffff" : "#333",
-                    "pointer-events": "none" }).textContent = sl.key;
+    function strip(title, segs, segWidth, interactive = true) {
+      const block = document.createElement("div");
+      block.className = "legend-block";
+      const t = document.createElement("span");
+      t.className = "lb-title"; t.textContent = title;
+      const row = document.createElement("div");
+      row.className = "legend-strip" + (interactive ? " interactive" : "");
+      for (const sg of segs) {
+        const seg = document.createElement("span");
+        seg.className = "ls-seg"; seg.style.width = segWidth + "px";
+        const cell = document.createElement("span");
+        cell.className = "ls-cell"; cell.style.background = sg.fill;
+        if (sg.hatch) cell.style.backgroundImage = hatchBg(sg.hatch);
+        if (sg.dashed) cell.style.backgroundImage =
+          "repeating-linear-gradient(90deg, transparent 0 4px, #ffffff 4px 10px)";
+        if (sg.border) cell.style.boxShadow = "inset 0 0 0 1px #c4d0d1";
+        if (sg.ramp != null) cell.dataset.ramp = sg.ramp;
+        const lbl = document.createElement("span");
+        lbl.className = "ls-lbl"; lbl.textContent = sg.label;
+        seg.append(cell, lbl);
+        if (sg.key) wire(seg, "cat", sg.key);
+        else if (sg.cls) wire(seg, "cls", sg.cls);
+        row.appendChild(seg);
       }
+      block.append(t, row);
+      root.appendChild(block);
     }
-
-    // Selective direct labels: the 6 largest population bases.
-    for (const r of sorted.slice(0, 6)) {
-      g("text", {
-        x: xOf(r), y: yOf(r) - R(popOf(r)) - 4,
-        "text-anchor": "middle", "font-size": 10, fill: "#333",
-      }).textContent = r.name ?? r.pcode;
+    strip(ADM === "low" ? "Forecast category (boundary line; dashed = moderate skill)"
+                        : "Forecast category (fill)", [
+      { fill: "#7f5619", label: "strongly below", key: "drought_vsev" },
+      { fill: "#dda555", label: "below normal", key: "drought_sev" },
+      { fill: "#e2e8e8", label: "normal", border: true, key: "none" },
+      { fill: "#74a1e8", label: "above normal", key: "flood_sev" },
+      { fill: "#134ead", label: "strongly above", key: "flood_vsev" },
+    ], 86);
+    strip("\u00a0", [
+      { fill: "#b1c1c2", label: "off season", key: "off_season" },
+    ], 86);
+    if (ADM === "low") {
+      strip("Severity class (fill)", [1, 2, 3, 4, 5].map((c) => ({
+        fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
+        border: c <= 2, cls: c,
+      })), 44);
     }
   }
+  // (built at the end of setup — it reads sevColors(), declared further down)
+
+  // ── Scatter (REMOVED 2026-08) ────────────────────────────────────────────────
+  // The severity-vs-targeted scatter was dropped as more confusing than useful.
+  // Full implementation + revival notes: docs/dev-notes/hnrp-scatter.md
+  // (last live at commit d7140e9, docs/hnrp.js renderScatter/scatterRows/popOf).
+
+  const NS = SVGNS; // SVG namespace for the bar chart's elements
 
   // ── Severity-breakdown bars (per admin, when a country is selected) ──────────
   // Population by JIAF class 1–5 (stacked), a tick for the targeted population, and
   // the unit's forecast category as a swatch beside its name. Severity uses the
   // IPC/CH-convention colours — a domain-standard scale this audience reads at a
   // glance, and far more separable than a single-hue ramp.
-  const SEV_COLORS = ["#cdfacd", "#fae61e", "#e67800", "#c80000", "#640000"];
+  // Two class ramps: IPC keeps the IPC convention; intersectoral (PbS/JIAF)
+  // uses the blue severity ramp from humanitarianaction.info's severity
+  // choropleths (Datawrapper stops on the Global HNO plan pages).
+  const IPC_COLORS = ["#cdfacd", "#fae61e", "#e67800", "#c80000", "#640000"];
+  const JIAF_COLORS = ["#e9f2fb", "#d4e5f7", "#82b5e9", "#418fde", "#1f69b3"];
+  const sevColors = () => (ipcMode() ? IPC_COLORS : JIAF_COLORS);
   const JIAF_LABELS = ["1 — minimal", "2 — stress", "3 — severe", "4 — extreme", "5 — catastrophic"];
   const IPC_LABELS = ["1 — minimal", "2 — stressed", "3 — crisis", "4 — emergency", "5 — catastrophe"];
   const sevClassLabels = () => (ipcMode() ? IPC_LABELS : JIAF_LABELS);
@@ -659,7 +772,7 @@
     barsLegend.innerHTML =
       (pinMode()
         ? `<span><i style="background:${PIN_COLOR}"></i> PiN${secTag()}</span>`
-        : SEV_COLORS.map((c, i) => (i < barC0() ? ""
+        : sevColors().map((c, i) => (i < barC0() ? ""
             : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("")) +
       `<span><i class="tick"></i> targeted</span>` +
       `<span>left swatch = forecast category</span>`;
@@ -748,8 +861,23 @@
       g("rect", { x: M.l - 199, y: y + ROW / 2 - 7, width: 13, height: 13,
                   fill: cat ? fillOf(cat) : HNRP_MUTED.fill,
                   stroke: cat ? STYLE[cat][1] : HNRP_MUTED.edge, "stroke-width": 1 });
-      const name = (r.name ?? r.pcode).length > 24 ? (r.name ?? r.pcode).slice(0, 23) + "…" : (r.name ?? r.pcode);
-      g("text", { x: M.l - 180, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" }).textContent = name;
+      let nameX = M.l - 180;
+      if (ADM === "low") {
+        const cls = sevClassOf(r);
+        if (cls) {
+          const sq = g("rect", { x: M.l - 182, y: y + ROW / 2 - 7, width: 13, height: 13,
+                                 fill: sevColors()[cls - 1], stroke: "#9db1b3",
+                                 "stroke-width": 0.6 });
+          const ti = document.createElementNS(NS, "title");
+          ti.textContent = `severity class ${cls} — ${sevClassLabels()[cls - 1]}`;
+          sq.appendChild(ti);
+        }
+        nameX = M.l - 165;
+      }
+      const nm0 = r.name ?? r.pcode;
+      const maxLen = ADM === "low" ? 22 : 24;
+      const name = nm0.length > maxLen ? nm0.slice(0, maxLen - 1) + "…" : nm0;
+      g("text", { x: nameX, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" }).textContent = name;
 
       // Stacked class segments with a white spacer between them (single PiN
       // segment in PiN mode — no class breakdown exists).
@@ -769,7 +897,7 @@
           const v = segs[c] ?? 0;
           if (v <= 0) continue;
           const seg = g("rect", { x: X(acc), y: y + 4, width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
-                                  height: ROW - 9, fill: SEV_COLORS[c] });
+                                  height: ROW - 9, fill: sevColors()[c] });
           const title = document.createElementNS(NS, "title");
           title.textContent = `${r.name ?? r.pcode} — ${ipcMode()
             ? `IPC phase ${c + 1}` : `PiN at severity ${c + 1}`}: ${fmtN(v)}`;
@@ -791,6 +919,7 @@
     { key: "country", label: "Country", num: false },
     { key: "name", label: ADM === "low" ? "Admin unit" : `Admin ${ADM}`, num: false },
     { key: "_plan_yr", label: "Plan", num: true },
+    ...(ADM === "low" ? [{ key: "sclass", label: "Class", num: true }] : []),
     { key: "sev4", label: "Severity 4+ pop", num: true },
     { key: "pin", label: "PiN", num: true },
     { key: "targeted", label: "Targeted", num: true },
@@ -827,6 +956,7 @@
 
     const SLOT_KEYS = { tri_label: "key", rp: "rp", pct: "pct", r: "r" };
     const kv = (row) => (sortKey === "_plan_yr" ? planYrOf(row)
+      : sortKey === "sclass" ? sevClassOf(row)
       : sortKey === "sev4" ? sevValOf(row)
       : sortKey === "pin" ? pinOf(row)
       : sortKey === "targeted" ? tgtOf(row)
@@ -855,6 +985,12 @@
         `<td>${r.country ?? r.iso3}</td>` +
         `<td>${dispName(r)}</td>` +
         `<td class="num">${planYrOf(r) ?? "–"}</td>` +
+        (ADM === "low" ? (() => {
+          const cls = sevClassOf(r);
+          return `<td class="num">${cls
+            ? `<span class="cls-chip" style="background:${sevColors()[cls - 1]}"></span>${cls}`
+            : "–"}</td>`;
+        })() : "") +
         `<td class="num">${fmtN(sevValOf(r))}</td>` +
         `<td class="num">${fmtN(pinOf(r))}</td>` +
         `<td class="num">${fmtN(tgtOf(r))}${tgtYrOf(r)
@@ -919,8 +1055,12 @@
   function renderAll() {
     syncURL(); // keep the URL an exact mirror of the controls at all times
     updateIpcPeriodUI();
+    // Legend severity ramp follows the active source (IPC vs intersectoral blue).
+    document.querySelectorAll("#hnrp-legend [data-ramp]").forEach((el) => {
+      el.style.background = sevColors()[+el.dataset.ramp];
+    });
     sortSevOpt.textContent = `Severity (${sevLabel()})`;
-    renderMap(); renderScatter(); renderBars(); renderTable();
+    renderMap(); renderBars(); renderTable();
   }
   for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel,
                     droughtOnlyEl, triSel, ipcPeriodSel]) {
@@ -940,6 +1080,7 @@
     fitCountry(false); // instant on reveal — the panel just appeared, nothing to glide from
     renderAll(); // paths may mount after the panel becomes visible — restyle then
   };
+  buildHnrpLegend(); // safe here: every const it reads is initialised by now
   restoreControls(); // after options are populated, before the first render
   renderAll();
   if (countrySel.value) fitCountry(false); // restored country: land on it directly
