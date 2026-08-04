@@ -247,11 +247,19 @@ footer p { margin: 4px 0; }
 #alerts-table th { font-weight: 600; color: var(--muted); }
 #alerts-table th.num, #alerts-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 #alerts-table tbody tr:hover td { background: var(--hdx-neutral-01); }
-#alerts-table .sev-chip { display: block; padding: 2px 9px;
+#alerts-table .sev-chip { display: block; padding: 2px 9px; white-space: nowrap;
   border-radius: var(--hdx-radius-sm); font-weight: 600; text-align: center; cursor: default; }
 #alerts-table td.skill-mod { background: var(--hdx-neutral-01); color: var(--hdx-neutral-8); }
 #alerts-table td.skill-hi { font-weight: 600; }
 #alerts-table .in-season-tag { color: var(--hdx-neutral-5); font-weight: 600; font-size: 0.75rem; }
+/* In-cell horizontal bars, GHO operations-dashboard style: fixed track filled
+   from the left, compact value to its right. */
+#alerts-table .cellbar { display: inline-flex; align-items: center; gap: 6px; }
+#alerts-table .bar-track { width: 74px; height: 13px; background: var(--hdx-neutral-01);
+  border-radius: 2px; overflow: hidden; flex: none; }
+#alerts-table .bar-fill { display: block; height: 100%; }
+#alerts-table .bar-val { min-width: 46px; text-align: right;
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
 #hnrp-map { height: 430px; border: 1px solid var(--line); border-radius: var(--hdx-radius-md); margin-bottom: 18px; background: #fff; }
 #hnrp-scatter-wrap { position: relative; margin-bottom: 6px; }
 #hnrp-scatter { width: 100%; height: 460px; display: block; }

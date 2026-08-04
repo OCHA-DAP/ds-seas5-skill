@@ -43,6 +43,7 @@
   const aboveChk = document.getElementById("alerts-above");
   const rainyChk = document.getElementById("alerts-rainy");
   const hnrpChk = document.getElementById("alerts-hnrp");
+  const oldChk = document.getElementById("alerts-old");
 
   // Worst signal per country × hazard under the CURRENT filters (the filters
   // change which trimesters qualify, so "worst" must be recomputed — under
@@ -87,11 +88,27 @@
              1: ["Above normal", "#74a1e8", "#0d2c5c"] },
   };
   const fmtN = (v) => (v == null ? "–" : Math.round(v).toLocaleString("en-US"));
+  // Compact figures for the bar cells, GHO-dashboard style (21.9M, 640k).
+  const fmtM = (v) => (v == null ? "–"
+    : v >= 995e4 ? `${(v / 1e6).toFixed(0)}M`
+    : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M`
+    : v >= 1e3 ? `${Math.round(v / 1e3)}k` : String(Math.round(v)));
   const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+  // In-cell horizontal bar (as on the GHO operations dashboard): fill scaled to
+  // `frac` of the track, value printed right of the track.
+  const barCell = (frac, text, color, title = "") =>
+    `<td class="num" title="${esc(title)}"><span class="cellbar">` +
+    `<span class="bar-track"><span class="bar-fill" style="width:${(100 * Math.max(0, Math.min(1, frac))).toFixed(1)}%;` +
+    `background:${color}"></span></span><span class="bar-val">${text}</span></span></td>`;
 
   // Latest plan year across the headline caseloads: rows on an OLDER plan get a
-  // visible year mark so mixed vintages are never silent.
+  // visible year mark so mixed vintages are never silent. Plans older than the
+  // previous cycle (e.g. Ethiopia's 2024 HRP) are hidden entirely unless the
+  // "include older plans" box is ticked.
   const latestPlanYr = Math.max(0, ...Object.values(planCl).map((c) => c.plan_year));
+  const oldestPlanYr = Math.min(latestPlanYr, ...Object.values(planCl).map((c) => c.plan_year));
+  const oldYrEl = document.getElementById("alerts-old-yr");
+  if (oldYrEl) oldYrEl.textContent = String(oldestPlanYr);
 
   document.getElementById("alerts-title").textContent =
     `SEAS5 precipitation alerts — forecast issued ${fc.issued_label}, ` +
@@ -109,7 +126,9 @@
       // direction (under the current skill/severity filters, regardless of
       // which direction checkboxes are ticked).
       const opp = best.has(iso3 + "|" + (hazard === "drought" ? "flood" : "drought"));
-      const cl = planCl[iso3];
+      let cl = planCl[iso3];
+      // Older-than-last-cycle plans don't count as "having a plan" unless opted in.
+      if (cl && cl.plan_year < latestPlanYr - 1 && !oldChk.checked) cl = undefined;
       return { iso3, hazard, opp, ...c, cl, pinShow: cl ? cl.pin : null };
     }).filter((r) =>
       (r.hazard === "drought" ? belowChk.checked : aboveChk.checked)
@@ -118,12 +137,14 @@
       || (b.pinShow ?? -1) - (a.pinShow ?? -1) || a.iso3.localeCompare(b.iso3));
 
     tbody.innerHTML = "";
+    const maxPin = Math.max(1, ...rows.map((r) => r.pinShow ?? 0)); // bar scale
     for (const r of rows) {
       const [label, bg, ink] = SEV_CHIP[r.hazard][r.sev];
       const detail = `Country-mean forecast percentile ` +
         `— RP ${r.rp.toFixed(1)} yr, r ${r.r.toFixed(2)}`;
-      const pct = r.cl && r.cl.pop ? `${((100 * r.cl.pin) / r.cl.pop).toFixed(1)}%` : "–";
-      const pinTip = r.cl ? `${r.cl.plan_name} ${r.cl.plan_year} plan headline (HPC API)` : "";
+      const frac = r.cl && r.cl.pop ? r.cl.pin / r.cl.pop : null;
+      const pinTip = r.cl
+        ? `${fmtN(r.cl.pin)} — ${r.cl.plan_name} ${r.cl.plan_year} plan headline (HPC API)` : "";
       const yrTag = r.cl && r.cl.plan_year < latestPlanYr
         ? ` <span class="in-season-tag">${r.cl.plan_year}</span>` : "";
       const tr = document.createElement("tr");
@@ -133,15 +154,17 @@
         `${label}</span></td>` +
         `<td>${r.tri}${r.lead < 0 ? ` <span class="in-season-tag">in season</span>` : ""}</td>` +
         `<td class="${r.skill === 2 ? "skill-hi" : "skill-mod"}">${r.skill === 2 ? "High" : "Moderate"}</td>` +
-        `<td class="num" title="${esc(pinTip)}">${fmtN(r.pinShow)}${yrTag}</td>` +
-        `<td class="num">${pct}</td>`);
+        (r.pinShow == null ? `<td class="num">–</td>`
+          : barCell(r.pinShow / maxPin, fmtM(r.pinShow) + yrTag, "#418fde", pinTip)) +
+        (frac == null ? `<td class="num">–</td>`
+          : barCell(frac, `${(100 * frac).toFixed(1)}%`, "#ef7a93")));
       tbody.appendChild(tr);
     }
     document.getElementById("alerts-empty").hidden = rows.length > 0;
     document.getElementById("alerts-star-note").hidden = !rows.some((r) => r.opp);
   }
 
-  for (const el of [skillSel, sevSel, belowChk, aboveChk, rainyChk, hnrpChk]) {
+  for (const el of [skillSel, sevSel, belowChk, aboveChk, rainyChk, hnrpChk, oldChk]) {
     el.addEventListener("change", render);
   }
   render();
