@@ -376,21 +376,54 @@
 
   <section id="tab-alerts" class="tab-panel" hidden>
     <h3 class="hnrp-h" id="alerts-title">Country alerts — loading…</h3>
+    <div id="alerts-controls">
+      <div class="ctl-row">
+        <label class="ctl">Skill
+          <select id="alerts-skill" class="map-select">
+            <option value="mod" selected>Moderate or high (r ≥ 0.30)</option>
+            <option value="high">High only (r ≥ 0.50)</option>
+          </select>
+        </label>
+        <label class="ctl">Severity
+          <select id="alerts-sev" class="map-select">
+            <option value="mod" selected>Moderate or strong (RP ≥ 3 yr)</option>
+            <option value="high">Strong only (RP ≥ 10 yr)</option>
+          </select>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="alerts-below" checked />
+          Below normal
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="alerts-above" checked />
+          Above normal
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="alerts-hnrp" checked />
+          HNRP countries only
+        </label>
+      </div>
+    </div>
     <table id="alerts-table">
       <thead></thead>
       <tbody></tbody>
     </table>
+    <p id="alerts-empty" class="lock-note" hidden>No country matches the current filters.</p>
+    <p id="alerts-star-note" class="lock-note">* also has a qualifying signal in the opposite
+      direction (under the current skill/severity filters).</p>
     <p class="note">
-      One line per country and hazard: the <strong>worst</strong> SEAS5 signal across all
+      One line per country and direction: the <strong>worst</strong> SEAS5 signal across all
       valid rainy-season trimesters — including seasons already in progress — over the
-      country's admin-1 units (skill r&nbsp;≥&nbsp;0.30). Severity High = return period
-      ≥&nbsp;10&nbsp;yr, Moderate = 3–10&nbsp;yr; forecast skill High means r&nbsp;≥&nbsp;0.50.
-      Hover a severity cell for the trimester, return period, and the admin-1 unit behind it.
+      country's admin-1 units. Strongly above/below normal = return period
+      ≥&nbsp;10&nbsp;yr; above/below normal = 3–10&nbsp;yr. Forecast skill High means
+      r&nbsp;≥&nbsp;0.50, Moderate 0.30–0.50. Hover a severity cell for the return period
+      and the admin-1 unit behind it.
       PiN is the HNRP intersectoral People in Need summed over the plan's admin-1 analysis;
-      a "–" means the country has IPC coverage here but no HNRP admin-level PiN. The
-      population share is computed over the admin-1 units that carry both a PiN and a
-      population figure (population is missing for some units), so partial-coverage plans
-      (e.g. Nigeria) are relative to the analysed area only.
+      unticking "HNRP countries only" adds countries with IPC coverage but no HNRP
+      admin-level PiN ("–" in the PiN columns). The population share is computed over the
+      admin-1 units that carry both a PiN and a population figure (population is missing
+      for some units), so partial-coverage plans (e.g. Nigeria) are relative to the
+      analysed area only.
     </p>
   </section>
 
@@ -529,6 +562,6 @@
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
   <script src="hnrp.js?v=20260803u"></script>
-  <script src="alerts.js?v=20260804a"></script>
+  <script src="alerts.js?v=20260804b"></script>
 </body>
 </html>

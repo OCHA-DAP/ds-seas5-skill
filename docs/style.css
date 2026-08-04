@@ -239,17 +239,19 @@ footer p { margin: 4px 0; }
 #hnrp-table td.skill-high { font-weight: 700; }
 #hnrp-table .in-season-tag { color: var(--hdx-neutral-5); font-weight: 600; font-size: 0.75rem; }
 
-/* Country alerts tab — compact grouped summary table */
-#alerts-table { border-collapse: collapse; font-size: 0.85rem; max-width: 780px; }
+/* Country alerts tab — compact summary table */
+#alerts-controls .ctl-row { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap;
+  margin: 0 0 14px; }
+#alerts-table { border-collapse: collapse; font-size: 0.85rem; max-width: 860px; }
 #alerts-table th, #alerts-table td { padding: 5px 14px; border-bottom: 1px solid var(--line); text-align: left; }
 #alerts-table th { font-weight: 600; color: var(--muted); }
 #alerts-table th.num, #alerts-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
-#alerts-table td.hazard { font-weight: 600; vertical-align: top; border-right: 1px solid var(--line); }
-#alerts-table tbody tr:hover td:not(.hazard) { background: var(--hdx-neutral-01); }
-#alerts-table .sev-chip { display: inline-block; min-width: 80px; padding: 2px 9px;
+#alerts-table tbody tr:hover td { background: var(--hdx-neutral-01); }
+#alerts-table .sev-chip { display: block; padding: 2px 9px;
   border-radius: var(--hdx-radius-sm); font-weight: 600; text-align: center; cursor: default; }
 #alerts-table td.skill-mod { background: var(--hdx-neutral-01); color: var(--hdx-neutral-8); }
 #alerts-table td.skill-hi { font-weight: 600; }
+#alerts-table .in-season-tag { color: var(--hdx-neutral-5); font-weight: 600; font-size: 0.75rem; }
 #hnrp-map { height: 430px; border: 1px solid var(--line); border-radius: var(--hdx-radius-md); margin-bottom: 18px; background: #fff; }
 #hnrp-scatter-wrap { position: relative; margin-bottom: 6px; }
 #hnrp-scatter { width: 100%; height: 460px; display: block; }
