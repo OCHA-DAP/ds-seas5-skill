@@ -241,8 +241,10 @@
   // (Fallback: the default lead-1 trimester.) An explicit trimester shows THAT
   // season's forecast for every unit. Slot keys are the compact trimester codes (MJJ).
   const triSel = document.getElementById("hnrp-tri");
-  const inScope = (r) =>
-    (!countrySel.value || r.country === countrySel.value) && (ipcMode() || inHnrp(r));
+  // Scope is the country filter, nothing more. Areas outside the plan's
+  // admin-level analysis still carry a forecast, and the forecast is the point
+  // of the tab — they show it, on a muted body that says "no severity here".
+  const inScope = (r) => !countrySel.value || r.country === countrySel.value;
   const fbSlot = (r) => (r.fb_pct == null ? null
     : { key: r.fb_tri, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r, rainy: !!r.fb_rainy });
   // Worst qualifying drought among the unit's valid trimesters, under the CURRENT
@@ -348,12 +350,11 @@
     if (r && r.country !== sel) {
       return countryTip(r.country, "Click to return to the world view");
     }
-    // No PiN/severity row = not part of the plan's admin-level analysis (e.g. Nigeria's
-    // HNRP covers only Borno/Adamawa/Yobe) — context only, never labelled "in HNRP".
-    if (!r || (!ipcMode() && !inHnrp(r))) {
-      return `<div class="name">${p.name ?? p.pcode}</div>` +
-        `<div class="cat" style="color:#9db1b3">Not in the HNRP admin-level analysis</div>`;
-    }
+    // No row at all = a polygon the payload doesn't cover; nothing to say but
+    // its name. (Areas that ARE in the payload but outside the plan's
+    // admin-level analysis still get the full readout — their forecast is real,
+    // and the "Not in an HNRP" line below is what qualifies it.)
+    if (!r) return `<div class="name">${p.name ?? p.pcode}</div>`;
     const cat = catOf(r);
     const s = slotOf(r);
     let rows = "";
@@ -370,9 +371,11 @@
     if (ADM === "low") {
       const cls = sevClassOf(r);
       if (cls) {
-        rows += `<div>${sevClassTitle()}: <span style="display:inline-block;width:10px;` +
+        rows += `<div><span style="display:inline-block;width:10px;` +
           `height:10px;background:${sevColors()[cls - 1]};border:1px solid #9db1b3;` +
-          `vertical-align:baseline"></span> ${cls} — ${sevClassWord(cls)}</div>`;
+          `vertical-align:baseline"></span> ${sevClassDesc(r)}</div>`;
+      } else if (pinMode() && pinOf(r) != null) {
+        rows += `<div style="color:#9db1b3">No severity published for this area</div>`;
       }
     }
     // Membership must be per-unit, never assumed from scope: in IPC mode most of a
@@ -382,8 +385,7 @@
     if (!member) rows += `<div style="color:#9db1b3">Not in an HNRP</div>`;
     const catLine = cat
       ? `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>`
-      : `<div class="cat" style="color:#9db1b3">${member ? "In HNRP" : "IPC-covered, not in an HNRP"}` +
-        ` — no forecast data</div>`;
+      : `<div class="cat" style="color:#9db1b3">No forecast for the selected season</div>`;
     return `<div class="name">${dispName(r)}</div>` + catLine + rows;
   };
   // World countries beneath as context (non-interactive, like the Map tab's backdrop).
@@ -512,14 +514,18 @@
     const sel = countrySel.value;
     if (!sel) return;
     if (!triSel.value.startsWith("auto")) return; // one explicit season — labels are noise
-    // At adm2 a country can have 1,000+ units (Colombia) — label soup. Cap it.
-    const nShown = data.rows.filter((r) => r.country === sel && slotOf(r)).length;
+    // At adm2 a country can have 1,000+ units (Colombia) — label soup. Cap it,
+    // counting only what would actually be drawn.
+    const nShown = data.rows.filter((r) => r.country === sel && slotOf(r)
+      && catOf(r) !== "low_skill").length;
     if (nShown > 150) return;
     layer.eachLayer((l) => {
       const r = byPcode.get(l.feature.properties.pcode);
       if (!r || r.country !== sel) return;
       const s = slotOf(r);
       if (!s) return;
+      // No usable skill = no alert, so which season it would have been is noise.
+      if (catOf(r) === "low_skill") return;
       // Markers, not standalone tooltips: DivOverlay tooltips mis-anchor after
       // interrupted/fractional zoom animations (labels drifting west, wedged
       // zooms); markers track the view exactly.
@@ -534,25 +540,61 @@
     });
   }
   // The unit's severity class (lowest view only — the finest level is where the
-  // one-class-per-unit classification is native):
-  // PiN mode = the class holding the unit's PiN (a single class for most plans);
-  // IPC mode = the IPC area-classification rule (highest phase reaching ≥20%
-  // of the analysed population).
-  function sevClassOf(r) {
+  // one-class-per-unit classification is native), and where it came from:
+  //   pin      — the class holding the unit's PiN (its PbS distribution)
+  //   area     — the plan's area classification, where its PbS had no usable
+  //              classes (the export flags these as pba)
+  //   analysis — the severity analysis's own population-by-class for the unit,
+  //              read here rather than in the export: the export's area-class
+  //              fallback is keyed on units present in the PbS table, so units
+  //              missing from it entirely fell through with no class at all
+  //              (DR Congo, Mozambique, Nigeria, Mali, Niger, Haiti — 466 units)
+  //   ipc      — the IPC area rule (highest phase reaching ≥20% of the analysed
+  //              population)
+  // The dominant class is the one holding the most people; `split` carries the
+  // rest, for the rare unit whose caseload spans more than one.
+  const dominant = (arr) => {
+    let best = 0, bi = null;
+    (arr ?? []).forEach((v, i) => { if ((v ?? 0) >= best && (v ?? 0) > 0) { best = v; bi = i + 1; } });
+    return bi;
+  };
+  const spread = (arr) => (arr ?? []).map((v, i) => [i + 1, v ?? 0]).filter(([, v]) => v > 0);
+  function sevClassInfo(r) {
+    if (!r) return { cls: null };
     if (ipcMode()) {
       const c = ipcComboOf(r);
-      if (!c || !c.tot) return null;
+      if (!c || !c.tot) return { cls: null };
       let cum = 0;
       for (let i = 4; i >= 0; i--) {
         cum += c.p[i] ?? 0;
-        if (cum / c.tot >= 0.2) return i + 1;
+        if (cum / c.tot >= 0.2) return { cls: i + 1, src: "ipc", split: spread(c.p) };
       }
-      return 1;
+      return { cls: 1, src: "ipc", split: spread(c.p) };
     }
-    if (!r.pb) return null;
-    let best = 0, bi = null;
-    r.pb.forEach((v, i) => { if ((v ?? 0) >= best && (v ?? 0) > 0) { best = v; bi = i + 1; } });
-    return bi;
+    const fromPin = dominant(r.pb);
+    if (fromPin) return { cls: fromPin, src: r.pba ? "area" : "pin", split: spread(r.pb) };
+    const sev = [r.s1, r.s2, r.s3, r.s4, r.s5];
+    const fromAnalysis = dominant(sev);
+    if (fromAnalysis) return { cls: fromAnalysis, src: "analysis", split: spread(sev) };
+    return { cls: null };
+  }
+  const sevClassOf = (r) => sevClassInfo(r).cls;
+  // Says the class and, where it matters, how it was arrived at.
+  const CLS_SRC_NOTE = {
+    area: " (from the plan's area classification)",
+    analysis: " (from the severity analysis, not the PiN split)",
+  };
+  function sevClassDesc(r) {
+    const { cls, src, split } = sevClassInfo(r);
+    if (!cls) return null;
+    let s = `${sevClassTitle()} ${cls} — ${sevClassWord(cls)}${CLS_SRC_NOTE[src] ?? ""}`;
+    // A caseload spanning classes is rare (one unit in the current payload) but
+    // it is exactly the case where a single class would mislead.
+    if (split && split.length > 1) {
+      s += ` · also ${split.filter(([c]) => c !== cls)
+        .map(([c, v]) => `${c}: ${fmtSI(v)}`).join(", ")}`;
+    }
+    return s;
   }
   // How a legend entry, per dimension, decides whether a unit matches. Skill
   // follows the Map tab's rule (app.js setHighlight): the "roughly normal"
@@ -591,8 +633,8 @@
       // "no qualifying drought signal" would be a lie about units that are merely
       // filtered out of view.
       const offCountry = sel && (!r || r.country !== sel);
-      if (offCountry || !r || (!ipcMode() && !inHnrp(r))) {
-        // Out of scope for the current mode: blend into the world backdrop —
+      if (offCountry || !r) {
+        // Out of scope: blend into the world backdrop —
         // and clear any ring left from a previous render, or other countries'
         // category outlines linger when one country is selected.
         el.setAttribute("fill", "#f7f9f9");
@@ -1088,7 +1130,7 @@
         titled(gr("rect", { x: COL.sev, y: y + ROW / 2 - 7, width: 13, height: 13,
                             fill: sevColors()[cls - 1], stroke: "#9db1b3",
                             "stroke-width": 0.6 }),
-          `${sevClassTitle()} ${cls} — ${sevClassWord(cls)}`);
+          sevClassDesc(r));
       }
       const nm0 = r.name ?? r.pcode;
       const maxLen = 24;
@@ -1113,8 +1155,7 @@
                               fill: cls ? sevColors()[cls - 1] : PIN_COLOR,
                               stroke: "#9db1b3", "stroke-width": 0.6 }),
             `${r.name ?? r.pcode} — PiN${secTag()}: ${fmtN(val)} · ${pctTxt(val)}` +
-            (cls ? ` · ${sevClassTitle().toLowerCase()} ${cls} — ${sevClassWord(cls)}`
-                 : " · no severity class published"));
+            (cls ? ` · ${sevClassDesc(r)}` : " · no severity published for this area"));
         }
       } else {
         const segs = segsOf(r) ?? [];

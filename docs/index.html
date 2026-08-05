@@ -230,6 +230,8 @@
         that season's forecast for every area. The trimester actually used is shown as its
         compact code (e.g. MJJ) — centred on
         each area when a country is selected on the map, and bold in every tooltip.
+        Areas below the skill floor carry no code: with no usable skill there is no
+        alert, so which season it would have been is beside the point.
         Forecast data are detrended, matching the Map tab's defaults.
       </p>
 
@@ -265,12 +267,18 @@
         The class comes from the plan's PiN-by-Severity distribution (JIAF 2.0 PbS
         workbooks, latest analysis cycle — mostly 2026): the PbS assigns each finest
         analysis unit <em>one</em> class and places that unit's whole PiN there, so at
-        the level shown here it is the unit's area classification. Pockets of higher
-        need inside a unit are not shown — the few plans that publish a within-unit
-        split (Yemen, Syria, at most two classes) are collapsed to the class holding
-        the PiN. Some plans publish PiN with no usable class (Guatemala, El Salvador
-        and Venezuela publish none; South Sudan fills one constant class on every unit
-        — a template artifact); those units keep their PiN and show no class.
+        the level shown here it is the unit's area classification. Where a unit's
+        caseload does span classes, the fill is the class holding the most of it and
+        the tooltip lists the rest (one unit in the current payload). Where the PbS
+        carries no usable class for a unit, the class falls back to the
+        <strong>severity analysis</strong>'s own population-by-class for that area —
+        the same source, read per area rather than per PiN row, which is what gives
+        DR Congo, Mozambique, Nigeria, Mali, Niger and Haiti their classes (466
+        units). Tooltips say when a class came from there rather than from the PiN
+        split. What remains classless is genuinely unpublished: Myanmar (330 units),
+        Burkina Faso, Chad, CAR, Cameroon and a dozen Somali districts have a PiN and
+        no severity anywhere in the plan data — 427 units, which keep their PiN and
+        show no class.
         <strong>IPC/CH acute food insecurity phases</strong> (via <a
         href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>) is the
         alternative. IPC publishes a genuine within-area phase distribution, so a
@@ -281,9 +289,11 @@
         <em>not</em> line up:
         they measure different things (acute food insecurity vs inter-sectoral needs) over
         different analysed populations, scopes, and periods — compare shapes, not values.
-        In IPC mode the map also includes IPC-covered areas
-        <strong>outside any HNRP</strong> (no PiN/severity/targeted)
-        — surfacing possible shocks beyond plan scope. Only IPC analyses valid in 2025 or
+        Areas <strong>outside any HNRP</strong> (no PiN/severity/targeted — most of
+        Nigeria, whose plan covers Borno, Adamawa and Yobe, and IPC-covered countries
+        with no plan) are on the map in either mode: muted body, since there is no
+        severity to colour, but their forecast outline in full, since the forecast is
+        just as real there. Only IPC analyses valid in 2025 or
         later are included; countries whose series stalled earlier (Ethiopia 2021,
         Angola/El Salvador 2022, Burkina Faso Aug 2024, Timor-Leste 2024) carry no IPC
         here.
@@ -559,7 +569,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260805k"></script>
+  <script src="hnrp.js?v=20260805m"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
