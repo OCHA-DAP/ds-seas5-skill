@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <!-- versioned: the HNRP legend's box strip and clear button need this
        stylesheet and hnrp.js to arrive as a pair, never one from cache -->
-  <link rel="stylesheet" href="style.css?v=20260805i" />
+  <link rel="stylesheet" href="style.css?v=20260805k" />
 </head>
 <body>
   <header>
@@ -344,14 +344,15 @@
         bars: in PiN mode one bar per unit, carrying that unit's severity colour; in
         IPC mode the phase distribution from the selected <strong>Level</strong> up,
         stacked (phases 1–2 dwarf the rest in populous areas and drown the signal, so
-        the bars never start below 3). Targeted gets its own track alongside.
-        Each track is the <strong>area's whole population</strong> and the bar the
-        share of it, with the headcount printed beside — so areas compare on both
-        weight and reach at once, however different their sizes. The population base
-        is the COD-PS total (or the plan's own HNO/WorldPop baseline where COD-PS is
-        missing); where none exists, the analysed population stands in and the bar
-        reads high against that smaller base — every tooltip names the base it used.
-        The column headers sort the chart, by headcount rather than by share.
+        the bars never start below 3). The dark tick on each bar is the targeted
+        population, on the same scale. Four figure columns follow — the caseload and
+        the targeted population, each as a <strong>headcount</strong> and as a
+        <strong>share of the area's population</strong> — and each column header
+        sorts by what it shows, so the same chart answers "where are the most people"
+        and "where is the largest share of an area affected". The population base is
+        the COD-PS total (or the plan's own HNO/WorldPop baseline where COD-PS is
+        missing); where none exists the analysed population stands in, a smaller base
+        against which shares read high — every figure's tooltip names the base used.
       </p>
     </details>
   </section>
@@ -558,7 +559,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260805j"></script>
+  <script src="hnrp.js?v=20260805k"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

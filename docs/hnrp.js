@@ -851,8 +851,12 @@
   // "IPC phase class" reads badly — the phase IS the class.
   const sevLegendTitle = () => (pinMode() ? "Intersectoral severity class (fill)"
     : "IPC phase (fill)");
-  const fmtSI = (v) => (v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M"
+  const fmtSI = (v) => (v == null ? "–"
+    : v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M"
     : v >= 1e3 ? Math.round(v / 1e3) + "k" : String(Math.round(v)));
+  // A share, at the precision it deserves: 0.4%, 7.2%, 55%.
+  const fmtPct = (f) => (f == null ? "–"
+    : `${(100 * f).toFixed(f >= 0.1 ? 0 : 1)}%`);
 
   function renderBarsLegend() {
     // In PiN mode the bar IS the severity colour, so the ramp legend applies to
@@ -861,9 +865,9 @@
       sevColors().map((c, i) => ((!pinMode() && i < barC0()) ? ""
         : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("") +
       (pinMode() ? `<span><i style="background:${PIN_COLOR}"></i> no class published</span>` : "") +
-      `<span><i style="background:#1d2021"></i> targeted</span>` +
-      `<span>bars are shares of the area's population; the figure beside each is` +
-      ` the headcount (hover for both, and for the population base used)</span>`;
+      `<span><i class="tick"></i> targeted</span>` +
+      `<span>% columns are of the area's population — hover any figure for the` +
+      ` count, the share and the population base used</span>`;
   }
 
   // Bar sorting: click a column header. Values sort high→low on first click,
@@ -876,14 +880,23 @@
     const i = CAT_ORDER.indexOf(catOf(r) ?? "");
     return i === -1 ? CAT_ORDER.length : i;
   };
+  // Share of the area's population — null when it has no population base, which
+  // sorts last rather than as zero.
+  const shareOfPop = (r, v) => {
+    const p = popOf(r);
+    return p && v != null ? v / p : null;
+  };
   // key -> [comparator in its DEFAULT direction, sorts a text column?]
+  const numCmp = (val) => (a, b) => (val(b) ?? -1) - (val(a) ?? -1);
   const BAR_SORTS = {
     forecast: [(a, b) => catRank(a) - catRank(b) || (sevValOf(b) ?? 0) - (sevValOf(a) ?? 0), false],
     severity: [(a, b) => (sevClassOf(b) ?? 0) - (sevClassOf(a) ?? 0)
       || (sevValOf(b) ?? 0) - (sevValOf(a) ?? 0), false],
     name: [(a, b) => String(a.name ?? a.pcode).localeCompare(String(b.name ?? b.pcode)), true],
-    value: [(a, b) => (sevValOf(b) ?? 0) - (sevValOf(a) ?? 0), false],
-    targeted: [(a, b) => (tgtOf(b) ?? 0) - (tgtOf(a) ?? 0), false],
+    value: [numCmp((r) => sevValOf(r)), false],
+    targeted: [numCmp((r) => tgtOf(r)), false],
+    valuePct: [numCmp((r) => shareOfPop(r, sevValOf(r))), false],
+    targetedPct: [numCmp((r) => shareOfPop(r, tgtOf(r))), false],
   };
   let barSort = "value", barSortFlip = false;
 
@@ -926,13 +939,12 @@
     // caseload takes, with the headcount printed beside it. Fixed tracks, not one
     // scale across rows: the question here is "how much of this area", and the
     // absolute figure is right there in the label.
-    const VALW = 46, GAP = 9, COLGAP = 34;
-    // Tracks split whatever width is left, so the chart fills the panel at any
-    // window size instead of stopping halfway across it.
-    const TRACK = Math.max(90, Math.min(280,
-      Math.floor((W - M.l - M.r - COLGAP - 2 * (GAP + VALW)) / 2)));
-    const CX = { val: M.l, tgt: M.l + TRACK + GAP + VALW + COLGAP };
-    const trackEnd = CX.tgt + TRACK + GAP + VALW;
+    // Four numeric columns on the right — headcount and share, for the caseload
+    // and for targeted — each sortable. The bar takes whatever is left.
+    const NUMW = 72, NGAP = 4, NUMS = 4;
+    const NUMBLOCK = NUMS * NUMW + (NUMS - 1) * NGAP;
+    const numRight = (i) => W - M.r - NUMBLOCK + i * (NUMW + NGAP) + NUMW;
+    const barRight = Math.max(M.l + 80, W - M.r - NUMBLOCK - 18);
     // Two layers: chrome (grid, headers, axis) is redrawn every render; rows
     // persist between renders, keyed by pcode, so a legend pin can slide and
     // fade them rather than blink the chart.
@@ -961,20 +973,26 @@
       parent.appendChild(el);
       return el;
     };
-    // Halfway + full-population gridlines under both tracks, with the scale
-    // spelled out once at the foot of each column.
-    for (const x0 of [CX.val, CX.tgt]) {
-      for (const f of [0.5, 1]) {
-        g("line", { x1: x0 + TRACK * f, x2: x0 + TRACK * f, y1: M.t, y2: H - M.b,
-                    stroke: "#eef1f1" });
-      }
-      for (const [f, lbl] of [[0, "0"], [0.5, "50%"], [1, "100%"]]) {
-        g("text", { x: x0 + TRACK * f, y: H - M.b + 15, "text-anchor": "middle",
-                    "font-size": 10, fill: "#aab6b7" }).textContent = lbl;
-      }
-      g("text", { x: x0, y: H - M.b + 29, "font-size": 10, fill: "#888" })
-        .textContent = "share of the area's population";
+    // One absolute scale across the rows, so bar length compares headcounts
+    // between areas; the share of each area's own population is the numbers
+    // column's job.
+    const shownSum = (r) => (pinMode() ? (sevValOf(r) ?? 0)
+      : (segsOf(r) ?? []).slice(barC0()).reduce((a, b) => a + (b ?? 0), 0));
+    const xmax = Math.max(...rows.map((r) => Math.max(shownSum(r), tgtOf(r) ?? 0)), 1) * 1.04;
+    const X = (v) => M.l + (v / xmax) * (barRight - M.l);
+
+    // x grid: 4 round ticks.
+    const step = Math.pow(10, Math.floor(Math.log10(xmax / 4)));
+    const tick = Math.ceil(xmax / 4 / step) * step;
+    for (let v = 0; v <= xmax; v += tick) {
+      g("line", { x1: X(v), x2: X(v), y1: M.t, y2: H - M.b, stroke: "#eef1f1" });
+      g("text", { x: X(v), y: H - M.b + 16, "text-anchor": "middle", "font-size": 10, fill: "#888" })
+        .textContent = fmtSI(v);
     }
+    g("text", { x: (M.l + barRight) / 2, y: H - 4, "text-anchor": "middle",
+                "font-size": 11, fill: "#555" })
+      .textContent = pinMode() ? `People in Need${secTag()}`
+        : `People (analysed population in IPC ${lvlTag()})`;
 
     // Clickable column headers, in place of a sort dropdown: each names the
     // column beneath it and sorts by it (by the headcount, not the share — the
@@ -999,10 +1017,19 @@
     header(COL.cat, "forecast", "Forecast category");
     header(COL.sev, "severity", sevClassTitle());
     header(COL.name, "name", "Admin name");
-    header(CX.val, "value", pinMode() ? "PiN" : `${sevLabel()} pop`);
-    header(CX.tgt, "targeted", "Targeted");
-    g("line", { x1: 0, x2: Math.max(trackEnd, W - M.r), y1: M.t - 4, y2: M.t - 4,
-                stroke: "#e2e8e8" });
+    // The bar itself is not a sort target — the four numeric columns are, one
+    // per quantity it draws (headcount and share, caseload and targeted).
+    g("text", { x: M.l, y: M.t - 10, "font-size": 11, fill: "#555" }).textContent =
+      pinMode() ? "PiN (bar) · targeted (tick)"
+        : `IPC phases (bar) · targeted (tick)`;
+    const NUM_COLS = [
+      ["value", pinMode() ? "PiN" : sevLabel()],
+      ["targeted", "Targeted"],
+      ["valuePct", `${pinMode() ? "PiN" : sevLabel()} %`],
+      ["targetedPct", "Targeted %"],
+    ];
+    NUM_COLS.forEach(([key, label], i) => header(numRight(i), key, label, "end"));
+    g("line", { x1: 0, x2: W - M.r, y1: M.t - 4, y2: M.t - 4, stroke: "#e2e8e8" });
 
     barRows.length = 0;
     const alive = new Set();
@@ -1070,64 +1097,55 @@
       nameEl.textContent = nm0.length > maxLen ? nm0.slice(0, maxLen - 1) + "…" : nm0;
       titled(nameEl, dispName(r));
 
-      // ── Caseload tracks ──────────────────────────────────────────────────
+      // ── Bar (headcount, shared scale) + targeted tick ────────────────────
       const pop = popOf(r), popSrc = popSrcOf(r);
-      const BH = 12, BY = y + ROW / 2 - BH / 2; // bar height / top
-      const share = (v) => (pop && v != null ? Math.min(v / pop, 1) : null);
+      const share = (v) => (pop && v != null ? v / pop : null);
       const pctTxt = (v) => {
         const f = share(v);
         return f == null ? "share unknown — no population base"
-          : `${(100 * f).toFixed(f < 0.1 ? 1 : 0)}% of ${fmtN(pop)} (${popSrc})`;
+          : `${fmtPct(f)} of ${fmtN(pop)} (${popSrc})`;
       };
-      // The empty track first, then the fill: an area with no population base
-      // still shows its headcount, against a visibly empty track.
-      const label = (x, v) => {
-        const t = gr("text", { x: x + TRACK + GAP + VALW, y: y + ROW / 2 + 4,
-                               "text-anchor": "end", "font-size": 11, fill: "#333",
-                               "font-variant-numeric": "tabular-nums" });
-        t.textContent = v == null ? "–" : fmtSI(v);
-        return t;
-      };
-      const track = (x) => gr("rect", { x, y: BY, width: TRACK, height: BH, rx: 2,
-                                        fill: "#f2f5f5", stroke: "#e6ecec",
-                                        "stroke-width": 0.8 });
-      const fill = (x, f0, f1, color, tip) => {
-        if (f0 == null || f1 == null || f1 <= f0) return;
-        titled(gr("rect", { x: x + TRACK * f0, y: BY,
-                            width: Math.max(TRACK * (f1 - f0), 1), height: BH,
-                            fill: color }), tip);
-      };
-      // Value column: the PiN in one piece (its area's severity colour, as on
-      // the map), or the IPC phases stacked from the selected level up.
-      track(CX.val);
+      const val = sevValOf(r), tgt = tgtOf(r);
       if (pinMode()) {
-        const v = sevValOf(r);
-        fill(CX.val, 0, share(v), cls ? sevColors()[cls - 1] : PIN_COLOR,
-          `${r.name ?? r.pcode} — PiN${secTag()}: ${fmtN(v)} · ${pctTxt(v)}` +
-          (cls ? ` · ${sevClassTitle().toLowerCase()} ${cls} — ${sevClassWord(cls)}`
-               : " · no severity class published"));
-        label(CX.val, v);
+        if (val > 0) {
+          titled(gr("rect", { x: X(0), y: y + 4, width: Math.max(X(val) - X(0), 0.5),
+                              height: ROW - 9,
+                              fill: cls ? sevColors()[cls - 1] : PIN_COLOR,
+                              stroke: "#9db1b3", "stroke-width": 0.6 }),
+            `${r.name ?? r.pcode} — PiN${secTag()}: ${fmtN(val)} · ${pctTxt(val)}` +
+            (cls ? ` · ${sevClassTitle().toLowerCase()} ${cls} — ${sevClassWord(cls)}`
+                 : " · no severity class published"));
+        }
       } else {
         const segs = segsOf(r) ?? [];
         let acc = 0;
         for (let c = barC0(); c < 5; c++) {
           const v = segs[c] ?? 0;
           if (v <= 0) continue;
-          fill(CX.val, share(acc), share(acc + v), sevColors()[c],
+          titled(gr("rect", { x: X(acc), y: y + 4,
+                              width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
+                              height: ROW - 9, fill: sevColors()[c] }),
             `${r.name ?? r.pcode} — IPC phase ${c + 1}: ${fmtN(v)} · ${pctTxt(v)}`);
           acc += v;
         }
-        label(CX.val, sevValOf(r));
       }
-      // Targeted, on the same population base — so the two tracks can be read
-      // against each other directly (targeted is a subset of the plan's PiN).
-      track(CX.tgt);
-      const tgt = tgtOf(r);
       if (tgt != null) {
-        fill(CX.tgt, 0, share(tgt), "#1d2021",
+        titled(gr("line", { x1: X(tgt), x2: X(tgt), y1: y + 1, y2: y + ROW - 3,
+                            stroke: "#1d2021", "stroke-width": 2 }),
           `${r.name ?? r.pcode} — targeted: ${fmtN(tgt)}${tgtFlag(r)} · ${pctTxt(tgt)}`);
       }
-      label(CX.tgt, tgt);
+      // ── The same four quantities as figures, one sortable column each ────
+      [[val, fmtSI(val), pctTxt(val)],
+       [tgt, tgt == null ? "–" : fmtSI(tgt), pctTxt(tgt)],
+       [share(val), fmtPct(share(val)), pctTxt(val)],
+       [share(tgt), tgt == null ? "–" : fmtPct(share(tgt)), pctTxt(tgt)],
+      ].forEach(([v, text, tip], i) => {
+        const t = gr("text", { x: numRight(i), y: y + ROW / 2 + 4, "text-anchor": "end",
+                               "font-size": 11, fill: v == null ? "#aab6b7" : "#333",
+                               "font-variant-numeric": "tabular-nums" });
+        t.textContent = v == null ? "–" : text;
+        titled(t, `${r.name ?? r.pcode} — ${tip}`);
+      });
     });
     // Rows the filter dropped: fade them where they stand, then drop them for
     // real — unless a later render revives them first.

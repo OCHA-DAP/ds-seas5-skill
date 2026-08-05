@@ -313,6 +313,7 @@ footer p { margin: 4px 0; }
 }
 #hnrp-bars-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
 #hnrp-bars-legend i { display: inline-block; width: 12px; height: 12px; border: 1px solid rgba(0,0,0,0.12); vertical-align: -2px; margin-right: 4px; }
+#hnrp-bars-legend i.tick { width: 2px; height: 14px; background: #1d2021; border: none; vertical-align: -3px; }
 #hnrp-bars-head { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
 #hnrp-bars-head h3 { margin-right: auto; }
 #hnrp-ipc-period-wrap[hidden] { display: none; }
