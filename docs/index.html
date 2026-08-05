@@ -8,7 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Merriweather:wght@700&display=swap" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="style.css" />
+  <!-- versioned: the HNRP legend's box strip and "showing …" chip need this
+       stylesheet and hnrp.js to arrive as a pair, never one from cache -->
+  <link rel="stylesheet" href="style.css?v=20260805a" />
 </head>
 <body>
   <header>
@@ -157,10 +159,6 @@
             <option value="auto" selected>Worst drought — forecast seasons</option>
             <option value="auto-in">Worst drought — incl. in-season</option>
           </select>
-        </label>
-        <label class="toggle">
-          <input type="checkbox" id="hnrp-drought-only" />
-          Show only drought signals
         </label>
       </div>
       <div class="ctl-row">
@@ -366,7 +364,11 @@
         unit's PiN; IPC mode applies the IPC area-classification rule (highest phase
         reaching ≥20% of the analysed population); PiN mode has no classes, so the
         classic colouring returns. Hovering a legend entry highlights matching units
-        and dims the rest. The same class appears in map tooltips, the table's Class
+        and dims the rest; <strong>clicking</strong> one pins it, so several can be
+        combined — entries within a strip are OR-ed, strips AND together (e.g.
+        <em>strongly below</em> × <em>moderate skill</em> × <em>class 4</em>). Pinned
+        entries are named in the "showing …" chip under the legend; click it, or press
+        Escape, to clear them. The same class appears in map tooltips, the table's Class
         column, and beside each bar-chart row. The severity bars plot classes 3–5 by
         default (classes 1–2 dominate populous areas and drown the signal — a checkbox
         restores them).
@@ -576,7 +578,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260804d"></script>
+  <script src="hnrp.js?v=20260805a"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

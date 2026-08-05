@@ -166,6 +166,8 @@ h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 
 /* Contiguous legend strips (ordered scales) */
 .legend-block { display: flex; flex-direction: column; gap: 4px; }
+/* display:flex above outranks the UA [hidden] rule — restate it */
+.legend-block[hidden] { display: none; }
 .legend-block .lb-title { font-weight: 500; color: var(--hdx-neutral-8); }
 .legend-strip { display: flex; }
 .legend-strip .ls-seg { display: flex; flex-direction: column; gap: 3px; cursor: default; }
@@ -179,6 +181,22 @@ h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 /* outline, not box-shadow: border:true cells carry an inline inset box-shadow that would win */
 .legend-strip.interactive .ls-seg.sel .ls-cell { outline: 1.5px solid var(--hdx-neutral-95); outline-offset: -0.5px; }
 .legend-item.interactive { cursor: pointer; }
+
+/* Standalone swatches (unordered keys, e.g. skill): separated boxes rather than
+   a contiguous ramp, since neither entry sits "next to" the other on a scale. */
+.legend-strip.boxes { gap: 10px; }
+/* .ls-seg in the selector so this outranks the strip's first/last-child corner rules */
+.legend-strip.boxes .ls-seg .ls-cell {
+  height: 17px; box-sizing: border-box; border-radius: var(--hdx-radius-sm);
+}
+
+/* "showing … — clear ✕": the standing state of the legend's pinned entries */
+#hnrp-legend-clear {
+  font: inherit; font-size: 0.72rem; color: var(--hdx-neutral-8);
+  background: var(--hdx-neutral-01); border: 1px solid var(--hdx-neutral-3);
+  border-radius: var(--hdx-radius-sm); padding: 3px 8px; cursor: pointer;
+}
+#hnrp-legend-clear:hover { background: var(--hdx-neutral-05); color: var(--hdx-neutral-95); }
 
 /* Leaflet zoom control — HDX-flavoured */
 .leaflet-control-zoom.leaflet-bar { border: 1px solid var(--hdx-neutral-2); box-shadow: var(--hdx-shadow-sm); border-radius: var(--hdx-radius-sm); }

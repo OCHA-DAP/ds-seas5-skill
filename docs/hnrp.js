@@ -56,7 +56,7 @@
       if (el && el.value) u.searchParams.set(k, el.value);
       else u.searchParams.delete(k); // deselected (e.g. country "") must clear too
     }
-    u.searchParams.set("dro", document.getElementById("hnrp-drought-only").checked ? "1" : "0");
+    u.searchParams.delete("dro"); // retired "show only drought signals" filter
     u.hash = "hnrp";
     return u;
   }
@@ -77,9 +77,6 @@
       // between admin levels; an absent option silently stays at the default).
       if (v != null && el && [...el.options].some((o) => o.value === v)) el.value = v;
     }
-    if (q.get("dro") != null) {
-      document.getElementById("hnrp-drought-only").checked = q.get("dro") === "1";
-    }
   }
 
   const skillSel = document.getElementById("hnrp-skill");
@@ -90,7 +87,6 @@
   const ipcPeriodWrap = document.getElementById("hnrp-ipc-period-wrap");
   const ipcPeriodSel = document.getElementById("hnrp-ipc-period");
   const countrySel = document.getElementById("hnrp-country");
-  const droughtOnlyEl = document.getElementById("hnrp-drought-only");
   const issuedEl = document.getElementById("hnrp-issued");
   const thead = document.querySelector("#hnrp-table thead");
   const tbody = document.querySelector("#hnrp-table tbody");
@@ -138,7 +134,6 @@
   const tgtFlag = (r) => (tgtYrOf(r) ? ` (${tgtYrOf(r)} plan)` : "");
   const secTag = () => "";
 
-  const droughtOnly = () => droughtOnlyEl.checked;
   // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
   // shown only in IPC mode, where surfacing needs the plan does NOT capture is the point.
   const inHnrp = (r) => r.sev_total > 0 || r.pin != null || r.targeted != null
@@ -295,15 +290,16 @@
   function passes(r) {
     return inScope(r) && isDrought(rawSlotOf(r));
   }
-  // Display slot: the qualifying drought slot, else (unless drought-only) the same
-  // season's real category — flood/normal/low-skill/off-season, like the Map tab.
-  // slotOfAny ignores the HNRP/IPC scope gate (the scatter plots every admin);
-  // slotOf applies it (map and table stay scoped to the selected mode).
+  // Display slot: the qualifying drought slot, else the same season's real
+  // category — flood/normal/low-skill/off-season, like the Map tab. Narrowing
+  // the view to drought signals is the legend's job (pin "strongly below" /
+  // "below normal"), not a separate filter.
+  // slotOfAny ignores the HNRP/IPC scope gate; slotOf applies it (map and table
+  // stay scoped to the selected mode).
   function slotOfAny(r) {
     const s = rawSlotOf(r);
     if (!s) return null;
     if (isDrought(s)) return s;
-    if (droughtOnly()) return null;
     if (s.worst) {
       // auto mode: the worst-drought slot failed the filters — display the default
       // lead-1 trimester instead (the slot shown for every non-drought unit).
@@ -314,8 +310,8 @@
   function slotOf(r) {
     return inScope(r) ? slotOfAny(r) : null;
   }
-  // Style for HNRP units with nothing to display (drought-only mode, or no forecast):
-  // distinct from both the world background and the classified categories.
+  // Style for HNRP units with nothing to display (no forecast for the selected
+  // season): distinct from both the world background and the classified categories.
   const HNRP_MUTED = { fill: "#e9eeee", edge: "#c4d0d1" };
   function catOf(r) {
     const s = r && slotOf(r);
@@ -392,7 +388,7 @@
     const catLine = cat
       ? `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>`
       : `<div class="cat" style="color:#9db1b3">${member ? "In HNRP" : "IPC-covered, not in an HNRP"}` +
-        ` — ${droughtOnly() ? "no qualifying drought signal" : "no forecast data"}</div>`;
+        ` — no forecast data</div>`;
     return `<div class="name">${dispName(r)}</div>` + catLine + rows;
   };
   // World countries beneath as context (non-interactive, like the Map tab's backdrop).
@@ -564,17 +560,24 @@
     r.pb.forEach((v, i) => { if ((v ?? 0) >= best && (v ?? 0) > 0) { best = v; bi = i + 1; } });
     return bi;
   }
-  function catMatches(cat, key) {
-    return !!cat && (key === "skill_mod"
-      ? cat.endsWith("_mod")
-      : catBase(cat) === key
-        || (key === "none" && (cat === "high_none" || cat === "mid_none")));
-  }
+  // How a legend entry, per dimension, decides whether a unit matches. Skill
+  // follows the Map tab's rule (app.js setHighlight): the "roughly normal"
+  // categories carry their skill in the category name, not a suffix.
+  const HL_MATCH = {
+    cat: (cat, cls, v) => !!cat && (catBase(cat) === v
+      || (v === "none" && (cat === "high_none" || cat === "mid_none"))),
+    skill: (cat, cls, v) => !!cat && (v === "skill_high"
+      ? cat.endsWith("_high") || cat === "high_none"
+      : cat.endsWith("_mod") || cat === "mid_none"),
+    cls: (cat, cls, v) => cls != null && String(cls) === v,
+  };
   function isDimmed(cat, cls) {
-    const ks = activeKeys(), cs = activeClss();
-    const dimCat = ks.size > 0 && ![...ks].some((k) => catMatches(cat, k));
-    const dimCls = cs.size > 0 && !cs.has(cls);
-    return dimCat || dimCls;
+    // OR within a dimension, AND across them: "strongly below" × "class 4" is
+    // the intersection. A dimension with nothing active constrains nothing.
+    return HL_DIMS.some((dim) => {
+      const act = activeOf(dim);
+      return act.size > 0 && ![...act].some((v) => HL_MATCH[dim](cat, cls, v));
+    });
   }
   function renderMap() {
     renderOutline();
@@ -600,6 +603,11 @@
         el.setAttribute("stroke", "#d9dedf");
         el.setAttribute("stroke-width", 0.5);
         el.removeAttribute("stroke-dasharray");
+        // Backdrop units are never dimmed — but this branch used to leave the
+        // opacity a legend highlight had set, so units that dropped out of scope
+        // while an entry was hovered stayed ghosted long after it was released.
+        el.setAttribute("fill-opacity", "1");
+        el.setAttribute("stroke-opacity", "1");
         ringInfo.set(l.feature.properties.pcode, null);
         return;
       }
@@ -609,8 +617,7 @@
       if (ADM === "low") {
         // Lowest view: the BODY is ALWAYS severity (muted when the unit has no
         // class — never the forecast category, which lives on the inset ring).
-        // cat==null (drought-only filtered / no forecast) stays fully muted so
-        // the filter visibly excludes units.
+        // cat==null (no forecast for the selected season) stays fully muted.
         fill = !cat ? HNRP_MUTED.fill : cls ? sevColors()[cls - 1] : HNRP_MUTED.fill;
         el.setAttribute("fill", fill);
         el.setAttribute("stroke", "#000000"); // true admin boundary
@@ -647,86 +654,134 @@
     });
   }
   // ── Legend (main-page style: titled strips, hover = highlight on the map) ────
-  // The active highlight is the PINNED (clicked) entries plus, transiently, the
-  // hovered one. Any number of entries may be pinned per strip (click again to
-  // unpin); a unit stays bright if it matches ANY active category AND ANY active
-  // class. Non-matching legend entries pale to mirror the map dim.
-  const stickKeys = new Set(), stickClss = new Set();
-  let hoverKey = null, hoverCls = null;
-  const activeKeys = () => (hoverKey ? new Set(stickKeys).add(hoverKey) : stickKeys);
-  const activeClss = () => (hoverCls != null ? new Set(stickClss).add(hoverCls) : stickClss);
+  // Three independent dimensions — forecast category, skill, severity class —
+  // each its own strip. The active highlight per dimension is its PINNED
+  // (clicked) entries plus, transiently, the hovered one; entries OR within a
+  // dimension and AND across them. Non-matching legend entries pale to mirror
+  // the map dim, and every pin is named in the "showing …" chip so a click made
+  // three controls ago can't silently shrink the highlight.
+  const HL_DIMS = ["cat", "skill", "cls"];
+  const pinned = { cat: new Set(), skill: new Set(), cls: new Set() };
+  const hlLabel = { cat: {}, skill: {}, cls: {} }; // dim -> value -> legend label
+  let hover = null; // { dim, val } while the pointer is on a legend entry
+  const activeOf = (dim) => (hover && hover.dim === dim
+    ? new Set(pinned[dim]).add(hover.val) : pinned[dim]);
+  const anyPinned = () => HL_DIMS.some((d) => pinned[d].size > 0);
+  let clearChip = null;
   function refreshLegendDim() {
-    document.querySelectorAll("#hnrp-legend .ls-seg[data-hl-type]").forEach((seg) => {
-      const isCat = seg.dataset.hlType === "cat";
-      const act = isCat ? activeKeys() : activeClss();
-      const stuck = isCat ? stickKeys : stickClss;
-      const v = seg.dataset.hlVal;
-      seg.style.opacity = act.size && ![...act].some((x) => String(x) === v) ? "0.3" : "1";
-      seg.classList.toggle("sel", [...stuck].some((x) => String(x) === v));
+    document.querySelectorAll("#hnrp-legend .ls-seg[data-hl-dim]").forEach((seg) => {
+      const { hlDim: dim, hlVal: v } = seg.dataset;
+      const act = activeOf(dim);
+      seg.style.opacity = act.size && !act.has(v) ? "0.3" : "1";
+      seg.classList.toggle("sel", pinned[dim].has(v));
     });
+    if (!clearChip) return;
+    clearChip.hidden = !anyPinned();
+    clearChip.textContent = "showing " +
+      HL_DIMS.filter((d) => pinned[d].size)
+        .map((d) => [...pinned[d]].map((v) => hlLabel[d][v] ?? v).join(" / "))
+        .join(" × ") + " — clear ✕";
+  }
+  function clearPins() {
+    if (!anyPinned()) return;
+    for (const d of HL_DIMS) pinned[d].clear();
+    refreshLegendDim();
+    renderMap();
   }
   function buildHnrpLegend() {
     const root = document.getElementById("hnrp-legend");
     root.innerHTML = "";
-    const wire = (el, type, val) => {
-      el.dataset.hlType = type; el.dataset.hlVal = String(val);
+    const wire = (el, dim, val, label) => {
+      val = String(val);
+      el.dataset.hlDim = dim; el.dataset.hlVal = val;
+      hlLabel[dim][val] = label;
       const paint = () => { refreshLegendDim(); renderMap(); };
-      el.addEventListener("mouseenter", () => {
-        if (type === "cat") hoverKey = val; else hoverCls = val;
-        paint();
-      });
-      el.addEventListener("mouseleave", () => { hoverKey = null; hoverCls = null; paint(); });
+      el.addEventListener("mouseenter", () => { hover = { dim, val }; paint(); });
+      el.addEventListener("mouseleave", () => { hover = null; paint(); });
       el.addEventListener("click", () => {
-        const set = type === "cat" ? stickKeys : stickClss;
+        const set = pinned[dim];
         set.has(val) ? set.delete(val) : set.add(val);
         paint();
       });
     };
-    function strip(title, segs, segWidth, interactive = true) {
+    function strip(title, segs, segWidth, rowClass = "") {
       const block = document.createElement("div");
       block.className = "legend-block";
       const t = document.createElement("span");
       t.className = "lb-title"; t.textContent = title;
       const row = document.createElement("div");
-      row.className = "legend-strip" + (interactive ? " interactive" : "");
+      row.className = "legend-strip interactive" + (rowClass ? " " + rowClass : "");
       for (const sg of segs) {
         const seg = document.createElement("span");
         seg.className = "ls-seg"; seg.style.width = segWidth + "px";
         const cell = document.createElement("span");
         cell.className = "ls-cell"; cell.style.background = sg.fill;
         if (sg.hatch) cell.style.backgroundImage = hatchBg(sg.hatch);
-        if (sg.dashed) cell.style.backgroundImage =
-          "repeating-linear-gradient(90deg, transparent 0 4px, #ffffff 4px 10px)";
         if (sg.border) cell.style.boxShadow = "inset 0 0 0 1px #c4d0d1";
+        // Skill swatches quote the map's own encoding: at the lowest level the
+        // category is a boundary line (solid = high skill, dashed = moderate),
+        // at the fixed admin levels it is the fill (plain vs hatched).
+        if (sg.outline) cell.style.border = `2px ${sg.outline} #1d2021`;
         if (sg.ramp != null) cell.dataset.ramp = sg.ramp;
         const lbl = document.createElement("span");
         lbl.className = "ls-lbl"; lbl.textContent = sg.label;
         seg.append(cell, lbl);
-        if (sg.key) wire(seg, "cat", sg.key);
-        else if (sg.cls) wire(seg, "cls", sg.cls);
+        // chipLabel: the strip label alone can be too terse to name a pin out of
+        // context (a severity class reads as a bare "4" in the "showing …" chip).
+        wire(seg, sg.dim, sg.val, sg.chipLabel ?? sg.label);
         row.appendChild(seg);
       }
       block.append(t, row);
       root.appendChild(block);
+      return block;
     }
-    strip(ADM === "low" ? "Forecast category (boundary line; dashed = moderate skill)"
+    strip(ADM === "low" ? "Forecast category (boundary line)"
                         : "Forecast category (fill)", [
-      { fill: "#7f5619", label: "strongly below", key: "drought_vsev" },
-      { fill: "#dda555", label: "below normal", key: "drought_sev" },
-      { fill: "#e2e8e8", label: "normal", border: true, key: "none" },
-      { fill: "#74a1e8", label: "above normal", key: "flood_sev" },
-      { fill: "#134ead", label: "strongly above", key: "flood_vsev" },
+      { fill: "#7f5619", label: "strongly below", dim: "cat", val: "drought_vsev" },
+      { fill: "#dda555", label: "below normal", dim: "cat", val: "drought_sev" },
+      { fill: "#e2e8e8", label: "normal", border: true, dim: "cat", val: "none" },
+      { fill: "#74a1e8", label: "above normal", dim: "cat", val: "flood_sev" },
+      { fill: "#134ead", label: "strongly above", dim: "cat", val: "flood_vsev" },
     ], 86);
     strip("\u00a0", [
-      { fill: "#b1c1c2", label: "off season", key: "off_season" },
+      { fill: "#b1c1c2", label: "off season", dim: "cat", val: "off_season" },
     ], 86);
-    if (ADM === "low") {
-      strip("Severity class (fill)", [1, 2, 3, 4, 5].map((c) => ({
-        fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
-        border: c <= 2, cls: c,
-      })), 44);
-    }
+    // Skill is how each category above is DRAWN, so these swatches carry no
+    // colour of their own — white boxes wearing the map's own distinction.
+    strip(ADM === "low" ? "Skill (line style)" : "Skill (fill style)", [
+      { fill: "#ffffff", outline: "solid", label: "high skill",
+        dim: "skill", val: "skill_high" },
+      ADM === "low"
+        ? { fill: "#ffffff", outline: "dashed", label: "moderate skill",
+            dim: "skill", val: "skill_mod" }
+        : { fill: "#ffffff", outline: "solid", hatch: "grey", label: "moderate skill",
+            dim: "skill", val: "skill_mod" },
+    ], 84, "boxes");
+    sevBlock = ADM === "low"
+      ? strip("Severity class (fill)", [1, 2, 3, 4, 5].map((c) => ({
+          fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
+          chipLabel: `class ${c}`, border: c <= 2, dim: "cls", val: c,
+        })), 44)
+      : null;
+    // Pins outlive every other control change, so the legend always states what
+    // is pinned and offers one click to drop it.
+    clearChip = document.createElement("button");
+    clearChip.type = "button";
+    clearChip.id = "hnrp-legend-clear";
+    clearChip.hidden = true;
+    clearChip.addEventListener("click", clearPins);
+    root.appendChild(clearChip);
+    // Backstop: a pointer that leaves the legend without the segment's own
+    // mouseleave firing (fast exit, re-render under the cursor, tab switch)
+    // would otherwise leave the hover highlight stuck on.
+    root.addEventListener("mouseleave", () => {
+      if (!hover) return;
+      hover = null;
+      refreshLegendDim();
+      renderMap();
+    });
   }
+  let sevBlock = null;
   // (built at the end of setup — it reads sevColors(), declared further down)
 
   // ── Scatter (REMOVED 2026-08) ────────────────────────────────────────────────
@@ -801,7 +856,6 @@
     const country = countrySel.value;
     const rows = country
       ? data.rows.filter((r) => r.country === country
-            && (!droughtOnly() || isDrought(rawSlotOf(r)))
             && (pinMode() ? sevValOf(r) != null
               : ipcMode() ? sevTotOf(r) > 0 && segsOf(r) : !!segsOf(r)))
           .sort(BAR_SORTS[barSortSel.value] || BAR_SORTS.sev4)
@@ -1059,11 +1113,18 @@
     document.querySelectorAll("#hnrp-legend [data-ramp]").forEach((el) => {
       el.style.background = sevColors()[+el.dataset.ramp];
     });
+    // PiN mode classifies nothing, so the class strip would be a legend for an
+    // encoding the map isn't using — and a class pinned before the switch would
+    // silently dim every unit (nothing can match). Drop both.
+    if (sevBlock) {
+      sevBlock.hidden = pinMode();
+      if (pinMode() && pinned.cls.size) pinned.cls.clear();
+    }
+    refreshLegendDim();
     sortSevOpt.textContent = `Severity (${sevLabel()})`;
     renderMap(); renderBars(); renderTable();
   }
-  for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel,
-                    droughtOnlyEl, triSel, ipcPeriodSel]) {
+  for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel, triSel, ipcPeriodSel]) {
     el.addEventListener("change", renderAll);
   }
   barSortSel.addEventListener("change", renderBars);
@@ -1080,6 +1141,11 @@
     fitCountry(false); // instant on reveal — the panel just appeared, nothing to glide from
     renderAll(); // paths may mount after the panel becomes visible — restyle then
   };
+  // Escape drops every pinned legend entry — the keyboard route out of a
+  // highlight, for when the chip itself has scrolled out of view.
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !document.getElementById("tab-hnrp").hidden) clearPins();
+  });
   buildHnrpLegend(); // safe here: every const it reads is initialised by now
   restoreControls(); // after options are populated, before the first render
   renderAll();
