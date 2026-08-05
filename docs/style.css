@@ -317,6 +317,13 @@ footer p { margin: 4px 0; }
 #hnrp-bars-wrap { margin: 6px 0 14px; }
 #hnrp-bars-wrap h3 { font-size: 0.95rem; margin: 10px 0 6px; }
 #hnrp-bars { width: 100%; display: block; }
+/* Bar rows keep their identity across renders, so a legend filter reads as
+   rows leaving and the rest closing the gap — not as the chart blinking. */
+#hnrp-bars .bar-row { transition: transform 0.3s ease, opacity 0.18s ease; }
+#hnrp-bars .bar-row.leaving, #hnrp-bars .bar-row.entering { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  #hnrp-bars .bar-row { transition: none; }
+}
 #hnrp-bars-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
 #hnrp-bars-legend i { display: inline-block; width: 12px; height: 12px; border: 1px solid rgba(0,0,0,0.12); vertical-align: -2px; margin-right: 4px; }
 #hnrp-bars-legend i.tick { width: 2px; height: 14px; background: #1d2021; border: none; vertical-align: -3px; }

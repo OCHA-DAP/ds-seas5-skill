@@ -558,9 +558,10 @@
   const HL_MATCH = {
     cat: (cat, cls, v) => !!cat && (catBase(cat) === v
       || (v === "none" && (cat === "high_none" || cat === "mid_none"))),
-    skill: (cat, cls, v) => !!cat && (v === "skill_high"
-      ? cat.endsWith("_high") || cat === "high_none"
-      : cat.endsWith("_mod") || cat === "mid_none"),
+    skill: (cat, cls, v) => !!cat && (
+      v === "skill_high" ? cat.endsWith("_high") || cat === "high_none"
+      : v === "skill_mod" ? cat.endsWith("_mod") || cat === "mid_none"
+      : cat === "low_skill"),
     cls: (cat, cls, v) => cls != null && String(cls) === v,
   };
   // OR within a dimension, AND across them: "strongly below" × "class 4" is the
@@ -576,10 +577,13 @@
   // choropleth read as missing data rather than as filtered out).
   const isDimmed = (cat, cls) => noMatch(cat, cls, activeOf);
   const isFilteredOut = (cat, cls) => noMatch(cat, cls, (dim) => pinned[dim]);
+  let tipsFor = null; // country selection the tooltip bindings were synced for
   function renderMap() {
     renderOutline();
     renderTriLabels();
     const sel = countrySel.value;
+    const syncTips = tipsFor !== sel;
+    tipsFor = sel;
     layer.eachLayer((l) => {
       const el = l._path;
       if (!el) return;
@@ -588,9 +592,15 @@
       // "no qualifying drought signal" would be a lie about units that are merely
       // filtered out of view.
       const offCountry = sel && (!r || r.country !== sel);
-      if (offCountry && l.getTooltip()) l.unbindTooltip();
-      if (!offCountry && !l.getTooltip()) {
-        l.bindTooltip(() => tipHtml(l.feature), { sticky: true });
+      // Only when the selection actually changed: bindTooltip leaks a focus
+      // listener that unbindTooltip never removes (Leaflet 1.9.4), so rebinding
+      // on every render — this one runs on each legend hover — stacks up
+      // handlers that throw once their tooltip is gone.
+      if (syncTips) {
+        if (offCountry && l.getTooltip()) l.unbindTooltip();
+        if (!offCountry && !l.getTooltip()) {
+          l.bindTooltip(() => tipHtml(l.feature), { sticky: true });
+        }
       }
       if (offCountry || !r || (!ipcMode() && !inHnrp(r))) {
         // Out of scope for the current mode: blend into the world backdrop —
@@ -718,6 +728,8 @@
         // category is a boundary line (solid = high skill, dashed = moderate),
         // at the fixed admin levels it is the fill (plain vs hatched).
         if (sg.outline) cell.style.border = `2px ${sg.outline} #1d2021`;
+        // "no line drawn" — just enough edge to see where the box is
+        if (sg.faint) cell.style.border = "1px solid #dfe6e6";
         if (sg.ramp != null) cell.dataset.ramp = sg.ramp;
         const lbl = document.createElement("span");
         lbl.className = "ls-lbl"; lbl.textContent = sg.label;
@@ -742,15 +754,22 @@
     ], 86);
     // Skill is how each category above is DRAWN, so these swatches carry no
     // colour of their own — white boxes wearing the map's own distinction.
-    strip(ADM === "low" ? "Skill (line style)" : "Skill (fill style)", [
-      { fill: "#ffffff", outline: "solid", label: "high skill",
-        dim: "skill", val: "skill_high" },
-      ADM === "low"
-        ? { fill: "#ffffff", outline: "dashed", label: "moderate skill",
-            dim: "skill", val: "skill_mod" }
-        : { fill: "#ffffff", outline: "solid", hatch: "grey", label: "moderate skill",
-            dim: "skill", val: "skill_mod" },
-    ], 84, "boxes");
+    // Below the skill floor (r < 0.30) no category is drawn at all: at the
+    // lowest level that means no boundary line, hence a swatch with no outline.
+    strip(ADM === "low" ? "Skill (line style)" : "Skill (fill style)", ADM === "low"
+      ? [{ fill: "#ffffff", outline: "solid", label: "high skill",
+           dim: "skill", val: "skill_high" },
+         { fill: "#ffffff", outline: "dashed", label: "moderate skill",
+           dim: "skill", val: "skill_mod" },
+         { fill: "#ffffff", faint: true, label: "no skill",
+           dim: "skill", val: "low_skill" }]
+      : [{ fill: "#ffffff", outline: "solid", label: "high skill",
+           dim: "skill", val: "skill_high" },
+         { fill: "#ffffff", outline: "solid", hatch: "grey", label: "moderate skill",
+           dim: "skill", val: "skill_mod" },
+         { fill: "#ffffff", outline: "solid", hatch: "cross", label: "no skill",
+           dim: "skill", val: "low_skill" }],
+      84, "boxes");
     // Both sources classify every unit (PiN by the class holding its PiN, IPC by
     // the area rule), so the class strip belongs to the lowest view outright.
     if (ADM === "low") {
@@ -878,7 +897,7 @@
     barsHint.textContent = country && anyPinned()
       ? "No areas in this country match the pinned legend filters."
       : BARS_HINT;
-    if (!rows.length) { barRows.length = 0; return; }
+    if (!rows.length) { resetBarRows(); return; }
     if (pinMode()) {
       barsTitle.textContent = `${country} — PiN${secTag()} and severity class, ` +
         `per ${ADM_LABEL[ADM]} (plan data ${planYrOf(rows[0]) ?? "–"}` +
@@ -895,11 +914,29 @@
     // 13px swatches — "Intersectoral severity" is the widest thing here.
     const COL = { cat: 2, sev: 108, name: 226 };
     const ROW = 26, M = { l: 392, r: 24, t: 26, b: 34 };
+    // Two layers: chrome (grid, headers, axis) is redrawn every render; rows
+    // persist between renders, keyed by pcode, so a legend pin can slide and
+    // fade them rather than blink the chart.
+    if (!rowsG) {
+      chromeG = document.createElementNS(NS, "g");
+      rowsG = document.createElementNS(NS, "g");
+      barsSvg.append(chromeG, rowsG);
+    }
+    // Nothing to animate BETWEEN countries or sources — those swap the whole
+    // population of the chart, and cross-fading two unrelated sets reads as noise.
+    const barsKeyNow = `${country}|${srcTypeSel.value}|${ADM}`;
+    if (barsKeyNow !== barsKey) { barsKey = barsKeyNow; resetBarRows(); }
+    chromeG.innerHTML = "";
+    // Hold the taller box while rows are on their way out, so they fade in view
+    // instead of being clipped; settle to the exact height once they are gone.
     const H = M.t + M.b + rows.length * ROW;
-    barsSvg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-    barsSvg.style.height = H + "px";
-    barsSvg.innerHTML = "";
-    const g = (tag, attrs, parent = barsSvg) => {
+    const Hshow = Math.max(H, prevBarsH);
+    prevBarsH = H;
+    barsSvg.setAttribute("viewBox", `0 0 ${W} ${Hshow}`);
+    barsSvg.style.height = Hshow + "px";
+    clearTimeout(barsSettle);
+    if (Hshow !== H) barsSettle = setTimeout(renderBars, EXIT_MS + 20);
+    const g = (tag, attrs, parent = chromeG) => {
       const el = document.createElementNS(NS, tag);
       for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
       parent.appendChild(el);
@@ -954,13 +991,40 @@
     g("line", { x1: 0, x2: W - M.r, y1: M.t - 4, y2: M.t - 4, stroke: "#e2e8e8" });
 
     barRows.length = 0;
+    const alive = new Set();
     rows.forEach((r, i) => {
-      const y = M.t + i * ROW;
+      const y = 0; // rows are positioned by their group's transform, not by y
       const cat = catOf(r);
       const cls = clsOf(r);
-      // One group per row, so a legend hover can pale whole rows without
-      // rebuilding the chart.
-      const row = g("g", {});
+      // One group per row: a legend hover pales whole rows without rebuilding,
+      // and a row kept across renders animates from wherever it was.
+      alive.add(r.pcode);
+      let row = rowEls.get(r.pcode);
+      const entering = !row;
+      if (entering) {
+        row = document.createElementNS(NS, "g");
+        row.setAttribute("class", "bar-row entering");
+        rowsG.appendChild(row);
+        rowEls.set(r.pcode, row);
+      } else {
+        row.classList.remove("leaving"); // caught on its way out — bring it back
+        row.innerHTML = "";
+      }
+      const top = M.t + i * ROW;
+      if (entering) {
+        // Land at the final position without sliding in from the origin, THEN
+        // let the transition take over. Two frames, not one: the transparent
+        // starting style has to be committed before the class comes off, or the
+        // browser has nothing to animate from and the row just appears.
+        row.style.transition = "none";
+        row.style.transform = `translateY(${top}px)`;
+        requestAnimationFrame(() => {
+          row.style.transition = "";
+          requestAnimationFrame(() => row.classList.remove("entering"));
+        });
+      } else {
+        row.style.transform = `translateY(${top}px)`;
+      }
       barRows.push({ el: row, cat, cls });
       const gr = (tag, attrs) => g(tag, attrs, row);
       const titled = (el, text) => {
@@ -1027,11 +1091,30 @@
           `${r.name ?? r.pcode} — targeted: ${fmtN(tgt)}${tgtFlag(r)}`);
       }
     });
+    // Rows the filter dropped: fade them where they stand, then drop them for
+    // real — unless a later render revives them first.
+    for (const [pcode, el] of rowEls) {
+      if (alive.has(pcode) || el.classList.contains("leaving")) continue;
+      el.classList.add("leaving");
+      setTimeout(() => {
+        if (!el.classList.contains("leaving")) return; // revived
+        el.remove();
+        if (rowEls.get(pcode) === el) rowEls.delete(pcode);
+      }, EXIT_MS);
+    }
     paintBarDim();
   }
   // Legend hover pales matching-out rows without rebuilding the chart (a pin,
   // which changes WHICH rows exist, re-runs renderBars instead).
   const barRows = [];
+  const rowEls = new Map(); // pcode -> <g>, including rows mid-exit
+  const EXIT_MS = 300;      // must outlast the .bar-row opacity transition
+  let chromeG = null, rowsG = null, barsKey = null, barsSettle = 0, prevBarsH = 0;
+  function resetBarRows() {
+    if (rowsG) rowsG.innerHTML = "";
+    rowEls.clear();
+    barRows.length = 0;
+  }
   function paintBarDim() {
     for (const b of barRows) {
       b.el.setAttribute("opacity", isDimmed(b.cat, b.cls) ? "0.15" : "1");
