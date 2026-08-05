@@ -5,9 +5,10 @@
 // skill), and the ranked table. Reuses app.js globals: STYLE, classify, catBase,
 // CAT_LABEL, T, buildPatterns.
 (async function () {
-  // Admin level via ?adm=1|2|3|low: switching reloads the page with that
-  // level's payload — the whole tab is data-driven, so a reload is the simplest
-  // correct switch. Default is "low": each country at its finest available level.
+  // The tab shows every country at its finest available admin level — the level
+  // the HNRP itself publishes, where each unit carries one severity class. The
+  // fixed levels remain reachable as an unlisted ?adm=1|2|3 escape hatch (no
+  // picker: switching would reload the page with that level's payload).
   const ADM_FILES = {
     low: ["data/hnrp_drought_low.json", "data/hnrp_low.geojson"],
     1: ["data/hnrp_drought.json", "data/hnrp_adm1.geojson"],
@@ -35,22 +36,21 @@
   } catch {
     return; // data files not built yet — leave the tab empty
   }
-  const admSel = document.getElementById("hnrp-adm");
-  admSel.value = String(ADM);
-  document.querySelector(".hnrp-h").textContent = `Severity vs targeted, per ${ADM_LABEL[ADM]}`;
+  // (the heading this used to retitle belonged to the removed scatter; the table
+  // below keeps its own static "Matching areas, ranked")
   // Parent admin-1 name qualifies adm2 units (district names repeat across regions).
   const dispName = (r) => (r.parent ? `${r.name ?? r.pcode} (${r.parent})` : (r.name ?? r.pcode));
-  // Every control survives the admin-level reload (and makes links shareable
-  // with their settings): state is carried in the URL query string.
+  // Every control survives a reload (and makes links shareable with their
+  // settings): state is carried in the URL query string.
   const CTLS = {
     skill: "hnrp-skill", rp: "hnrp-rp", tri: "hnrp-tri",
     sev: "hnrp-sev-type", lvl: "hnrp-sev-lvl", ipcp: "hnrp-ipc-period",
-    country: "hnrp-country", sort: "hnrp-bar-sort",
+    country: "hnrp-country",
   };
   function stateURL() {
     const u = new URL(location.href);
-    if (admSel.value === "low") u.searchParams.delete("adm");
-    else u.searchParams.set("adm", admSel.value);
+    if (ADM === "low") u.searchParams.delete("adm");
+    else u.searchParams.set("adm", String(ADM));
     for (const [k, id] of Object.entries(CTLS)) {
       const el = document.getElementById(id);
       if (el && el.value) u.searchParams.set(k, el.value);
@@ -68,7 +68,6 @@
     if (location.hash.replace("#", "") !== "hnrp") return;
     history.replaceState(null, "", stateURL().toString());
   }
-  admSel.addEventListener("change", () => { location.href = stateURL().toString(); });
   function restoreControls() {
     const q = new URLSearchParams(location.search);
     for (const [k, id] of Object.entries(CTLS)) {
@@ -139,7 +138,11 @@
   const inHnrp = (r) => r.sev_total > 0 || r.pin != null || r.targeted != null
     || r.sec != null || r.pbs_tot != null;
 
-  // ── Severity source: JIAF inter-sectoral 4+ (default) or IPC/CH phase N+ ─────
+  // ── Severity source: the plan's PiN (default) or IPC/CH phase N+ ────────────
+  // PiN mode is the plain plan figure per area — one PiN and one severity class
+  // per unit, as the plan publishes them. (The PiN-by-Severity distribution
+  // behind that class is no longer split out: pockets of higher need inside a
+  // unit are ignored, the unit takes the class holding its PiN.)
   // IPC rows carry a list of analysis periods (current / projections, each with a
   // validity window). Rather than a per-country menu of overlapping rounds, one
   // global choice: "Now" = the most recent estimate covering the issuance month
@@ -170,12 +173,6 @@
   }
   function sevValOf(r) {
     if (pinMode()) return pinOf(r);
-    if (srcTypeSel.value === "jiaf") {
-      // People-level: the plan's PiN-by-severity distribution (JIAF 2.0 PbS,
-      // hpc.pin_admin). Plans without a class breakdown (GTM/SLV/VEN) show dashes.
-      if (!r.pb) return null;
-      return r.pb.slice(lvl() - 1).reduce((a, b) => a + (b ?? 0), 0);
-    }
     const c = ipcComboOf(r);
     if (!c) return null;
     return c.p.slice(lvl() - 1).reduce((a, b) => a + (b ?? 0), 0);
@@ -184,11 +181,7 @@
   // shares use the plan's JIAF analysed population (same plan, same admin unit).
   const sevTotOf = (r) => (ipcMode() ? (ipcComboOf(r)?.tot ?? null) : r.sev_total);
   const lvlTag = () => (lvl() === 5 ? "5" : lvl() + "+");
-  // JIAF figures are now people-level: PiN per severity class from the plan's
-  // PiN-by-Severity distribution — labelled plainly as "PiN N+".
-  const sevLabel = () => (pinMode() ? `PiN${secTag()}`
-    : srcTypeSel.value === "jiaf" ? `PiN ${lvlTag()}`
-    : `IPC ${lvlTag()}`);
+  const sevLabel = () => (pinMode() ? `PiN${secTag()}` : `IPC ${lvlTag()}`);
 
   // Exercise (analysis) month + validity window of an IPC combo — spelled out
   // everywhere a figure from it appears, since periods differ by country.
@@ -538,13 +531,12 @@
       }));
     });
   }
-  // The unit's severity class, for the outline (lowest view only — the finest
-  // level is where the one-class-per-unit classification is native):
-  // PbS mode = the class holding the most PiN (single class for most plans);
+  // The unit's severity class (lowest view only — the finest level is where the
+  // one-class-per-unit classification is native):
+  // PiN mode = the class holding the unit's PiN (a single class for most plans);
   // IPC mode = the IPC area-classification rule (highest phase reaching ≥20%
-  // of the analysed population); PiN mode = none.
+  // of the analysed population).
   function sevClassOf(r) {
-    if (pinMode()) return null;
     if (ipcMode()) {
       const c = ipcComboOf(r);
       if (!c || !c.tot) return null;
@@ -751,12 +743,14 @@
         : { fill: "#ffffff", outline: "solid", hatch: "grey", label: "moderate skill",
             dim: "skill", val: "skill_mod" },
     ], 84, "boxes");
-    sevBlock = ADM === "low"
-      ? strip("Severity class (fill)", [1, 2, 3, 4, 5].map((c) => ({
-          fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
-          border: c <= 2, dim: "cls", val: c,
-        })), 44)
-      : null;
+    // Both sources classify every unit (PiN by the class holding its PiN, IPC by
+    // the area rule), so the class strip belongs to the lowest view outright.
+    if (ADM === "low") {
+      strip("Severity class (fill)", [1, 2, 3, 4, 5].map((c) => ({
+        fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
+        border: c <= 2, dim: "cls", val: c,
+      })), 44);
+    }
     // Pins outlive every other control change, so there is always one click
     // back to the unfiltered map.
     clearChip = document.createElement("button");
@@ -775,7 +769,6 @@
       renderMap();
     });
   }
-  let sevBlock = null;
   // (built at the end of setup — it reads sevColors(), declared further down)
 
   // ── Scatter (REMOVED 2026-08) ────────────────────────────────────────────────
@@ -799,12 +792,10 @@
   const JIAF_LABELS = ["1 — minimal", "2 — stress", "3 — severe", "4 — extreme", "5 — catastrophic"];
   const IPC_LABELS = ["1 — minimal", "2 — stressed", "3 — crisis", "4 — emergency", "5 — catastrophe"];
   const sevClassLabels = () => (ipcMode() ? IPC_LABELS : JIAF_LABELS);
-  // Class breakdown for the bars: JIAF classes or the selected IPC period's phases.
-  // PiN has no class breakdown — bars fall back to a single neutral segment.
-  const PIN_COLOR = "#9db1b3";
-  const segsOf = (r) => (pinMode() ? null
-    : ipcMode() ? (ipcComboOf(r)?.p ?? null)
-    : (r.pb ?? null));
+  // Class breakdown for the bars — IPC mode only: the selected period's phases.
+  // A PiN bar is one figure for the unit, coloured by the unit's own class.
+  const PIN_COLOR = "#9db1b3"; // classless units (plans publishing no PbS)
+  const segsOf = (r) => (pinMode() ? null : (ipcComboOf(r)?.p ?? null));
   const barsWrap = document.getElementById("hnrp-bars-wrap");
   const barsHint = document.getElementById("hnrp-bars-hint");
   const barsSvg = document.getElementById("hnrp-bars");
@@ -818,17 +809,18 @@
     : v >= 1e3 ? Math.round(v / 1e3) + "k" : String(Math.round(v)));
 
   function renderBarsLegend() {
+    // In PiN mode the bar IS the severity colour, so the ramp legend applies to
+    // both modes — only the class range differs (IPC stacks from barC0()).
     barsLegend.innerHTML =
-      (pinMode()
-        ? `<span><i style="background:${PIN_COLOR}"></i> PiN${secTag()}</span>`
-        : sevColors().map((c, i) => (i < barC0() ? ""
-            : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("")) +
-      `<span><i class="tick"></i> targeted</span>` +
-      `<span>left swatch = forecast category</span>`;
+      sevColors().map((c, i) => ((!pinMode() && i < barC0()) ? ""
+        : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("") +
+      (pinMode() ? `<span><i style="background:${PIN_COLOR}"></i> no class published</span>` : "") +
+      `<span><i class="tick"></i> targeted</span>`;
   }
 
-  // Sort control: severity 4+ first by default; forecast order puts droughts on top.
-  const barSortSel = document.getElementById("hnrp-bar-sort");
+  // Bar sorting: click a column header. Values sort high→low on first click,
+  // names A→Z; clicking the active header flips it. Forecast order puts the
+  // worst droughts on top.
   const CAT_ORDER = ["drought_vsev_high", "drought_vsev_mod", "drought_sev_high",
     "drought_sev_mod", "flood_vsev_high", "flood_vsev_mod", "flood_sev_high",
     "flood_sev_mod", "high_none", "mid_none", "low_skill", "off_season"];
@@ -836,42 +828,45 @@
     const i = CAT_ORDER.indexOf(catOf(r) ?? "");
     return i === -1 ? CAT_ORDER.length : i;
   };
+  // key -> [comparator in its DEFAULT direction, sorts a text column?]
   const BAR_SORTS = {
-    sev4: (a, b) => (sevValOf(b) ?? 0) - (sevValOf(a) ?? 0),
-    total: (a, b) => (sevTotOf(b) ?? 0) - (sevTotOf(a) ?? 0),
-    targeted: (a, b) => (tgtOf(b) ?? 0) - (tgtOf(a) ?? 0),
-    forecast: (a, b) => catRank(a) - catRank(b) || (sevValOf(b) ?? 0) - (sevValOf(a) ?? 0),
-    name: (a, b) => String(a.name ?? a.pcode).localeCompare(String(b.name ?? b.pcode)),
+    forecast: [(a, b) => catRank(a) - catRank(b) || (sevValOf(b) ?? 0) - (sevValOf(a) ?? 0), false],
+    severity: [(a, b) => (sevClassOf(b) ?? 0) - (sevClassOf(a) ?? 0)
+      || (sevValOf(b) ?? 0) - (sevValOf(a) ?? 0), false],
+    name: [(a, b) => String(a.name ?? a.pcode).localeCompare(String(b.name ?? b.pcode)), true],
+    value: [(a, b) => (sevValOf(b) ?? 0) - (sevValOf(a) ?? 0), false],
+    targeted: [(a, b) => (tgtOf(b) ?? 0) - (tgtOf(a) ?? 0), false],
   };
+  let barSort = "value", barSortFlip = false;
 
   function renderBars() {
     renderBarsLegend();
     barsFullEl.closest("label").style.display = pinMode() ? "none" : "";
     const country = countrySel.value;
+    const [cmp, isText] = BAR_SORTS[barSort] ?? BAR_SORTS.value;
     const rows = country
       ? data.rows.filter((r) => r.country === country
-            && (pinMode() ? sevValOf(r) != null
-              : ipcMode() ? sevTotOf(r) > 0 && segsOf(r) : !!segsOf(r)))
-          .sort(BAR_SORTS[barSortSel.value] || BAR_SORTS.sev4)
+            && (pinMode() ? sevValOf(r) != null : sevTotOf(r) > 0 && segsOf(r)))
+          .sort(barSortFlip ? (a, b) => cmp(b, a) : cmp)
       : [];
     barsWrap.hidden = rows.length === 0;
     barsHint.hidden = rows.length > 0;
     if (!rows.length) return;
     if (pinMode()) {
-      barsTitle.textContent = `${country} — PiN${secTag()} per ${ADM_LABEL[ADM]}` +
-        ` (plan data ${planYrOf(rows[0]) ?? "–"})`;
-    } else if (ipcMode()) {
+      barsTitle.textContent = `${country} — PiN${secTag()} and severity class, ` +
+        `per ${ADM_LABEL[ADM]} (plan data ${planYrOf(rows[0]) ?? "–"}` +
+        `${rows[0].pba ? ", class from the area classification" : ""})`;
+    } else {
       const c = ipcComboOf(rows[0]);
       barsTitle.textContent = `${country} — population by IPC/CH phase, per ${ADM_LABEL[ADM]}` +
         (c ? ` (${comboDesc(c)})` : "");
-    } else {
-      barsTitle.textContent = `${country} — PiN by JIAF severity class, ` +
-        `per ${ADM_LABEL[ADM]} (${rows[0].pbs_yr ?? "–"} analysis` +
-        `${rows[0].pba ? ", classes from the area classification" : ""})`;
     }
 
     const W = barsSvg.parentElement.clientWidth || 900;
-    const ROW = 26, M = { l: 205, r: 24, t: 6, b: 34 };
+    // Left gutter holds three labelled columns: forecast swatch, severity
+    // square, admin name — each header wide enough to read and click.
+    const COL = { cat: 2, sev: 108, name: 168 };
+    const ROW = 26, M = { l: 330, r: 24, t: 26, b: 34 };
     const H = M.t + M.b + rows.length * ROW;
     barsSvg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     barsSvg.style.height = H + "px";
@@ -902,40 +897,68 @@
         : barC0() ? "People (analysed population in classes 3–5)"
         : "People (analysed population by severity class)";
 
+    // Clickable column headers, in place of a sort dropdown: each names the
+    // column beneath it and sorts by it. "targeted" rides along in the value
+    // header — it has no column of its own, only the tick on each bar.
+    function header(x, key, label, anchor = "start") {
+      const t = g("text", { x, y: M.t - 10, "font-size": 11, "text-anchor": anchor,
+                            fill: barSort === key ? "#1d2021" : "#555",
+                            "font-weight": barSort === key ? 600 : 400 });
+      // ↓ always means "descending" — which is the DEFAULT for values (high
+      // first) and the flipped state for names (Z→A), as in the table below.
+      const desc = BAR_SORTS[key][1] ? barSortFlip : !barSortFlip;
+      t.textContent = label + (barSort === key ? (desc ? " ↓" : " ↑") : "");
+      t.style.cursor = "pointer";
+      t.addEventListener("click", () => {
+        if (barSort === key) barSortFlip = !barSortFlip;
+        else { barSort = key; barSortFlip = false; }
+        renderBars();
+      });
+      return t;
+    }
+    header(COL.cat, "forecast", "Forecast category");
+    header(COL.sev, "severity", "Severity");
+    header(COL.name, "name", "Admin name");
+    header(M.l, "value", pinMode() ? "PiN" : `${sevLabel()} pop`);
+    // Fixed offset, not a measured one: getComputedTextLength() returns 0 while
+    // the panel is hidden, which would stack the two headers on top of each other.
+    header(M.l + 96, "targeted", "targeted");
+    g("line", { x1: 0, x2: W - M.r, y1: M.t - 4, y2: M.t - 4, stroke: "#e2e8e8" });
+
     rows.forEach((r, i) => {
       const y = M.t + i * ROW;
       const cat = catOf(r);
-      // Forecast-category swatch + admin name.
-      g("rect", { x: M.l - 199, y: y + ROW / 2 - 7, width: 13, height: 13,
+      const cls = ADM === "low" ? sevClassOf(r) : null;
+      // Forecast-category swatch, severity square, admin name.
+      g("rect", { x: COL.cat, y: y + ROW / 2 - 7, width: 13, height: 13,
                   fill: cat ? fillOf(cat) : HNRP_MUTED.fill,
                   stroke: cat ? STYLE[cat][1] : HNRP_MUTED.edge, "stroke-width": 1 });
-      let nameX = M.l - 180;
-      if (ADM === "low") {
-        const cls = sevClassOf(r);
-        if (cls) {
-          const sq = g("rect", { x: M.l - 182, y: y + ROW / 2 - 7, width: 13, height: 13,
-                                 fill: sevColors()[cls - 1], stroke: "#9db1b3",
-                                 "stroke-width": 0.6 });
-          const ti = document.createElementNS(NS, "title");
-          ti.textContent = `severity class ${cls} — ${sevClassLabels()[cls - 1]}`;
-          sq.appendChild(ti);
-        }
-        nameX = M.l - 165;
+      if (cls) {
+        const sq = g("rect", { x: COL.sev, y: y + ROW / 2 - 7, width: 13, height: 13,
+                               fill: sevColors()[cls - 1], stroke: "#9db1b3",
+                               "stroke-width": 0.6 });
+        const ti = document.createElementNS(NS, "title");
+        ti.textContent = `severity class ${cls} — ${sevClassLabels()[cls - 1]}`;
+        sq.appendChild(ti);
       }
       const nm0 = r.name ?? r.pcode;
-      const maxLen = ADM === "low" ? 22 : 24;
+      const maxLen = 24;
       const name = nm0.length > maxLen ? nm0.slice(0, maxLen - 1) + "…" : nm0;
-      g("text", { x: nameX, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" }).textContent = name;
+      g("text", { x: COL.name, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" }).textContent = name;
 
-      // Stacked class segments with a white spacer between them (single PiN
-      // segment in PiN mode — no class breakdown exists).
+      // PiN mode: one bar per unit, carrying the unit's own severity colour (the
+      // same encoding as the map's fill). IPC mode: the phase distribution,
+      // stacked, with a white spacer between segments.
       if (pinMode()) {
         const v = sevValOf(r) ?? 0;
         if (v > 0) {
           const seg = g("rect", { x: X(0), y: y + 4, width: Math.max(X(v) - X(0), 0.5),
-                                  height: ROW - 9, fill: PIN_COLOR });
+                                  height: ROW - 9,
+                                  fill: cls ? sevColors()[cls - 1] : PIN_COLOR,
+                                  stroke: "#9db1b3", "stroke-width": 0.6 });
           const title = document.createElementNS(NS, "title");
-          title.textContent = `${r.name ?? r.pcode} — PiN${secTag()}: ${fmtN(v)}`;
+          title.textContent = `${r.name ?? r.pcode} — PiN${secTag()}: ${fmtN(v)}` +
+            (cls ? ` · severity class ${cls} (${sevClassLabels()[cls - 1]})` : "");
           seg.appendChild(title);
         }
       } else {
@@ -947,8 +970,7 @@
           const seg = g("rect", { x: X(acc), y: y + 4, width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
                                   height: ROW - 9, fill: sevColors()[c] });
           const title = document.createElementNS(NS, "title");
-          title.textContent = `${r.name ?? r.pcode} — ${ipcMode()
-            ? `IPC phase ${c + 1}` : `PiN at severity ${c + 1}`}: ${fmtN(v)}`;
+          title.textContent = `${r.name ?? r.pcode} — IPC phase ${c + 1}: ${fmtN(v)}`;
           seg.appendChild(title);
           acc += v;
         }
@@ -963,12 +985,14 @@
   }
 
   // ── Table ────────────────────────────────────────────────────────────────────
-  const COLS = [
+  // Rebuilt per render: in PiN mode the severity column IS the PiN column, so
+  // carrying both would print the same number twice.
+  const colsNow = () => [
     { key: "country", label: "Country", num: false },
     { key: "name", label: ADM === "low" ? "Admin unit" : `Admin ${ADM}`, num: false },
     { key: "_plan_yr", label: "Plan", num: true },
     ...(ADM === "low" ? [{ key: "sclass", label: "Class", num: true }] : []),
-    { key: "sev4", label: "Severity 4+ pop", num: true },
+    ...(pinMode() ? [] : [{ key: "sev4", label: "Severity 4+ pop", num: true }]),
     { key: "pin", label: "PiN", num: true },
     { key: "targeted", label: "Targeted", num: true },
     { key: "tri_label", label: "Season", num: false },
@@ -976,9 +1000,13 @@
     { key: "pct", label: "Percentile", num: true },
     { key: "r", label: "Skill (r)", num: true },
   ];
-  let sortKey = "sev4", sortDesc = true;
+  let sortKey = "pin", sortDesc = true;
 
   function renderTable() {
+    const COLS = colsNow();
+    // The active column can vanish with a source switch — fall back rather than
+    // sort by a key no column offers.
+    if (!COLS.some((c) => c.key === sortKey)) { sortKey = "pin"; sortDesc = true; }
     thead.innerHTML = "";
     const trh = document.createElement("tr");
     for (const c of COLS) {
@@ -1039,7 +1067,7 @@
             ? `<span class="cls-chip" style="background:${sevColors()[cls - 1]}"></span>${cls}`
             : "–"}</td>`;
         })() : "") +
-        `<td class="num">${fmtN(sevValOf(r))}</td>` +
+        (pinMode() ? "" : `<td class="num">${fmtN(sevValOf(r))}</td>`) +
         `<td class="num">${fmtN(pinOf(r))}</td>` +
         `<td class="num">${fmtN(tgtOf(r))}${tgtYrOf(r)
           ? `<span class="stale-flag" title="targeted from the ${tgtYrOf(r)} plan cycle — none published in the current one">*</span>` : ""}</td>` +
@@ -1098,8 +1126,6 @@
     triSel.appendChild(o);
   }
 
-  // The bar-sort "Severity" option follows the severity-source selector.
-  const sortSevOpt = barSortSel.querySelector('option[value="sev4"]');
   function renderAll() {
     syncURL(); // keep the URL an exact mirror of the controls at all times
     updateIpcPeriodUI();
@@ -1107,21 +1133,12 @@
     document.querySelectorAll("#hnrp-legend [data-ramp]").forEach((el) => {
       el.style.background = sevColors()[+el.dataset.ramp];
     });
-    // PiN mode classifies nothing, so the class strip would be a legend for an
-    // encoding the map isn't using — and a class pinned before the switch would
-    // silently dim every unit (nothing can match). Drop both.
-    if (sevBlock) {
-      sevBlock.hidden = pinMode();
-      if (pinMode() && pinned.cls.size) pinned.cls.clear();
-    }
     refreshLegendDim();
-    sortSevOpt.textContent = `Severity (${sevLabel()})`;
     renderMap(); renderBars(); renderTable();
   }
   for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel, triSel, ipcPeriodSel]) {
     el.addEventListener("change", renderAll);
   }
-  barSortSel.addEventListener("change", renderBars);
   barsFullEl.addEventListener("change", renderBars);
   // finally: whatever happens during re-render, the zoom step must still run.
   countrySel.addEventListener("change", () => {

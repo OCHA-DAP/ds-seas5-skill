@@ -8,9 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Merriweather:wght@700&display=swap" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <!-- versioned: the HNRP legend's box strip and "showing …" chip need this
+  <!-- versioned: the HNRP legend's box strip and clear button need this
        stylesheet and hnrp.js to arrive as a pair, never one from cache -->
-  <link rel="stylesheet" href="style.css?v=20260805a" />
+  <link rel="stylesheet" href="style.css?v=20260805b" />
 </head>
 <body>
   <header>
@@ -165,9 +165,8 @@
         <span class="row-tag">Severity</span>
         <label class="ctl">Source
           <select id="hnrp-sev-type" class="map-select">
-            <option value="ipc" selected>IPC/CH phases</option>
-            <option value="jiaf">PiN by severity</option>
-            <option value="pin">PiN (no severity)</option>
+            <option value="pin" selected>PiN</option>
+            <option value="ipc">IPC/CH phases</option>
           </select>
         </label>
         <label class="ctl" id="hnrp-sev-lvl-wrap">Level
@@ -189,14 +188,6 @@
         <label class="ctl">
           <select id="hnrp-country" class="map-select"><option value="">All</option></select>
         </label>
-        <label class="ctl">Admin level
-          <select id="hnrp-adm" class="map-select">
-            <option value="low" selected>Lowest available</option>
-            <option value="1">Admin 1</option>
-            <option value="2">Admin 2</option>
-            <option value="3">Admin 3</option>
-          </select>
-        </label>
         <span id="hnrp-issued" class="lock-note"></span>
       </div>
     </div>
@@ -207,15 +198,6 @@
     <div id="hnrp-bars-wrap" hidden>
       <div id="hnrp-bars-head">
         <h3 id="hnrp-bars-title"></h3>
-        <label class="ctl">Sort by
-          <select id="hnrp-bar-sort" class="map-select">
-            <option value="sev4" selected>Severity (JIAF 4+)</option>
-            <option value="total">Analysed population</option>
-            <option value="targeted">Targeted</option>
-            <option value="forecast">Forecast category</option>
-            <option value="name">Name</option>
-          </select>
-        </label>
         <label class="toggle">
           <input type="checkbox" id="hnrp-bars-full" />
           Include classes 1–2
@@ -225,8 +207,8 @@
       <div id="hnrp-bars-legend"></div>
     </div>
     <p id="hnrp-bars-hint" class="lock-note">Select a country above to see its per-admin
-      severity breakdown (PiN at each JIAF severity class or population per IPC phase, targeted
-      population, and the forecast category).</p>
+      breakdown (PiN or population per IPC phase, the area's severity class, targeted
+      population, and the forecast category). Click a column header to sort.</p>
 
     <h3 class="hnrp-h">Matching areas, ranked</h3>
     <table id="hnrp-table">
@@ -270,8 +252,9 @@
         cycle is this year or last: Ethiopia (last subnational needs 2024, no newer
         plan) and Syria (last needs 2024; its 2025 severity analysis publishes no
         population figures) are absent entirely. PiN is the plan's headline total for
-        the intersectoral caseload — <em>not</em> a severity band (it has no JIAF-class or
-        IPC-phase breakdown). All PiN/targeted figures shown are the plans'
+        the intersectoral caseload — <em>not</em> a severity band: it is a count of
+        people in need, shown alongside (not split by) the unit's severity class.
+        All PiN/targeted figures shown are the plans'
         <strong>intersectoral</strong> ones.
         Each country shows its <strong>latest plan cycle</strong> (year in the country
         selector, the Plan column, and tooltips); where no newer plan exists the previous
@@ -285,28 +268,24 @@
 
       <h4>Severity sources</h4>
       <p>
-        The <strong>Severity</strong> row picks the source and level. <strong>IPC/CH acute
-        food insecurity phases</strong> (default, via <a
-        href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>), <strong>JIAF
-        severity</strong> from the HNRP severity analysis (latest analysis year per country),
-        or the plan's <strong>PiN</strong> itself (no severity level; shares then divide by
-        the plan's JIAF analysed population). JIAF figures are <em>people-level</em>:
-        the plan's <strong>PiN-by-Severity distribution</strong> (JIAF 2.0 PbS workbooks,
-        latest analysis cycle — mostly 2026), i.e. the number of people in need at each
-        intersectoral severity class per area ("JIAF PiN 3+" = PiN at classes 3–5). Note
-        the granularity: the PbS assigns each finest analysis unit (× population group)
-        <em>one</em> class and places that unit's whole PiN there — within-unit splits
-        exist only where plans publish them (Yemen and Syria, at most two classes). So at
-        admin-2 most units show a single class (matching the unit's area classification),
-        and a mixed distribution emerges only where sub-units or population groups sit at
-        different classes — admin-1 bars mix their districts; IPC, by contrast, publishes
-        genuine within-area phase distributions. Some
-        plans publish PiN without a usable class breakdown (Guatemala, El Salvador and
-        Venezuela publish no classes; South Sudan fills one constant class on every unit —
-        a template artifact) — there, each unit's PiN is placed at its <em>area
-        classification</em> from the severity analysis, the same one-class-per-unit
-        semantic the PbS encodes everywhere else (flagged in the bar-chart title).
-        IPC and JIAF figures do <em>not</em> line up:
+        The <strong>Severity</strong> row picks the source. <strong>PiN</strong> (the
+        default) is the plan's own figure for the area: one intersectoral PiN and one
+        <strong>severity class</strong> per unit, exactly as the plan publishes them.
+        The class comes from the plan's PiN-by-Severity distribution (JIAF 2.0 PbS
+        workbooks, latest analysis cycle — mostly 2026): the PbS assigns each finest
+        analysis unit <em>one</em> class and places that unit's whole PiN there, so at
+        the level shown here it is the unit's area classification. Pockets of higher
+        need inside a unit are not shown — the few plans that publish a within-unit
+        split (Yemen, Syria, at most two classes) are collapsed to the class holding
+        the PiN. Some plans publish PiN with no usable class (Guatemala, El Salvador
+        and Venezuela publish none; South Sudan fills one constant class on every unit
+        — a template artifact); those units keep their PiN and show no class.
+        <strong>IPC/CH acute food insecurity phases</strong> (via <a
+        href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>) is the
+        alternative, and adds a <strong>Level</strong> selector — IPC publishes a genuine
+        within-area phase distribution, so a level (3+, 4+, 5) picks how much of it to
+        count, and the area's class follows the IPC rule (highest phase reaching ≥20% of
+        the analysed population). IPC and plan figures do <em>not</em> line up:
         they measure different things (acute food insecurity vs inter-sectoral needs) over
         different analysed populations, scopes, and periods — compare shapes, not values.
         In IPC mode the map and table also include IPC-covered areas
@@ -319,14 +298,15 @@
 
       <h4>Admin levels</h4>
       <p>
-        The <strong>Admin level</strong> selector switches the whole tab between four
-        views. <em>Lowest available</em> (the default) shows each country at the finest
-        level we can: admin-3 where plans publish it against boundaries we hold
+        Every country is shown at the <strong>finest level we can</strong> — the level
+        the plan itself publishes, where each unit carries a single severity class:
+        admin-3 where plans publish it against boundaries we hold
         (Burkina Faso communes, Myanmar townships, Syria sub-districts, and DR Congo's
         519 zones de santé — via the SNIS/OCHA health-zone shapefile, which matches the
         plan's zone codes exactly), admin-2 for the
-        21-country admin-2 scope, admin-1 elsewhere. Fixed admin-1/2/3 views show one
-        level only. Admin-2 covers ~4,900 units across 21 countries with admin-2
+        21-country admin-2 scope, admin-1 elsewhere. (Fixed single-level views remain
+        reachable at <code>?adm=1</code>, <code>?adm=2</code> or <code>?adm=3</code>,
+        without a picker.) Admin-2 covers ~4,900 units across 21 countries with admin-2
         boundaries and zonal statistics in our database (AFG, BFA, CAF, CMR, COD, COL,
         GTM, HND, HTI, MLI, MOZ, NER, NGA, SDN, SLV, SOM, SSD, TCD, UKR, VEN, YEM —
         the rest lack admin-2 polygons on our side and are excluded on that basis;
@@ -356,22 +336,22 @@
 
       <h4>Reading the map</h4>
       <p>
-        In the <em>Lowest available</em> view the map <strong>fills</strong> each unit
-        with its <strong>severity class colour</strong> (1→5; IPC convention colours in
-        IPC mode, the humanitarianaction.info blue ramp for intersectoral severity) and
-        draws the <strong>forecast category</strong> as each unit's boundary line
-        (dashed = moderate skill, solid = high) — PbS mode uses the class holding the
-        unit's PiN; IPC mode applies the IPC area-classification rule (highest phase
-        reaching ≥20% of the analysed population); PiN mode has no classes, so the
-        classic colouring returns. Hovering a legend entry highlights matching units
+        The map <strong>fills</strong> each unit with its <strong>severity class
+        colour</strong> (1→5; the humanitarianaction.info blue ramp for the plan's own
+        classes, IPC convention colours in IPC mode) and draws the <strong>forecast
+        category</strong> as each unit's boundary line (dashed = moderate skill, solid
+        = high). Hovering a legend entry highlights matching units
         and dims the rest; <strong>clicking</strong> one pins it, so several can be
         combined — entries within a strip are OR-ed, strips AND together (e.g.
         <em>strongly below</em> × <em>moderate skill</em> × <em>class 4</em>). Pinned
         entries stay outlined in the legend; <em>Clear all filters</em>, or Escape,
         drops them all. The same class appears in map tooltips, the table's Class
-        column, and beside each bar-chart row. The severity bars plot classes 3–5 by
-        default (classes 1–2 dominate populous areas and drown the signal — a checkbox
-        restores them).
+        column, and beside each bar-chart row. Selecting a country opens the per-area
+        bars: in PiN mode one bar per unit, carrying that unit's severity colour; in
+        IPC mode the phase distribution, stacked, plotting classes 3–5 by default
+        (classes 1–2 dominate populous areas and drown the signal — a checkbox restores
+        them). Either way the dark tick is the targeted population, and the bar chart's
+        column headers sort it.
       </p>
     </details>
   </section>
@@ -578,7 +558,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260805a"></script>
+  <script src="hnrp.js?v=20260805b"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
