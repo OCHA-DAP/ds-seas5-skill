@@ -169,13 +169,6 @@
             <option value="ipc">IPC/CH phases</option>
           </select>
         </label>
-        <label class="ctl" id="hnrp-sev-lvl-wrap">Level
-          <select id="hnrp-sev-lvl" class="map-select">
-            <option value="3" selected>3+</option>
-            <option value="4">4+</option>
-            <option value="5">5</option>
-          </select>
-        </label>
         <label class="ctl" id="hnrp-ipc-period-wrap" hidden>IPC estimate
           <select id="hnrp-ipc-period" class="map-select">
             <option value="now" selected>Now (latest covering this month)</option>
@@ -198,9 +191,15 @@
     <div id="hnrp-bars-wrap" hidden>
       <div id="hnrp-bars-head">
         <h3 id="hnrp-bars-title"></h3>
-        <label class="toggle">
-          <input type="checkbox" id="hnrp-bars-full" />
-          Include classes 1–2
+        <!-- The phase level only ever changed what the BARS count — the map
+             classifies each area by the IPC area rule, whatever level is set —
+             so it lives with the chart it drives. -->
+        <label class="ctl" id="hnrp-sev-lvl-wrap">Level
+          <select id="hnrp-sev-lvl" class="map-select">
+            <option value="3" selected>3+</option>
+            <option value="4">4+</option>
+            <option value="5">5</option>
+          </select>
         </label>
       </div>
       <svg id="hnrp-bars"></svg>
@@ -274,10 +273,12 @@
         — a template artifact); those units keep their PiN and show no class.
         <strong>IPC/CH acute food insecurity phases</strong> (via <a
         href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>) is the
-        alternative, and adds a <strong>Level</strong> selector — IPC publishes a genuine
-        within-area phase distribution, so a level (3+, 4+, 5) picks how much of it to
-        count, and the area's class follows the IPC rule (highest phase reaching ≥20% of
-        the analysed population). IPC and plan figures do <em>not</em> line up:
+        alternative. IPC publishes a genuine within-area phase distribution, so a
+        <strong>Level</strong> selector — above the bar chart, since that is all it
+        changes — picks how much of it to count: 3+, 4+ or 5. The area's class on the
+        map follows the IPC rule instead (highest phase reaching ≥20% of the analysed
+        population) and does not move with the level. IPC and plan figures do
+        <em>not</em> line up:
         they measure different things (acute food insecurity vs inter-sectoral needs) over
         different analysed populations, scopes, and periods — compare shapes, not values.
         In IPC mode the map also includes IPC-covered areas
@@ -341,10 +342,10 @@
         areas leave it, and return when the pin is dropped. The same class appears in
         map tooltips and beside each bar-chart row. Selecting a country opens the per-area
         bars: in PiN mode one bar per unit, carrying that unit's severity colour; in
-        IPC mode the phase distribution, stacked, plotting classes 3–5 by default
-        (classes 1–2 dominate populous areas and drown the signal — a checkbox restores
-        them). Either way the dark tick is the targeted population, and the bar chart's
-        column headers sort it.
+        IPC mode the phase distribution from the selected <strong>Level</strong> up,
+        stacked (phases 1–2 dwarf the rest in populous areas and drown the signal, so
+        the bars never start below 3). Either way the dark tick is the targeted
+        population, and the bar chart's column headers sort it.
       </p>
     </details>
   </section>
@@ -551,7 +552,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260805g"></script>
+  <script src="hnrp.js?v=20260805h"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

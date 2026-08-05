@@ -819,11 +819,11 @@
   const barsSvg = document.getElementById("hnrp-bars");
   const barsTitle = document.getElementById("hnrp-bars-title");
   const barsLegend = document.getElementById("hnrp-bars-legend");
-  // Classes 1–2 dwarf 3–5 in populous areas and drown the signal — plot 3+ by
-  // default, with a checkbox to bring the full distribution back.
-  const barsFullEl = document.getElementById("hnrp-bars-full");
   const BARS_HINT = barsHint.textContent; // restored whenever it applies again
-  const barC0 = () => (barsFullEl.checked ? 0 : 2);
+  // Lowest class the IPC bars stack, straight from the Level selector above the
+  // chart: 3+ stacks 3–5, 5 stacks 5 alone. (Phases 1–2 dwarf the rest in
+  // populous areas and drown the signal, which is why the floor is never 1.)
+  const barC0 = () => lvl() - 1;
   // The class shown per unit — only the lowest view classifies one unit at a time.
   const clsOf = (r) => (ADM === "low" ? sevClassOf(r) : null);
   // "4 — extreme" already carries the number; don't print it twice.
@@ -870,7 +870,6 @@
 
   function renderBars() {
     renderBarsLegend();
-    barsFullEl.closest("label").style.display = pinMode() ? "none" : "";
     const country = countrySel.value;
     const [cmp, isText] = BAR_SORTS[barSort] ?? BAR_SORTS.value;
     const rows = country
@@ -948,8 +947,7 @@
     }
     g("text", { x: (M.l + W - M.r) / 2, y: H - 4, "text-anchor": "middle", "font-size": 11, fill: "#555" })
       .textContent = pinMode() ? `People in Need${secTag()}`
-        : barC0() ? "People (analysed population in classes 3–5)"
-        : "People (analysed population by severity class)";
+        : `People (analysed population in IPC ${lvlTag()})`;
 
     // Clickable column headers, in place of a sort dropdown: each names the
     // column beneath it and sorts by it. "targeted" rides along in the value
@@ -1166,7 +1164,6 @@
   for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel, triSel, ipcPeriodSel]) {
     el.addEventListener("change", renderAll);
   }
-  barsFullEl.addEventListener("change", renderBars);
   // finally: whatever happens during re-render, the zoom step must still run.
   countrySel.addEventListener("change", () => {
     try { renderAll(); } finally { fitCountry(); }
