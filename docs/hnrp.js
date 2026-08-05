@@ -849,6 +849,12 @@
   const IPC_COLORS = ["#cdfacd", "#fae61e", "#e67800", "#c80000", "#640000"];
   const JIAF_COLORS = ["#e9f2fb", "#d4e5f7", "#82b5e9", "#418fde", "#1f69b3"];
   const sevColors = () => (ipcMode() ? IPC_COLORS : JIAF_COLORS);
+  // Readable ink for a label sitting on one of the ramp colours.
+  const inkOn = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    const lum = 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+    return lum > 150 ? "#1d2021" : "#ffffff";
+  };
   const JIAF_LABELS = ["1 — minimal", "2 — stress", "3 — severe", "4 — extreme", "5 — catastrophic"];
   const IPC_LABELS = ["1 — minimal", "2 — stressed", "3 — crisis", "4 — emergency", "5 — catastrophe"];
   const sevClassLabels = () => (ipcMode() ? IPC_LABELS : JIAF_LABELS);
@@ -901,12 +907,13 @@
     : `${(100 * f).toFixed(f >= 0.1 ? 0 : 1)}%`);
 
   function renderBarsLegend() {
-    // In PiN mode the bar IS the severity colour, so the ramp legend applies to
-    // both modes — only the class range differs (IPC stacks from barC0()).
+    // PiN mode needs no ramp key: the class number is written in its swatch, and
+    // the bar wears the same colour. IPC mode keeps it — the bar there is a
+    // stack of phases, and only a key says which segment is which.
     barsLegend.innerHTML =
-      sevColors().map((c, i) => ((!pinMode() && i < barC0()) ? ""
-        : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("") +
-      (pinMode() ? `<span><i style="background:${PIN_COLOR}"></i> no class published</span>` : "") +
+      (pinMode() ? `<span><i style="background:${PIN_COLOR}"></i> no severity published</span>`
+        : sevColors().map((c, i) => (i < barC0() ? ""
+            : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("")) +
       `<span><i class="tick"></i> targeted</span>` +
       `<span>% columns are of the area's population — hover any figure for the` +
       ` count, the share and the population base used</span>`;
@@ -1126,11 +1133,24 @@
           (sl ? ` · ${sl.key}${sl.lead < 0 ? " (in season)" : ""} — RP ${fmt(sl.rp, 1)} yr, ` +
                 `percentile ${fmt(sl.pct, 1)}, skill r ${fmt(sl.r, 2)}` : "")
         : "No forecast for the selected season");
+      // Which season the category refers to, beside its swatch — omitted below
+      // the skill floor, where there is no alert for a season to qualify.
+      if (sl && cat && cat !== "low_skill") {
+        gr("text", { x: COL.cat + 20, y: y + ROW / 2 + 4, "font-size": 10,
+                     fill: sl.lead < 0 ? "#1d2021" : "#6b7a7b",
+                     "font-weight": sl.lead < 0 ? 600 : 400 })
+          .textContent = sl.key;
+      }
       if (cls) {
-        titled(gr("rect", { x: COL.sev, y: y + ROW / 2 - 7, width: 13, height: 13,
-                            fill: sevColors()[cls - 1], stroke: "#9db1b3",
+        // The class number goes IN the swatch: five steps of one ramp are hard
+        // to tell apart, and the colour is then a cue rather than the only key.
+        titled(gr("rect", { x: COL.sev, y: y + ROW / 2 - 8, width: 15, height: 15,
+                            rx: 2, fill: sevColors()[cls - 1], stroke: "#9db1b3",
                             "stroke-width": 0.6 }),
           sevClassDesc(r));
+        gr("text", { x: COL.sev + 7.5, y: y + ROW / 2 + 4, "text-anchor": "middle",
+                     "font-size": 10, "font-weight": 600, "pointer-events": "none",
+                     fill: inkOn(sevColors()[cls - 1]) }).textContent = String(cls);
       }
       const nm0 = r.name ?? r.pcode;
       const maxLen = 24;
