@@ -368,9 +368,9 @@
     if (ADM === "low") {
       const cls = sevClassOf(r);
       if (cls) {
-        rows += `<div>Severity class: <span style="display:inline-block;width:10px;` +
+        rows += `<div>${sevClassTitle()}: <span style="display:inline-block;width:10px;` +
           `height:10px;background:${sevColors()[cls - 1]};border:1px solid #9db1b3;` +
-          `vertical-align:baseline"></span> ${sevClassLabels()[cls - 1]}</div>`;
+          `vertical-align:baseline"></span> ${cls} — ${sevClassWord(cls)}</div>`;
       }
     }
     // Membership must be per-unit, never assumed from scope: in IPC mode most of a
@@ -563,14 +563,19 @@
       : cat.endsWith("_mod") || cat === "mid_none"),
     cls: (cat, cls, v) => cls != null && String(cls) === v,
   };
-  function isDimmed(cat, cls) {
-    // OR within a dimension, AND across them: "strongly below" × "class 4" is
-    // the intersection. A dimension with nothing active constrains nothing.
+  // OR within a dimension, AND across them: "strongly below" × "class 4" is the
+  // intersection. A dimension with nothing selected constrains nothing.
+  function noMatch(cat, cls, setOf) {
     return HL_DIMS.some((dim) => {
-      const act = activeOf(dim);
+      const act = setOf(dim);
       return act.size > 0 && ![...act].some((v) => HL_MATCH[dim](cat, cls, v));
     });
   }
+  // Hover is transient — it only pales. A pin is a filter: the bar chart drops
+  // non-matching rows outright (the map keeps them, dimmed, since holes in a
+  // choropleth read as missing data rather than as filtered out).
+  const isDimmed = (cat, cls) => noMatch(cat, cls, activeOf);
+  const isFilteredOut = (cat, cls) => noMatch(cat, cls, (dim) => pinned[dim]);
   function renderMap() {
     renderOutline();
     renderTriLabels();
@@ -676,6 +681,7 @@
     for (const d of HL_DIMS) pinned[d].clear();
     refreshLegendDim();
     renderMap();
+    renderBars(); // the filter dropped rows; they come back
   }
   function buildHnrpLegend() {
     const root = document.getElementById("hnrp-legend");
@@ -683,13 +689,15 @@
     const wire = (el, dim, val) => {
       val = String(val);
       el.dataset.hlDim = dim; el.dataset.hlVal = val;
-      const paint = () => { refreshLegendDim(); renderMap(); };
+      // Hover only repaints (bars pale in place); a pin changes which rows the
+      // bar chart holds at all, so it rebuilds the chart.
+      const paint = () => { refreshLegendDim(); renderMap(); paintBarDim(); };
       el.addEventListener("mouseenter", () => { hover = { dim, val }; paint(); });
       el.addEventListener("mouseleave", () => { hover = null; paint(); });
       el.addEventListener("click", () => {
         const set = pinned[dim];
         set.has(val) ? set.delete(val) : set.add(val);
-        paint();
+        refreshLegendDim(); renderMap(); renderBars();
       });
     };
     function strip(title, segs, segWidth, rowClass = "") {
@@ -746,10 +754,11 @@
     // Both sources classify every unit (PiN by the class holding its PiN, IPC by
     // the area rule), so the class strip belongs to the lowest view outright.
     if (ADM === "low") {
-      strip("Severity class (fill)", [1, 2, 3, 4, 5].map((c) => ({
+      // Title and ramp both follow the source — renderAll() keeps them current.
+      strip(sevLegendTitle(), [1, 2, 3, 4, 5].map((c) => ({
         fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
         border: c <= 2, dim: "cls", val: c,
-      })), 44);
+      })), 44).querySelector(".lb-title").id = "hnrp-sev-strip-title";
     }
     // Pins outlive every other control change, so there is always one click
     // back to the unfiltered map.
@@ -767,6 +776,7 @@
       hover = null;
       refreshLegendDim();
       renderMap();
+      paintBarDim();
     });
   }
   // (built at the end of setup — it reads sevColors(), declared further down)
@@ -804,7 +814,18 @@
   // Classes 1–2 dwarf 3–5 in populous areas and drown the signal — plot 3+ by
   // default, with a checkbox to bring the full distribution back.
   const barsFullEl = document.getElementById("hnrp-bars-full");
+  const BARS_HINT = barsHint.textContent; // restored whenever it applies again
   const barC0 = () => (barsFullEl.checked ? 0 : 2);
+  // The class shown per unit — only the lowest view classifies one unit at a time.
+  const clsOf = (r) => (ADM === "low" ? sevClassOf(r) : null);
+  // "4 — extreme" already carries the number; don't print it twice.
+  const sevClassWord = (cls) => sevClassLabels()[cls - 1].replace(/^\d+\s*—\s*/, "");
+  // The severity encoding is the plan's intersectoral class, or IPC's phase —
+  // named in full wherever it is labelled.
+  const sevClassTitle = () => (pinMode() ? "Intersectoral severity" : "IPC phase");
+  // "IPC phase class" reads badly — the phase IS the class.
+  const sevLegendTitle = () => (pinMode() ? "Intersectoral severity class (fill)"
+    : "IPC phase (fill)");
   const fmtSI = (v) => (v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M"
     : v >= 1e3 ? Math.round(v / 1e3) + "k" : String(Math.round(v)));
 
@@ -846,12 +867,18 @@
     const [cmp, isText] = BAR_SORTS[barSort] ?? BAR_SORTS.value;
     const rows = country
       ? data.rows.filter((r) => r.country === country
-            && (pinMode() ? sevValOf(r) != null : sevTotOf(r) > 0 && segsOf(r)))
+            && (pinMode() ? sevValOf(r) != null : sevTotOf(r) > 0 && segsOf(r))
+            && !isFilteredOut(catOf(r), clsOf(r)))
           .sort(barSortFlip ? (a, b) => cmp(b, a) : cmp)
       : [];
     barsWrap.hidden = rows.length === 0;
     barsHint.hidden = rows.length > 0;
-    if (!rows.length) return;
+    // "Pick a country" is the wrong prompt when a country IS picked and the
+    // legend filters emptied the chart.
+    barsHint.textContent = country && anyPinned()
+      ? "No areas in this country match the pinned legend filters."
+      : BARS_HINT;
+    if (!rows.length) { barRows.length = 0; return; }
     if (pinMode()) {
       barsTitle.textContent = `${country} — PiN${secTag()} and severity class, ` +
         `per ${ADM_LABEL[ADM]} (plan data ${planYrOf(rows[0]) ?? "–"}` +
@@ -864,9 +891,10 @@
 
     const W = barsSvg.parentElement.clientWidth || 900;
     // Left gutter holds three labelled columns: forecast swatch, severity
-    // square, admin name — each header wide enough to read and click.
-    const COL = { cat: 2, sev: 108, name: 168 };
-    const ROW = 26, M = { l: 330, r: 24, t: 26, b: 34 };
+    // square, admin name. Column starts are set by the HEADER widths, not the
+    // 13px swatches — "Intersectoral severity" is the widest thing here.
+    const COL = { cat: 2, sev: 108, name: 226 };
+    const ROW = 26, M = { l: 392, r: 24, t: 26, b: 34 };
     const H = M.t + M.b + rows.length * ROW;
     barsSvg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     barsSvg.style.height = H + "px";
@@ -917,7 +945,7 @@
       return t;
     }
     header(COL.cat, "forecast", "Forecast category");
-    header(COL.sev, "severity", "Severity");
+    header(COL.sev, "severity", sevClassTitle());
     header(COL.name, "name", "Admin name");
     header(M.l, "value", pinMode() ? "PiN" : `${sevLabel()} pop`);
     // Fixed offset, not a measured one: getComputedTextLength() returns 0 while
@@ -925,26 +953,44 @@
     header(M.l + 96, "targeted", "targeted");
     g("line", { x1: 0, x2: W - M.r, y1: M.t - 4, y2: M.t - 4, stroke: "#e2e8e8" });
 
+    barRows.length = 0;
     rows.forEach((r, i) => {
       const y = M.t + i * ROW;
       const cat = catOf(r);
-      const cls = ADM === "low" ? sevClassOf(r) : null;
+      const cls = clsOf(r);
+      // One group per row, so a legend hover can pale whole rows without
+      // rebuilding the chart.
+      const row = g("g", {});
+      barRows.push({ el: row, cat, cls });
+      const gr = (tag, attrs) => g(tag, attrs, row);
+      const titled = (el, text) => {
+        const t = document.createElementNS(NS, "title");
+        t.textContent = text;
+        el.appendChild(t);
+        return el;
+      };
       // Forecast-category swatch, severity square, admin name.
-      g("rect", { x: COL.cat, y: y + ROW / 2 - 7, width: 13, height: 13,
-                  fill: cat ? fillOf(cat) : HNRP_MUTED.fill,
-                  stroke: cat ? STYLE[cat][1] : HNRP_MUTED.edge, "stroke-width": 1 });
+      const sw = gr("rect", { x: COL.cat, y: y + ROW / 2 - 7, width: 13, height: 13,
+                              fill: cat ? fillOf(cat) : HNRP_MUTED.fill,
+                              stroke: cat ? STYLE[cat][1] : HNRP_MUTED.edge, "stroke-width": 1 });
+      const sl = slotOf(r);
+      titled(sw, cat
+        ? `${CAT_LABEL[catBase(cat)] || cat}` +
+          (sl ? ` · ${sl.key}${sl.lead < 0 ? " (in season)" : ""} — RP ${fmt(sl.rp, 1)} yr, ` +
+                `percentile ${fmt(sl.pct, 1)}, skill r ${fmt(sl.r, 2)}` : "")
+        : "No forecast for the selected season");
       if (cls) {
-        const sq = g("rect", { x: COL.sev, y: y + ROW / 2 - 7, width: 13, height: 13,
-                               fill: sevColors()[cls - 1], stroke: "#9db1b3",
-                               "stroke-width": 0.6 });
-        const ti = document.createElementNS(NS, "title");
-        ti.textContent = `severity class ${cls} — ${sevClassLabels()[cls - 1]}`;
-        sq.appendChild(ti);
+        titled(gr("rect", { x: COL.sev, y: y + ROW / 2 - 7, width: 13, height: 13,
+                            fill: sevColors()[cls - 1], stroke: "#9db1b3",
+                            "stroke-width": 0.6 }),
+          `${sevClassTitle()} ${cls} — ${sevClassWord(cls)}`);
       }
       const nm0 = r.name ?? r.pcode;
       const maxLen = 24;
-      const name = nm0.length > maxLen ? nm0.slice(0, maxLen - 1) + "…" : nm0;
-      g("text", { x: COL.name, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" }).textContent = name;
+      const nameEl = gr("text", { x: COL.name, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" });
+      // textContent first: it would wipe a <title> child appended before it.
+      nameEl.textContent = nm0.length > maxLen ? nm0.slice(0, maxLen - 1) + "…" : nm0;
+      titled(nameEl, dispName(r));
 
       // PiN mode: one bar per unit, carrying the unit's own severity colour (the
       // same encoding as the map's fill). IPC mode: the phase distribution,
@@ -952,14 +998,13 @@
       if (pinMode()) {
         const v = sevValOf(r) ?? 0;
         if (v > 0) {
-          const seg = g("rect", { x: X(0), y: y + 4, width: Math.max(X(v) - X(0), 0.5),
-                                  height: ROW - 9,
-                                  fill: cls ? sevColors()[cls - 1] : PIN_COLOR,
-                                  stroke: "#9db1b3", "stroke-width": 0.6 });
-          const title = document.createElementNS(NS, "title");
-          title.textContent = `${r.name ?? r.pcode} — PiN${secTag()}: ${fmtN(v)}` +
-            (cls ? ` · severity class ${cls} (${sevClassLabels()[cls - 1]})` : "");
-          seg.appendChild(title);
+          titled(gr("rect", { x: X(0), y: y + 4, width: Math.max(X(v) - X(0), 0.5),
+                              height: ROW - 9,
+                              fill: cls ? sevColors()[cls - 1] : PIN_COLOR,
+                              stroke: "#9db1b3", "stroke-width": 0.6 }),
+            `${r.name ?? r.pcode} — PiN${secTag()}: ${fmtN(v)}` +
+            (cls ? ` · ${sevClassTitle().toLowerCase()} ${cls} — ${sevClassWord(cls)}`
+                 : " · no severity class published"));
         }
       } else {
         const segs = segsOf(r) ?? [];
@@ -967,21 +1012,30 @@
         for (let c = barC0(); c < 5; c++) {
           const v = segs[c] ?? 0;
           if (v <= 0) continue;
-          const seg = g("rect", { x: X(acc), y: y + 4, width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
-                                  height: ROW - 9, fill: sevColors()[c] });
-          const title = document.createElementNS(NS, "title");
-          title.textContent = `${r.name ?? r.pcode} — IPC phase ${c + 1}: ${fmtN(v)}`;
-          seg.appendChild(title);
+          titled(gr("rect", { x: X(acc), y: y + 4,
+                              width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
+                              height: ROW - 9, fill: sevColors()[c] }),
+            `${r.name ?? r.pcode} — IPC phase ${c + 1}: ${fmtN(v)}`);
           acc += v;
         }
       }
       // Targeted tick (dark vertical line).
       const tgt = tgtOf(r);
       if (tgt != null) {
-        g("line", { x1: X(tgt), x2: X(tgt), y1: y + 1, y2: y + ROW - 3,
-                    stroke: "#1d2021", "stroke-width": 2 });
+        titled(gr("line", { x1: X(tgt), x2: X(tgt), y1: y + 1, y2: y + ROW - 3,
+                            stroke: "#1d2021", "stroke-width": 2 }),
+          `${r.name ?? r.pcode} — targeted: ${fmtN(tgt)}${tgtFlag(r)}`);
       }
     });
+    paintBarDim();
+  }
+  // Legend hover pales matching-out rows without rebuilding the chart (a pin,
+  // which changes WHICH rows exist, re-runs renderBars instead).
+  const barRows = [];
+  function paintBarDim() {
+    for (const b of barRows) {
+      b.el.setAttribute("opacity", isDimmed(b.cat, b.cls) ? "0.15" : "1");
+    }
   }
 
   // ── Table ────────────────────────────────────────────────────────────────────
@@ -1129,10 +1183,13 @@
   function renderAll() {
     syncURL(); // keep the URL an exact mirror of the controls at all times
     updateIpcPeriodUI();
-    // Legend severity ramp follows the active source (IPC vs intersectoral blue).
+    // Legend severity strip follows the active source (IPC phases vs the plan's
+    // own intersectoral classes, on the blue ramp).
     document.querySelectorAll("#hnrp-legend [data-ramp]").forEach((el) => {
       el.style.background = sevColors()[+el.dataset.ramp];
     });
+    const sevStripTitle = document.getElementById("hnrp-sev-strip-title");
+    if (sevStripTitle) sevStripTitle.textContent = sevLegendTitle();
     refreshLegendDim();
     renderMap(); renderBars(); renderTable();
   }
