@@ -658,11 +658,10 @@
   // each its own strip. The active highlight per dimension is its PINNED
   // (clicked) entries plus, transiently, the hovered one; entries OR within a
   // dimension and AND across them. Non-matching legend entries pale to mirror
-  // the map dim, and every pin is named in the "showing …" chip so a click made
-  // three controls ago can't silently shrink the highlight.
+  // the map dim, and the clear button stands up the moment anything is pinned —
+  // otherwise a click made three controls ago silently shrinks the highlight.
   const HL_DIMS = ["cat", "skill", "cls"];
   const pinned = { cat: new Set(), skill: new Set(), cls: new Set() };
-  const hlLabel = { cat: {}, skill: {}, cls: {} }; // dim -> value -> legend label
   let hover = null; // { dim, val } while the pointer is on a legend entry
   const activeOf = (dim) => (hover && hover.dim === dim
     ? new Set(pinned[dim]).add(hover.val) : pinned[dim]);
@@ -675,12 +674,10 @@
       seg.style.opacity = act.size && !act.has(v) ? "0.3" : "1";
       seg.classList.toggle("sel", pinned[dim].has(v));
     });
-    if (!clearChip) return;
-    clearChip.hidden = !anyPinned();
-    clearChip.textContent = "showing " +
-      HL_DIMS.filter((d) => pinned[d].size)
-        .map((d) => [...pinned[d]].map((v) => hlLabel[d][v] ?? v).join(" / "))
-        .join(" × ") + " — clear ✕";
+    // Fixed label, and hidden by visibility rather than [hidden]: the button
+    // keeps its slot on the legend's last line whether or not anything is
+    // pinned, so nothing reflows as entries are added and dropped.
+    if (clearChip) clearChip.classList.toggle("on", anyPinned());
   }
   function clearPins() {
     if (!anyPinned()) return;
@@ -691,10 +688,9 @@
   function buildHnrpLegend() {
     const root = document.getElementById("hnrp-legend");
     root.innerHTML = "";
-    const wire = (el, dim, val, label) => {
+    const wire = (el, dim, val) => {
       val = String(val);
       el.dataset.hlDim = dim; el.dataset.hlVal = val;
-      hlLabel[dim][val] = label;
       const paint = () => { refreshLegendDim(); renderMap(); };
       el.addEventListener("mouseenter", () => { hover = { dim, val }; paint(); });
       el.addEventListener("mouseleave", () => { hover = null; paint(); });
@@ -726,9 +722,7 @@
         const lbl = document.createElement("span");
         lbl.className = "ls-lbl"; lbl.textContent = sg.label;
         seg.append(cell, lbl);
-        // chipLabel: the strip label alone can be too terse to name a pin out of
-        // context (a severity class reads as a bare "4" in the "showing …" chip).
-        wire(seg, sg.dim, sg.val, sg.chipLabel ?? sg.label);
+        wire(seg, sg.dim, sg.val);
         row.appendChild(seg);
       }
       block.append(t, row);
@@ -760,15 +754,15 @@
     sevBlock = ADM === "low"
       ? strip("Severity class (fill)", [1, 2, 3, 4, 5].map((c) => ({
           fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
-          chipLabel: `class ${c}`, border: c <= 2, dim: "cls", val: c,
+          border: c <= 2, dim: "cls", val: c,
         })), 44)
       : null;
-    // Pins outlive every other control change, so the legend always states what
-    // is pinned and offers one click to drop it.
+    // Pins outlive every other control change, so there is always one click
+    // back to the unfiltered map.
     clearChip = document.createElement("button");
     clearChip.type = "button";
     clearChip.id = "hnrp-legend-clear";
-    clearChip.hidden = true;
+    clearChip.textContent = "Clear all filters";
     clearChip.addEventListener("click", clearPins);
     root.appendChild(clearChip);
     // Backstop: a pointer that leaves the legend without the segment's own
