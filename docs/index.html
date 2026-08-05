@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <!-- versioned: the HNRP legend's box strip and clear button need this
        stylesheet and hnrp.js to arrive as a pair, never one from cache -->
-  <link rel="stylesheet" href="style.css?v=20260805k" />
+  <link rel="stylesheet" href="style.css?v=20260805p" />
 </head>
 <body>
   <header>
@@ -362,9 +362,25 @@
         <strong>share of the area's population</strong> — and each column header
         sorts by what it shows, so the same chart answers "where are the most people"
         and "where is the largest share of an area affected". The population base is
-        the COD-PS total (or the plan's own HNO/WorldPop baseline where COD-PS is
-        missing); where none exists the analysed population stands in, a smaller base
-        against which shares read high — every figure's tooltip names the base used.
+        the <strong>largest</strong> figure held for the area — its COD-PS total, the
+        plan's own HNO or WorldPop baseline, the IPC analysed base, or the plan's
+        JIAF analysed base. Largest, not "total first": where an analysis covers more
+        people than the baseline says live there, the baseline is the stale number.
+        Every figure's tooltip names the base used.
+      </p>
+      <p>
+        <strong>Shares over 100%.</strong> For 94 of 3,582 areas the caseload exceeds
+        every population figure we hold, so the share column reads
+        <em>&gt;100%</em> — muted, with the real ratio in the tooltip — rather than a
+        spurious 1,656%. Two different things cause it. Some are real: a plan counts
+        displaced people the resident baseline never had, which is most of Burkina
+        Faso's cases (Djibo's PiN is 4.9× a WorldPop 2020 that predates the influx).
+        Others are a caseload and a population figure that do not describe the same
+        area — Venezuela's 30 cases sit on a 2011 COD-PS, and municipalities of a few
+        thousand people carry six-figure caseloads, which is a unit-level mismatch
+        upstream rather than anything the site can reconcile. Sudan (14) and Myanmar
+        (11) make up most of the rest. Country totals are unaffected: Venezuela's
+        national PiN is 7.9M against a 27.2M population.
       </p>
     </details>
   </section>
@@ -571,7 +587,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260805n"></script>
+  <script src="hnrp.js?v=20260805q"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

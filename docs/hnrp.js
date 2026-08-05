@@ -868,23 +868,27 @@
   const barsTitle = document.getElementById("hnrp-bars-title");
   const barsLegend = document.getElementById("hnrp-bars-legend");
   const BARS_HINT = barsHint.textContent; // restored whenever it applies again
-  // Denominator for the share bars, layered per unit: (1) the COD-PS total
-  // population baseline, or the plan's own HNO/WorldPop total where COD-PS is
-  // missing (r.pop_src says which), (2) failing that, the analysed-population
-  // proxy — the larger of the IPC analysed base and the plan's JIAF analysed
-  // base. The same value divides PiN and targeted, so the two bars are directly
-  // comparable; the tooltip always names the base actually used, since (2) is a
-  // smaller population than (1) and its shares read higher.
-  const popOf = (r) =>
-    r.pop ?? (Math.max(ipcComboOf(r)?.tot ?? 0, r.sev_total ?? 0) || null);
-  const popSrcOf = (r) => {
-    if (r.pop) {
-      const src = { HNO: "HNO baseline", WorldPop: "WorldPop" }[r.pop_src] ?? "COD-PS";
-      return `total population, ${src}${r.pop_year ? ` ${r.pop_year}` : ""}`;
-    }
-    const ipc = ipcComboOf(r)?.tot ?? 0, jiaf = r.sev_total ?? 0;
-    return !ipc && !jiaf ? null : ipc >= jiaf ? "IPC analysed population" : "JIAF analysed population";
-  };
+  // Denominator for the share columns: the LARGEST population figure we hold
+  // for the unit — its COD-PS/HNO/WorldPop total, the IPC analysed base, or the
+  // plan's JIAF analysed base. Largest, not "total first": where an analysis
+  // covers more people than the baseline says live there, the baseline is the
+  // stale number, and picking it would overstate every share (it lowers 1,073
+  // units' shares to take the bigger base). The same value divides PiN and
+  // targeted, so the two are comparable; the tooltip names the one used.
+  // Deliberately independent of the IPC period selector — the widest IPC base,
+  // not the selected period's — so a PiN share doesn't move when the period does.
+  function popBase(r) {
+    const yr = r.pop_year ? ` ${r.pop_year}` : "";
+    const cands = [
+      [r.pop ?? 0, `total population, ${{ HNO: "HNO baseline", WorldPop: "WorldPop" }[r.pop_src]
+        ?? "COD-PS"}${yr}`],
+      [Math.max(0, ...(r.ipc ?? []).map((c) => c.tot ?? 0)), "IPC analysed population"],
+      [r.sev_total ?? 0, "JIAF analysed population"],
+    ].sort((a, b) => b[0] - a[0]);
+    return cands[0][0] > 0 ? { pop: cands[0][0], src: cands[0][1] } : { pop: null, src: null };
+  }
+  const popOf = (r) => popBase(r).pop;
+  const popSrcOf = (r) => popBase(r).src;
   // Lowest class the IPC bars stack, straight from the Level selector above the
   // chart: 3+ stacks 3–5, 5 stacks 5 alone. (Phases 1–2 dwarf the rest in
   // populous areas and drown the signal, which is why the floor is never 1.)
@@ -902,8 +906,11 @@
   const fmtSI = (v) => (v == null ? "–"
     : v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M"
     : v >= 1e3 ? Math.round(v / 1e3) + "k" : String(Math.round(v)));
-  // A share, at the precision it deserves: 0.4%, 7.2%, 55%.
+  // A share, at the precision it deserves: 0.4%, 7.2%, 55%. A caseload larger
+  // than every population figure we hold for the area is not a share at all —
+  // print the fact, not a spurious 1,656%. The tooltip carries the real ratio.
   const fmtPct = (f) => (f == null ? "–"
+    : f > 1 ? ">100%"
     : `${(100 * f).toFixed(f >= 0.1 ? 0 : 1)}%`);
 
   function renderBarsLegend() {
@@ -1091,29 +1098,29 @@
       alive.add(r.pcode);
       let row = rowEls.get(r.pcode);
       const entering = !row;
+      const top = M.t + i * ROW;
       if (entering) {
         row = document.createElementNS(NS, "g");
-        row.setAttribute("class", "bar-row entering");
+        row.setAttribute("class", "bar-row");
+        // Position it BEFORE it enters the document: an element appended with
+        // its transform already set has no previous value to transition from,
+        // so it lands in place instead of sliding in from the origin — and no
+        // transition has to be suppressed and restored to achieve that.
+        row.style.transform = `translateY(${top}px)`;
         rowsG.appendChild(row);
         rowEls.set(r.pcode, row);
+        // A one-shot animation, not a class the next frame takes off — and only
+        // while the page is actually being painted. A hidden tab freezes its
+        // animation timeline at t=0, which would hold every new row at the
+        // opacity the fade starts from: a chart of invisible rows until the
+        // window comes forward. Nothing about a fade is worth that risk.
+        if (document.visibilityState === "visible") {
+          row.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: "ease" });
+        }
       } else {
         row.classList.remove("leaving"); // caught on its way out — bring it back
         row.innerHTML = "";
-      }
-      const top = M.t + i * ROW;
-      if (entering) {
-        // Land at the final position without sliding in from the origin, THEN
-        // let the transition take over. Two frames, not one: the transparent
-        // starting style has to be committed before the class comes off, or the
-        // browser has nothing to animate from and the row just appears.
-        row.style.transition = "none";
-        row.style.transform = `translateY(${top}px)`;
-        requestAnimationFrame(() => {
-          row.style.transition = "";
-          requestAnimationFrame(() => row.classList.remove("entering"));
-        });
-      } else {
-        row.style.transform = `translateY(${top}px)`;
+        row.style.transform = `translateY(${top}px)`; // slides, per the CSS transition
       }
       barRows.push({ el: row, cat, cls });
       const gr = (tag, attrs) => g(tag, attrs, row);
@@ -1164,8 +1171,13 @@
       const share = (v) => (pop && v != null ? v / pop : null);
       const pctTxt = (v) => {
         const f = share(v);
-        return f == null ? "share unknown — no population base"
-          : `${fmtPct(f)} of ${fmtN(pop)} (${popSrc})`;
+        if (f == null) return "share unknown — no population base";
+        // Over 100%: give the real ratio here, and say why it can happen —
+        // people counted who are not in the baseline (displacement), or a
+        // caseload and a population figure that do not describe the same area.
+        const exact = `${(100 * f).toFixed(f >= 0.1 ? 0 : 1)}% of ${fmtN(pop)} (${popSrc})`;
+        return f > 1 ? `${exact} — caseload exceeds every population figure we hold`
+          : exact;
       };
       const val = sevValOf(r), tgt = tgtOf(r);
       if (pinMode()) {
@@ -1201,8 +1213,10 @@
        [share(val), fmtPct(share(val)), pctTxt(val)],
        [share(tgt), tgt == null ? "–" : fmtPct(share(tgt)), pctTxt(tgt)],
       ].forEach(([v, text, tip], i) => {
+        // ">100%" is a flag, not a figure — mute it like a missing value.
+        const flagged = v == null || (i >= 2 && v > 1);
         const t = gr("text", { x: numRight(i), y: y + ROW / 2 + 4, "text-anchor": "end",
-                               "font-size": 11, fill: v == null ? "#aab6b7" : "#333",
+                               "font-size": 11, fill: flagged ? "#aab6b7" : "#333",
                                "font-variant-numeric": "tabular-nums" });
         t.textContent = v == null ? "–" : text;
         titled(t, `${r.name ?? r.pcode} — ${tip}`);

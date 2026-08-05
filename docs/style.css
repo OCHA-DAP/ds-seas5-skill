@@ -306,8 +306,10 @@ footer p { margin: 4px 0; }
 #hnrp-bars { width: 100%; display: block; }
 /* Bar rows keep their identity across renders, so a legend filter reads as
    rows leaving and the rest closing the gap — not as the chart blinking. */
-#hnrp-bars .bar-row { transition: transform 0.3s ease, opacity 0.18s ease; }
-#hnrp-bars .bar-row.leaving, #hnrp-bars .bar-row.entering { opacity: 0; }
+/* Transform only: entering rows fade via a one-shot animation instead, which
+   cannot be left half-applied by a render arriving mid-frame. */
+#hnrp-bars .bar-row { transition: transform 0.3s ease; }
+#hnrp-bars .bar-row.leaving { opacity: 0; transition: opacity 0.18s ease; }
 @media (prefers-reduced-motion: reduce) {
   #hnrp-bars .bar-row { transition: none; }
 }
