@@ -1,9 +1,8 @@
-// Forecast × HNRP tab: ADM1 drought forecast vs HNRP severity/targeted caseloads.
-// Three linked views — an ADM1 choropleth (same classification as the Map tab), a
-// scatter (x = % of total population in severity 4+, y = targeted as % of total
-// population, bubble area = total population, fill/hatch = forecast category ×
-// skill), and the ranked table. Reuses app.js globals: STYLE, classify, catBase,
-// CAT_LABEL, T, buildPatterns.
+// Forecast × HNRP tab: drought forecast vs HNRP severity/targeted caseloads, at
+// each country's lowest published admin level. Two linked views — a choropleth
+// (severity class as the fill, forecast category as the boundary line) and, once
+// a country is selected, per-area PiN bars — driven by one interactive legend.
+// Reuses app.js globals: STYLE, classify, catBase, CAT_LABEL, T, buildPatterns.
 (async function () {
   // The tab shows every country at its finest available admin level — the level
   // the HNRP itself publishes, where each unit carries one severity class. The
@@ -36,8 +35,6 @@
   } catch {
     return; // data files not built yet — leave the tab empty
   }
-  // (the heading this used to retitle belonged to the removed scatter; the table
-  // below keeps its own static "Matching areas, ranked")
   // Parent admin-1 name qualifies adm2 units (district names repeat across regions).
   const dispName = (r) => (r.parent ? `${r.name ?? r.pcode} (${r.parent})` : (r.name ?? r.pcode));
   // Every control survives a reload (and makes links shareable with their
@@ -87,9 +84,6 @@
   const ipcPeriodSel = document.getElementById("hnrp-ipc-period");
   const countrySel = document.getElementById("hnrp-country");
   const issuedEl = document.getElementById("hnrp-issued");
-  const thead = document.querySelector("#hnrp-table thead");
-  const tbody = document.querySelector("#hnrp-table tbody");
-  const emptyEl = document.getElementById("hnrp-empty");
 
   // buildPatterns() returns the complete cat -> fill map (solid hex or pattern url);
   // app.js already registered the pattern defs, duplicate ids resolve to the first.
@@ -280,14 +274,11 @@
       && s.r != null && s.r >= (skillSel.value === "high" ? T.r_high : T.r_mod)
       && s.rp != null && s.rp >= +rpSel.value;
   }
-  function passes(r) {
-    return inScope(r) && isDrought(rawSlotOf(r));
-  }
   // Display slot: the qualifying drought slot, else the same season's real
   // category — flood/normal/low-skill/off-season, like the Map tab. Narrowing
   // the view to drought signals is the legend's job (pin "strongly below" /
   // "below normal"), not a separate filter.
-  // slotOfAny ignores the HNRP/IPC scope gate; slotOf applies it (map and table
+  // slotOfAny ignores the HNRP/IPC scope gate; slotOf applies it (map and bars
   // stay scoped to the selected mode).
   function slotOfAny(r) {
     const s = rawSlotOf(r);
@@ -324,8 +315,9 @@
   // Global view: per-admin figures at world zoom are noise. One line per country —
   // name, plan year, and which datasets we hold — until the country is clicked open.
   const countryTipCache = new Map();
-  function countryTip(country) {
-    if (!countryTipCache.has(country)) {
+  function countryTip(country, hint = "Click to explore") {
+    const key = `${country}|${hint}`;
+    if (!countryTipCache.has(key)) {
       const rs = data.rows.filter((x) => x.country === country);
       const has = (k) => rs.some((x) => x[k] != null);
       const ds = [];
@@ -335,17 +327,27 @@
       if (has("pb") || has("pba")) ds.push("PiN by severity");
       if (has("ipc")) ds.push("IPC");
       const py = planYrByCountry.get(country);
-      countryTipCache.set(country,
+      countryTipCache.set(key,
         `<div class="name">${country}</div>` +
         `<div>${py ? `Plan data ${py} · ` : ""}${ds.join(", ")}</div>` +
-        `<div class="cat" style="color:#9db1b3">Click to explore</div>`);
+        `<div class="cat" style="color:#9db1b3">${hint}</div>`);
     }
-    return countryTipCache.get(country);
+    return countryTipCache.get(key);
   }
   const tipHtml = (f) => {
     const p = f.properties, r = byPcode.get(p.pcode);
-    if (!countrySel.value) return r ? countryTip(r.country)
+    const sel = countrySel.value;
+    if (!sel) return r ? countryTip(r.country)
       : `<div class="name">${p.name ?? p.pcode}</div>`;
+    // Outside the selected country: the country line, never a per-unit readout —
+    // those areas are drawn as backdrop, and their figures are not on screen.
+    // (Answering with something is also what keeps the tooltip BOUND: Leaflet
+    // 1.9.4 leaks a focus listener on every bindTooltip that unbindTooltip never
+    // removes, so binding once per layer and never touching it again is the only
+    // way to keep those listeners from piling up.)
+    if (r && r.country !== sel) {
+      return countryTip(r.country, "Click to return to the world view");
+    }
     // No PiN/severity row = not part of the plan's admin-level analysis (e.g. Nigeria's
     // HNRP covers only Borno/Adamawa/Yobe) — context only, never labelled "in HNRP".
     if (!r || (!ipcMode() && !inHnrp(r))) {
@@ -577,13 +579,10 @@
   // choropleth read as missing data rather than as filtered out).
   const isDimmed = (cat, cls) => noMatch(cat, cls, activeOf);
   const isFilteredOut = (cat, cls) => noMatch(cat, cls, (dim) => pinned[dim]);
-  let tipsFor = null; // country selection the tooltip bindings were synced for
   function renderMap() {
     renderOutline();
     renderTriLabels();
     const sel = countrySel.value;
-    const syncTips = tipsFor !== sel;
-    tipsFor = sel;
     layer.eachLayer((l) => {
       const el = l._path;
       if (!el) return;
@@ -592,16 +591,6 @@
       // "no qualifying drought signal" would be a lie about units that are merely
       // filtered out of view.
       const offCountry = sel && (!r || r.country !== sel);
-      // Only when the selection actually changed: bindTooltip leaks a focus
-      // listener that unbindTooltip never removes (Leaflet 1.9.4), so rebinding
-      // on every render — this one runs on each legend hover — stacks up
-      // handlers that throw once their tooltip is gone.
-      if (syncTips) {
-        if (offCountry && l.getTooltip()) l.unbindTooltip();
-        if (!offCountry && !l.getTooltip()) {
-          l.bindTooltip(() => tipHtml(l.feature), { sticky: true });
-        }
-      }
       if (offCountry || !r || (!ipcMode() && !inHnrp(r))) {
         // Out of scope for the current mode: blend into the world backdrop —
         // and clear any ring left from a previous render, or other countries'
@@ -1121,108 +1110,6 @@
     }
   }
 
-  // ── Table ────────────────────────────────────────────────────────────────────
-  // Rebuilt per render: in PiN mode the severity column IS the PiN column, so
-  // carrying both would print the same number twice.
-  const colsNow = () => [
-    { key: "country", label: "Country", num: false },
-    { key: "name", label: ADM === "low" ? "Admin unit" : `Admin ${ADM}`, num: false },
-    { key: "_plan_yr", label: "Plan", num: true },
-    ...(ADM === "low" ? [{ key: "sclass", label: "Class", num: true }] : []),
-    ...(pinMode() ? [] : [{ key: "sev4", label: "Severity 4+ pop", num: true }]),
-    { key: "pin", label: "PiN", num: true },
-    { key: "targeted", label: "Targeted", num: true },
-    { key: "tri_label", label: "Season", num: false },
-    { key: "rp", label: "Drought RP (yr)", num: true },
-    { key: "pct", label: "Percentile", num: true },
-    { key: "r", label: "Skill (r)", num: true },
-  ];
-  let sortKey = "pin", sortDesc = true;
-
-  function renderTable() {
-    const COLS = colsNow();
-    // The active column can vanish with a source switch — fall back rather than
-    // sort by a key no column offers.
-    if (!COLS.some((c) => c.key === sortKey)) { sortKey = "pin"; sortDesc = true; }
-    thead.innerHTML = "";
-    const trh = document.createElement("tr");
-    for (const c of COLS) {
-      const th = document.createElement("th");
-      // PiN/Targeted columns follow the caseload selector.
-      let label = c.label + ((c.key === "pin" || c.key === "targeted") ? secTag() : "");
-      if (c.key === "sev4") label = `${sevLabel()} pop`;
-      if (c.key === "pin") {
-        th.title = "People in Need — the plan's total intersectoral PiN. " +
-          "A headline planning figure, not a severity band: " +
-          "it is not broken down by JIAF class or IPC phase.";
-      }
-      th.textContent = label + (c.key === sortKey ? (sortDesc ? " ↓" : " ↑") : "");
-      th.className = (c.num ? "num" : "") + (c.key === sortKey ? " sorted" : "");
-      th.addEventListener("click", () => {
-        if (sortKey === c.key) sortDesc = !sortDesc;
-        else { sortKey = c.key; sortDesc = c.num; }
-        renderTable();
-      });
-      trh.appendChild(th);
-    }
-    thead.appendChild(trh);
-
-    const SLOT_KEYS = { tri_label: "key", rp: "rp", pct: "pct", r: "r" };
-    const kv = (row) => (sortKey === "_plan_yr" ? planYrOf(row)
-      : sortKey === "sclass" ? sevClassOf(row)
-      : sortKey === "sev4" ? sevValOf(row)
-      : sortKey === "pin" ? pinOf(row)
-      : sortKey === "targeted" ? tgtOf(row)
-      : sortKey in SLOT_KEYS ? slotOf(row)?.[SLOT_KEYS[sortKey]]
-      : row[sortKey]);
-    const rs = data.rows.filter(passes).sort((a, b) => {
-      const x = kv(a), y = kv(b);
-      if (x == null) return 1;
-      if (y == null) return -1;
-      const cmp = typeof x === "number" ? x - y : String(x).localeCompare(String(y));
-      return sortDesc ? -cmp : cmp;
-    });
-    tbody.innerHTML = "";
-    emptyEl.hidden = rs.length > 0;
-    // DOM guard for adm2 (potentially thousands of qualifying rows): render the
-    // top 500 under the current sort, and say so.
-    const capped = rs.length > 500;
-    for (const r of rs.slice(0, 500)) {
-      const tr = document.createElement("tr");
-      const s = slotOf(r);
-      // Pale wash of the forecast-category colour, tying rows to the map/scatter.
-      const cat = catOf(r);
-      if (cat) tr.style.background = STYLE[cat][0] + "21";
-      const skillCls = s && s.r >= T.r_high ? "skill-high" : "skill-mod";
-      tr.innerHTML =
-        `<td>${r.country ?? r.iso3}</td>` +
-        `<td>${dispName(r)}</td>` +
-        `<td class="num">${planYrOf(r) ?? "–"}</td>` +
-        (ADM === "low" ? (() => {
-          const cls = sevClassOf(r);
-          return `<td class="num">${cls
-            ? `<span class="cls-chip" style="background:${sevColors()[cls - 1]}"></span>${cls}`
-            : "–"}</td>`;
-        })() : "") +
-        (pinMode() ? "" : `<td class="num">${fmtN(sevValOf(r))}</td>`) +
-        `<td class="num">${fmtN(pinOf(r))}</td>` +
-        `<td class="num">${fmtN(tgtOf(r))}${tgtYrOf(r)
-          ? `<span class="stale-flag" title="targeted from the ${tgtYrOf(r)} plan cycle — none published in the current one">*</span>` : ""}</td>` +
-        `<td>${s ? s.key : "–"}${s && s.lead < 0 ? ' <span class="in-season-tag">· in season</span>' : ""}</td>` +
-        `<td class="num">${fmt(s?.rp, 1)}</td>` +
-        `<td class="num">${fmt(s?.pct, 1)}</td>` +
-        `<td class="num ${skillCls}">${fmt(s?.r, 2)}</td>`;
-      tbody.appendChild(tr);
-    }
-    if (capped) {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td colspan="${COLS.length}" style="color:var(--muted);font-style:italic">` +
-        `Showing the top 500 of ${rs.length.toLocaleString("en-US")} matching areas — ` +
-        `narrow with the filters or sort to bring others into view.</td>`;
-      tbody.appendChild(tr);
-    }
-  }
-
   function fitCountry(animate = true) {
     const c = countrySel.value;
     let bounds = null;
@@ -1274,7 +1161,7 @@
     const sevStripTitle = document.getElementById("hnrp-sev-strip-title");
     if (sevStripTitle) sevStripTitle.textContent = sevLegendTitle();
     refreshLegendDim();
-    renderMap(); renderBars(); renderTable();
+    renderMap(); renderBars();
   }
   for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel, triSel, ipcPeriodSel]) {
     el.addEventListener("change", renderAll);

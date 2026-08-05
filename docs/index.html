@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <!-- versioned: the HNRP legend's box strip and clear button need this
        stylesheet and hnrp.js to arrive as a pair, never one from cache -->
-  <link rel="stylesheet" href="style.css?v=20260805d" />
+  <link rel="stylesheet" href="style.css?v=20260805f" />
 </head>
 <body>
   <header>
@@ -210,15 +210,8 @@
       breakdown (PiN or population per IPC phase, the area's severity class, targeted
       population, and the forecast category). Click a column header to sort.</p>
 
-    <h3 class="hnrp-h">Matching areas, ranked</h3>
-    <table id="hnrp-table">
-      <thead></thead>
-      <tbody></tbody>
-    </table>
-    <p id="hnrp-empty" class="lock-note" hidden>No admin-1 units match the current filters.</p>
-
     <p class="note">
-      Admin-1 areas where the latest SEAS5 seasonal forecast points to drought, weighted by
+      Areas where the latest SEAS5 seasonal forecast points to drought, weighted by
       food-insecurity severity and HNRP caseloads — so the largest at-risk populations with
       the worst forecasts rise to the top.
     </p>
@@ -257,13 +250,12 @@
         All PiN/targeted figures shown are the plans'
         <strong>intersectoral</strong> ones.
         Each country shows its <strong>latest plan cycle</strong> (year in the country
-        selector, the Plan column, and tooltips); where no newer plan exists the previous
+        selector, the bar-chart title, and tooltips); where no newer plan exists the previous
         cycle is shown (e.g. Guatemala, latest 2025). Where the current cycle publishes a
         unit's PiN but no targeted figure (or omits a unit entirely), the newest earlier
-        cycle fills the gap — a stale targeted is flagged with its year (* in the table,
-        "(2024 plan)" in tooltips), and a wholly carried-over unit shows the older year in
-        its Plan column. A country can still be absent from a given caseload when its plan
-        never publishes that sector subnationally — the columns then show dashes.
+        cycle fills the gap — a stale targeted is flagged with its year in the tooltip
+        ("(2024 plan)"). A country can still be absent from a given caseload when its plan
+        never publishes that sector subnationally — those figures then show dashes.
       </p>
 
       <h4>Severity sources</h4>
@@ -288,7 +280,7 @@
         the analysed population). IPC and plan figures do <em>not</em> line up:
         they measure different things (acute food insecurity vs inter-sectoral needs) over
         different analysed populations, scopes, and periods — compare shapes, not values.
-        In IPC mode the map and table also include IPC-covered areas
+        In IPC mode the map also includes IPC-covered areas
         <strong>outside any HNRP</strong> (no PiN/severity/targeted)
         — surfacing possible shocks beyond plan scope. Only IPC analyses valid in 2025 or
         later are included; countries whose series stalled earlier (Ethiopia 2021,
@@ -320,8 +312,8 @@
         (1&nbsp;km UN-adjusted, summed over the same admin-3 boundaries). Figures published only at admin-1 cannot be downscaled
         and show dashes at admin-2. Forecast skill at admin-2 is computed identically,
         per unit; smaller units are noisier, so treat marginal signals with extra
-        caution. The table shows at most 500 rows at a time; admin-2 unit names carry
-        their admin-1 parent in parentheses.
+        caution. Where district names repeat across regions, an area's tooltip carries
+        its admin-1 parent in parentheses.
       </p>
 
       <h4>IPC estimate periods</h4>
@@ -345,8 +337,9 @@
         combined — entries within a strip are OR-ed, strips AND together (e.g.
         <em>strongly below</em> × <em>moderate skill</em> × <em>class 4</em>). Pinned
         entries stay outlined in the legend; <em>Clear all filters</em>, or Escape,
-        drops them all. The same class appears in map tooltips, the table's Class
-        column, and beside each bar-chart row. Selecting a country opens the per-area
+        drops them all. Pinning also filters the bar chart outright: non-matching
+        areas leave it, and return when the pin is dropped. The same class appears in
+        map tooltips and beside each bar-chart row. Selecting a country opens the per-area
         bars: in PiN mode one bar per unit, carrying that unit's severity colour; in
         IPC mode the phase distribution, stacked, plotting classes 3–5 by default
         (classes 1–2 dominate populous areas and drown the signal — a checkbox restores
@@ -558,7 +551,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260805e"></script>
+  <script src="hnrp.js?v=20260805g"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

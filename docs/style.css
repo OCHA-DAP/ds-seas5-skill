@@ -232,9 +232,6 @@ footer p { margin: 4px 0; }
 .leaflet-container path.leaflet-interactive:focus,
 .leaflet-container:focus { outline: none; }
 .hnrp-h { margin: 28px 0 8px; font-size: 1rem; }
-.stale-flag { color: var(--hdx-primary-5); cursor: help; font-weight: 700; }
-.cls-chip { display: inline-block; width: 10px; height: 10px; margin-right: 5px;
-  border: 1px solid var(--hdx-neutral-4); vertical-align: baseline; }
 #hnrp-scatter-legend span[data-hl] { cursor: pointer; }
 #hnrp-outline-legend .sev-ramp { cursor: pointer; }
 #hnrp-outline-legend .sev-ramp:hover { outline: 1px solid var(--ink); }
@@ -252,16 +249,6 @@ footer p { margin: 4px 0; }
 #hnrp-note h4 { margin: 14px 0 4px; font-size: 0.74rem; text-transform: uppercase;
   letter-spacing: 0.05em; color: var(--hdx-neutral-7); }
 #hnrp-note p { margin: 4px 0 10px; max-width: 72rem; }
-#hnrp-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
-#hnrp-table th, #hnrp-table td { padding: 5px 10px; border-bottom: 1px solid var(--line); text-align: left; }
-#hnrp-table th { cursor: pointer; user-select: none; font-weight: 600; color: var(--muted);
-  border-bottom: 2px solid var(--line); white-space: nowrap; }
-#hnrp-table th.sorted { color: var(--ink); }
-#hnrp-table th.num, #hnrp-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
-#hnrp-table tbody tr:hover { background: var(--hdx-neutral-01); }
-#hnrp-table td.skill-high { font-weight: 700; }
-#hnrp-table .in-season-tag { color: var(--hdx-neutral-5); font-weight: 600; font-size: 0.75rem; }
-
 /* Country alerts tab — compact summary table. table-layout: fixed pins every
    column at a constant x whatever the cell contents — no jitter across rows
    or re-sorts. */
