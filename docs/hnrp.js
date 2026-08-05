@@ -820,6 +820,23 @@
   const barsTitle = document.getElementById("hnrp-bars-title");
   const barsLegend = document.getElementById("hnrp-bars-legend");
   const BARS_HINT = barsHint.textContent; // restored whenever it applies again
+  // Denominator for the share bars, layered per unit: (1) the COD-PS total
+  // population baseline, or the plan's own HNO/WorldPop total where COD-PS is
+  // missing (r.pop_src says which), (2) failing that, the analysed-population
+  // proxy — the larger of the IPC analysed base and the plan's JIAF analysed
+  // base. The same value divides PiN and targeted, so the two bars are directly
+  // comparable; the tooltip always names the base actually used, since (2) is a
+  // smaller population than (1) and its shares read higher.
+  const popOf = (r) =>
+    r.pop ?? (Math.max(ipcComboOf(r)?.tot ?? 0, r.sev_total ?? 0) || null);
+  const popSrcOf = (r) => {
+    if (r.pop) {
+      const src = { HNO: "HNO baseline", WorldPop: "WorldPop" }[r.pop_src] ?? "COD-PS";
+      return `total population, ${src}${r.pop_year ? ` ${r.pop_year}` : ""}`;
+    }
+    const ipc = ipcComboOf(r)?.tot ?? 0, jiaf = r.sev_total ?? 0;
+    return !ipc && !jiaf ? null : ipc >= jiaf ? "IPC analysed population" : "JIAF analysed population";
+  };
   // Lowest class the IPC bars stack, straight from the Level selector above the
   // chart: 3+ stacks 3–5, 5 stacks 5 alone. (Phases 1–2 dwarf the rest in
   // populous areas and drown the signal, which is why the floor is never 1.)
@@ -844,7 +861,9 @@
       sevColors().map((c, i) => ((!pinMode() && i < barC0()) ? ""
         : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("") +
       (pinMode() ? `<span><i style="background:${PIN_COLOR}"></i> no class published</span>` : "") +
-      `<span><i class="tick"></i> targeted</span>`;
+      `<span><i style="background:#1d2021"></i> targeted</span>` +
+      `<span>bars are shares of the area's population; the figure beside each is` +
+      ` the headcount (hover for both, and for the population base used)</span>`;
   }
 
   // Bar sorting: click a column header. Values sort high→low on first click,
@@ -902,6 +921,18 @@
     // 13px swatches — "Intersectoral severity" is the widest thing here.
     const COL = { cat: 2, sev: 108, name: 226 };
     const ROW = 26, M = { l: 392, r: 24, t: 26, b: 34 };
+    // Caseload columns, GHO-dashboard style (as on the Country alerts tab): a
+    // fixed-width track = the area's whole population, filled to the share this
+    // caseload takes, with the headcount printed beside it. Fixed tracks, not one
+    // scale across rows: the question here is "how much of this area", and the
+    // absolute figure is right there in the label.
+    const VALW = 46, GAP = 9, COLGAP = 34;
+    // Tracks split whatever width is left, so the chart fills the panel at any
+    // window size instead of stopping halfway across it.
+    const TRACK = Math.max(90, Math.min(280,
+      Math.floor((W - M.l - M.r - COLGAP - 2 * (GAP + VALW)) / 2)));
+    const CX = { val: M.l, tgt: M.l + TRACK + GAP + VALW + COLGAP };
+    const trackEnd = CX.tgt + TRACK + GAP + VALW;
     // Two layers: chrome (grid, headers, axis) is redrawn every render; rows
     // persist between renders, keyed by pcode, so a legend pin can slide and
     // fade them rather than blink the chart.
@@ -930,28 +961,25 @@
       parent.appendChild(el);
       return el;
     };
-    // Scale to what is actually plotted: the sum of the SHOWN classes (3+ by
-    // default; the PiN total in PiN mode) and the targeted tick.
-    const shownSum = (r) => (pinMode() ? (sevValOf(r) ?? 0)
-      : (segsOf(r) ?? []).slice(barC0()).reduce((a, b) => a + (b ?? 0), 0));
-    const xmax = Math.max(...rows.map((r) => Math.max(shownSum(r), tgtOf(r) ?? 0))) * 1.04;
-    const X = (v) => M.l + (v / xmax) * (W - M.l - M.r);
-
-    // x grid: 4 round ticks.
-    const step = Math.pow(10, Math.floor(Math.log10(xmax / 4)));
-    const tick = Math.ceil(xmax / 4 / step) * step;
-    for (let v = 0; v <= xmax; v += tick) {
-      g("line", { x1: X(v), x2: X(v), y1: M.t, y2: H - M.b, stroke: "#eef1f1" });
-      g("text", { x: X(v), y: H - M.b + 16, "text-anchor": "middle", "font-size": 10, fill: "#888" })
-        .textContent = fmtSI(v);
+    // Halfway + full-population gridlines under both tracks, with the scale
+    // spelled out once at the foot of each column.
+    for (const x0 of [CX.val, CX.tgt]) {
+      for (const f of [0.5, 1]) {
+        g("line", { x1: x0 + TRACK * f, x2: x0 + TRACK * f, y1: M.t, y2: H - M.b,
+                    stroke: "#eef1f1" });
+      }
+      for (const [f, lbl] of [[0, "0"], [0.5, "50%"], [1, "100%"]]) {
+        g("text", { x: x0 + TRACK * f, y: H - M.b + 15, "text-anchor": "middle",
+                    "font-size": 10, fill: "#aab6b7" }).textContent = lbl;
+      }
+      g("text", { x: x0, y: H - M.b + 29, "font-size": 10, fill: "#888" })
+        .textContent = "share of the area's population";
     }
-    g("text", { x: (M.l + W - M.r) / 2, y: H - 4, "text-anchor": "middle", "font-size": 11, fill: "#555" })
-      .textContent = pinMode() ? `People in Need${secTag()}`
-        : `People (analysed population in IPC ${lvlTag()})`;
 
     // Clickable column headers, in place of a sort dropdown: each names the
-    // column beneath it and sorts by it. "targeted" rides along in the value
-    // header — it has no column of its own, only the tick on each bar.
+    // column beneath it and sorts by it (by the headcount, not the share — the
+    // bars are shares, but "which area has the largest caseload" is the question
+    // a click on a caseload header is asking).
     function header(x, key, label, anchor = "start") {
       const t = g("text", { x, y: M.t - 10, "font-size": 11, "text-anchor": anchor,
                             fill: barSort === key ? "#1d2021" : "#555",
@@ -971,11 +999,10 @@
     header(COL.cat, "forecast", "Forecast category");
     header(COL.sev, "severity", sevClassTitle());
     header(COL.name, "name", "Admin name");
-    header(M.l, "value", pinMode() ? "PiN" : `${sevLabel()} pop`);
-    // Fixed offset, not a measured one: getComputedTextLength() returns 0 while
-    // the panel is hidden, which would stack the two headers on top of each other.
-    header(M.l + 96, "targeted", "targeted");
-    g("line", { x1: 0, x2: W - M.r, y1: M.t - 4, y2: M.t - 4, stroke: "#e2e8e8" });
+    header(CX.val, "value", pinMode() ? "PiN" : `${sevLabel()} pop`);
+    header(CX.tgt, "targeted", "Targeted");
+    g("line", { x1: 0, x2: Math.max(trackEnd, W - M.r), y1: M.t - 4, y2: M.t - 4,
+                stroke: "#e2e8e8" });
 
     barRows.length = 0;
     const alive = new Set();
@@ -1043,40 +1070,64 @@
       nameEl.textContent = nm0.length > maxLen ? nm0.slice(0, maxLen - 1) + "…" : nm0;
       titled(nameEl, dispName(r));
 
-      // PiN mode: one bar per unit, carrying the unit's own severity colour (the
-      // same encoding as the map's fill). IPC mode: the phase distribution,
-      // stacked, with a white spacer between segments.
+      // ── Caseload tracks ──────────────────────────────────────────────────
+      const pop = popOf(r), popSrc = popSrcOf(r);
+      const BH = 12, BY = y + ROW / 2 - BH / 2; // bar height / top
+      const share = (v) => (pop && v != null ? Math.min(v / pop, 1) : null);
+      const pctTxt = (v) => {
+        const f = share(v);
+        return f == null ? "share unknown — no population base"
+          : `${(100 * f).toFixed(f < 0.1 ? 1 : 0)}% of ${fmtN(pop)} (${popSrc})`;
+      };
+      // The empty track first, then the fill: an area with no population base
+      // still shows its headcount, against a visibly empty track.
+      const label = (x, v) => {
+        const t = gr("text", { x: x + TRACK + GAP + VALW, y: y + ROW / 2 + 4,
+                               "text-anchor": "end", "font-size": 11, fill: "#333",
+                               "font-variant-numeric": "tabular-nums" });
+        t.textContent = v == null ? "–" : fmtSI(v);
+        return t;
+      };
+      const track = (x) => gr("rect", { x, y: BY, width: TRACK, height: BH, rx: 2,
+                                        fill: "#f2f5f5", stroke: "#e6ecec",
+                                        "stroke-width": 0.8 });
+      const fill = (x, f0, f1, color, tip) => {
+        if (f0 == null || f1 == null || f1 <= f0) return;
+        titled(gr("rect", { x: x + TRACK * f0, y: BY,
+                            width: Math.max(TRACK * (f1 - f0), 1), height: BH,
+                            fill: color }), tip);
+      };
+      // Value column: the PiN in one piece (its area's severity colour, as on
+      // the map), or the IPC phases stacked from the selected level up.
+      track(CX.val);
       if (pinMode()) {
-        const v = sevValOf(r) ?? 0;
-        if (v > 0) {
-          titled(gr("rect", { x: X(0), y: y + 4, width: Math.max(X(v) - X(0), 0.5),
-                              height: ROW - 9,
-                              fill: cls ? sevColors()[cls - 1] : PIN_COLOR,
-                              stroke: "#9db1b3", "stroke-width": 0.6 }),
-            `${r.name ?? r.pcode} — PiN${secTag()}: ${fmtN(v)}` +
-            (cls ? ` · ${sevClassTitle().toLowerCase()} ${cls} — ${sevClassWord(cls)}`
-                 : " · no severity class published"));
-        }
+        const v = sevValOf(r);
+        fill(CX.val, 0, share(v), cls ? sevColors()[cls - 1] : PIN_COLOR,
+          `${r.name ?? r.pcode} — PiN${secTag()}: ${fmtN(v)} · ${pctTxt(v)}` +
+          (cls ? ` · ${sevClassTitle().toLowerCase()} ${cls} — ${sevClassWord(cls)}`
+               : " · no severity class published"));
+        label(CX.val, v);
       } else {
         const segs = segsOf(r) ?? [];
         let acc = 0;
         for (let c = barC0(); c < 5; c++) {
           const v = segs[c] ?? 0;
           if (v <= 0) continue;
-          titled(gr("rect", { x: X(acc), y: y + 4,
-                              width: Math.max(X(acc + v) - X(acc) - 1, 0.5),
-                              height: ROW - 9, fill: sevColors()[c] }),
-            `${r.name ?? r.pcode} — IPC phase ${c + 1}: ${fmtN(v)}`);
+          fill(CX.val, share(acc), share(acc + v), sevColors()[c],
+            `${r.name ?? r.pcode} — IPC phase ${c + 1}: ${fmtN(v)} · ${pctTxt(v)}`);
           acc += v;
         }
+        label(CX.val, sevValOf(r));
       }
-      // Targeted tick (dark vertical line).
+      // Targeted, on the same population base — so the two tracks can be read
+      // against each other directly (targeted is a subset of the plan's PiN).
+      track(CX.tgt);
       const tgt = tgtOf(r);
       if (tgt != null) {
-        titled(gr("line", { x1: X(tgt), x2: X(tgt), y1: y + 1, y2: y + ROW - 3,
-                            stroke: "#1d2021", "stroke-width": 2 }),
-          `${r.name ?? r.pcode} — targeted: ${fmtN(tgt)}${tgtFlag(r)}`);
+        fill(CX.tgt, 0, share(tgt), "#1d2021",
+          `${r.name ?? r.pcode} — targeted: ${fmtN(tgt)}${tgtFlag(r)} · ${pctTxt(tgt)}`);
       }
+      label(CX.tgt, tgt);
     });
     // Rows the filter dropped: fade them where they stand, then drop them for
     // real — unless a later render revives them first.
