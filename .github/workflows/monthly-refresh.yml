@@ -38,6 +38,7 @@ jobs:
     # NOTE: The PROD Azure DB firewall must allow GitHub Actions egress IPs.
     permissions:
       contents: write
+      pull-requests: write
 
     env:
       DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS }}
@@ -94,10 +95,19 @@ jobs:
       - name: Export plan headline caseloads (plan_caseloads.json)
         run: uv run python pipeline/export_plan_caseloads.py
 
-      - name: Commit updated data
+      # main is branch-protected (PRs required, 0 approvals) — a direct push is
+      # rejected, so the refresh lands via a self-merged PR instead.
+      - name: Commit updated data via PR
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/data/
-          git diff --cached --quiet || git commit -m "chore: monthly data refresh [skip ci]"
-          git push
+          if git diff --cached --quiet; then echo "no data changes"; exit 0; fi
+          BR="data-refresh-$(date -u +%Y%m%d-%H%M)"
+          git checkout -b "$BR"
+          git commit -m "chore: monthly data refresh [skip ci]"
+          git push -u origin "$BR"
+          gh pr create --base main --head "$BR" --fill
+          gh pr merge "$BR" --merge --delete-branch
