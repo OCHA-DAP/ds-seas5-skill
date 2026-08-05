@@ -305,6 +305,66 @@ def normalize_pcodes(
     return out
 
 
+def _scrambled_cycles(engine) -> set[tuple[str, pd.Timestamp]]:
+    """Plan cycles whose unit-level attribution is provably misaligned upstream.
+
+    The signature, found in VEN 2025: a cycle's own admin population baseline
+    (Intersectoral / population_status 'all') is EXACTLY the COD-PS population
+    MULTISET — the plan is quoting COD-PS, unit for unit — yet a large share of
+    units carry another unit's number. Same values, wrong owners: the rows were
+    shuffled against their p-codes somewhere upstream, and everything sitting on
+    those rows (PiN, targeted, every sector) belongs to a different unit.
+    VEN 2025 puts 156,307 PiN on Cardenal Quintero (9,441 people) and 4,387 on
+    Libertador (217,537) — and its baseline hands Cardenal Quintero the 600,351
+    that belongs to Sucre in Miranda. 135 of 335 units are affected; the national
+    total is untouched, which is why it survives every aggregate check.
+
+    Only an EXACT multiset match licenses this call. Plans that publish their own
+    population estimates (MLI, SDN, CAF — 50–100% of units differ from COD-PS in
+    VALUE) are a different, legitimate thing and are never flagged. Across the 17
+    country-cycles that carry a baseline, this fires on VEN 2025 alone: VEN 2024
+    and HTI 2025 also quote COD-PS exactly, and assign every unit correctly.
+
+    Un-scrambling is possible in principle — each row's baseline value identifies
+    the unit it belongs to — but that would mean publishing an attribution the
+    source never made, silently. Dropping the cycle lets the loader's existing
+    fallback take the previous one, which is visible: the unit's plan year.
+    """
+    q_base = """
+    SELECT location_code, reference_period_start,
+           COALESCE(admin2_code, admin1_code) AS pcode, population
+    FROM hpc.needs_admin
+    WHERE sector_code = 'Intersectoral' AND category = 'total'
+      AND population_status = 'all' AND population IS NOT NULL
+      AND COALESCE(admin2_code, admin1_code) IS NOT NULL
+    """
+    q_pop = """
+    SELECT COALESCE(admin2_code, admin1_code) AS pcode, population, reference_period_start
+    FROM pop.population_admin WHERE population IS NOT NULL
+    """
+    with engine.connect() as conn:
+        base = pd.read_sql(q_base, conn, parse_dates=["reference_period_start"])
+        pop = pd.read_sql(q_pop, conn, parse_dates=["reference_period_start"])
+    ref = (pop.sort_values("reference_period_start").groupby("pcode")["population"].last())
+    bad: set[tuple[str, pd.Timestamp]] = set()
+    for (loc, period), g in base.groupby(["location_code", "reference_period_start"]):
+        g = g.drop_duplicates("pcode")
+        cod = g["pcode"].map(ref)
+        ok = cod.notna()
+        if ok.sum() < 10:
+            continue
+        plan_v, cod_v = g["population"][ok].astype("int64"), cod[ok].astype("int64")
+        if sorted(plan_v) != sorted(cod_v):
+            continue  # the plan is not quoting COD-PS — nothing to conclude
+        mis = int((plan_v.values != cod_v.values).sum())
+        if mis >= 5 and mis / len(plan_v) > 0.02:
+            bad.add((loc, period))
+            print(f"  PiN: {loc} {period:%Y} cycle DROPPED — its baseline is the COD-PS "
+                  f"population but {mis} of {len(plan_v)} units carry another unit's "
+                  f"value; every figure on those rows is misattributed upstream")
+    return bad
+
+
 def load_pin_adm1(sub_parent: dict | None = None) -> tuple[pd.DataFrame, dict[str, str]]:
     """PiN + targeted per ADM1 pcode, EVERY sector the plans publish.
 
@@ -383,6 +443,16 @@ def load_pin_adm1(sub_parent: dict | None = None) -> tuple[pd.DataFrame, dict[st
     if stale_locs:
         print(f"  PiN: dropped {stale_locs} — newest plan cycle predates {cutoff.year}")
     df = df[newest >= cutoff]
+
+    # Then drop individual cycles whose rows are misaligned against their p-codes.
+    # AFTER the staleness cut, deliberately: a country with a corrupt current cycle
+    # still HAS a current plan, so it stays in the tab on its previous cycle rather
+    # than vanishing — the same fallback a unit missing from this cycle already gets.
+    scrambled = _scrambled_cycles(engine)
+    if scrambled:
+        keep = [(l, p) not in scrambled for l, p in
+                zip(df["location_code"], df["reference_period_start"])]
+        df = df[keep]
 
     # 'ALL' ("Final HRP caseload") is the intersectoral-equivalent of the admin-3
     # publishers: promote it where the country has no subnational Intersectoral
