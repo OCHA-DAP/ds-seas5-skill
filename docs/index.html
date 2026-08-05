@@ -369,18 +369,28 @@
         Every figure's tooltip names the base used.
       </p>
       <p>
-        <strong>Shares over 100%.</strong> For 94 of 3,582 areas the caseload exceeds
-        every population figure we hold, so the share column reads
-        <em>&gt;100%</em> — muted, with the real ratio in the tooltip — rather than a
-        spurious 1,656%. Two different things cause it. Some are real: a plan counts
-        displaced people the resident baseline never had, which is most of Burkina
-        Faso's cases (Djibo's PiN is 4.9× a WorldPop 2020 that predates the influx).
-        Others are a caseload and a population figure that do not describe the same
-        area — Venezuela's 30 cases sit on a 2011 COD-PS, and municipalities of a few
-        thousand people carry six-figure caseloads, which is a unit-level mismatch
-        upstream rather than anything the site can reconcile. Sudan (14) and Myanmar
-        (11) make up most of the rest. Country totals are unaffected: Venezuela's
-        national PiN is 7.9M against a 27.2M population.
+        <strong>Shares over 100%.</strong> Where a caseload exceeds every population
+        figure we hold, the share column reads <em>&gt;100%</em> — muted, with the
+        real ratio in the tooltip — rather than a spurious 1,656%. Mostly this is
+        real: a plan counts displaced people the resident baseline never had, which
+        is most of Burkina Faso's cases (Djibo's PiN is 4.9× a WorldPop 2020 that
+        predates the influx). Sudan and Myanmar make up much of the rest.
+      </p>
+      <p>
+        <strong>Misaligned plan cycles.</strong> One cause was neither of those.
+        Venezuela's 2025 cycle carries its rows against the wrong p-codes: 156,307
+        PiN on Cardenal Quintero (9,441 people) while Libertador (217,537) gets
+        4,387. Its own population baseline gives it away — in 2024 that baseline is
+        the COD-PS population exactly, unit for unit; in 2025 it is the same multiset
+        of values with 135 of 335 units holding another unit's number, and each PiN
+        is a faithful 26% of the number next to it. National totals are untouched,
+        which is why nothing caught it. The export now drops any cycle showing that
+        signature — a baseline that IS the COD-PS multiset yet misassigns a material
+        share of it — and the country falls back to its previous cycle, visible in
+        its plan year. It fires on Venezuela 2025 alone across every cycle we hold.
+        Venezuela's figures therefore revert to its 2024 cycle, where no unit's PiN
+        exceeds its population, <em>from the next data refresh onward</em>; the
+        figures shipped here still predate that.
       </p>
     </details>
   </section>
