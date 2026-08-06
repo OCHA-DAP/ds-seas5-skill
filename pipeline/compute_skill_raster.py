@@ -169,6 +169,37 @@ def main():
             with open(local, "rb") as f:
                 stratus.upload_blob_data(f.read(), blob, stage="dev")
             tqdm.write(f"Uploaded -> DEV blob: {blob}")
+
+    # Vintage self-check: if the ERA5 month(s) an in-season composite needs have
+    # not been uploaded yet, that combo silently falls back to LAST YEAR's
+    # issuance (Aug 2026 run without July ERA5 -> Aug-2025 pixels wearing an
+    # Aug-2026 label). The export drops such layers, but shout here too so the
+    # operator knows to rerun once ERA5 lands rather than ship 5/7 trimesters.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling exporter module
+    from export_static_site import _tri_valid, issued_year_for_season  # noqa: E402
+    cfy = out_dt["current_forecast_year"]
+
+    def _issue_years(m):
+        ys = {}
+        for t, months in TRIMESTERS.items():
+            if not _tri_valid(months, m):
+                continue
+            v = cfy.sel(issued_month=m, trimester=t).values
+            v = v[np.isfinite(v)]
+            if v.size:
+                ys[t] = issued_year_for_season(int(v.max()), m, t)
+        return ys
+
+    per_im = {m: ys for m in range(1, 13) if (ys := _issue_years(m))}
+    if per_im:
+        latest_im = max(per_im, key=lambda m: (max(per_im[m].values()), m))
+        ys = per_im[latest_im]
+        newest = max(ys.values())
+        stale = sorted(t for t, y in ys.items() if y < newest)
+        if stale:
+            tqdm.write(f"WARNING: issued_month {latest_im} combos {stale} carry an OLDER "
+                       f"issuance year than the rest ({newest}) — ERA5 for their elapsed "
+                       f"month(s) was missing at compute time. Rerun once ERA5 lands.")
     tqdm.write("Done.")
 
 
