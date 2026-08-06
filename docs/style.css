@@ -23,6 +23,16 @@ body {
   font-family: var(--hdx-font-body);
   color: var(--ink); max-width: 1200px; margin: 0 auto;
 }
+/* Standing notice above everything: present on every view, but quiet enough not
+   to compete with the page. Full-bleed so it reads as chrome, not content. */
+.dev-banner {
+  margin: 0 -16px 0; padding: 9px 16px;
+  background: #fdf1cf; border-bottom: 1px solid #edd58f;
+  color: #5b4714; font-size: 0.82rem; line-height: 1.4;
+}
+.dev-banner a { color: var(--hdx-primary-7); }
+@media (max-width: 700px) { .dev-banner { font-size: 0.78rem; } }
+
 header { padding: 16px 0 4px; }
 h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 #subtitle { margin: 0; color: var(--muted); font-size: 0.95rem; }
