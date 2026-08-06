@@ -28,8 +28,7 @@
     <button class="tab active" data-tab="map">Map</button>
     <button class="tab" data-tab="skillmap">Skill map</button>
     <button class="tab" data-tab="skill">Skill by country</button>
-    <!-- Unlisted for now: reachable only via the #hnrp hash link -->
-    <button class="tab" data-tab="hnrp" hidden>Forecast × HNRP</button>
+    <button class="tab" data-tab="hnrp">Forecast × HNRP</button>
     <!-- Unlisted for now: reachable only via the #alerts hash link -->
     <button class="tab" data-tab="alerts" hidden>Country alerts</button>
     <button class="tab" data-tab="methods">Methodology</button>
@@ -251,21 +250,23 @@
         <strong>PiN / Targeted</strong> come from each plan's latest reference period via <a
         href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>; figures
         published at admin-2/3 are summed to admin-1 (some plans publish subnational
-        needs only at admin-3 — DR Congo, Myanmar; where such a plan reports a
+        needs only at admin-3 — DR Congo, Myanmar, Syria; where such a plan reports a
         single "Final HRP caseload" instead of Intersectoral, that is shown as the
         Intersectoral figure). Caseloads appear only for countries whose newest plan
-        cycle is this year or last: Ethiopia (last subnational needs 2024, no newer
-        plan) and Syria (last needs 2024; its 2025 severity analysis publishes no
-        population figures) are absent entirely. PiN is the plan's headline total for
+        cycle is this year or last, which currently leaves <strong>Ethiopia</strong>
+        alone in being absent entirely (last subnational needs 2024, no newer plan).
+        PiN is the plan's headline total for
         the intersectoral caseload — <em>not</em> a severity band: it is a count of
         people in need, shown alongside (not split by) the unit's severity class.
         All PiN/targeted figures shown are the plans'
         <strong>intersectoral</strong> ones.
         A <strong>Plan year</strong> selector picks the cycle, and nothing is ever
         blended across cycles: an area the chosen plan does not cover shows dashes
-        rather than an older year's figures. That matters because coverage moves
-        between cycles — Mozambique's 2025 plan reaches 15 districts where its 2024
-        one reached 117.
+        rather than an older year's figures. That matters because the three cycles
+        are not the same countries — 2026 covers 3,470 units across 16 countries,
+        2025 covers 3,305 across 21, 2024 covers 3,041 across 14 — and coverage
+        moves within a country too: Mozambique's 2025 plan reaches 15 districts
+        where its 2024 one reached 117.
         The <strong>2026</strong> cycle is a special case. Its subnational figures
         come from the JIAF needs analysis (the "PiN par gravité" workbooks), which
         publishes PiN by severity and <em>no targets</em>: HPC's 2026 targeting
@@ -288,16 +289,24 @@
         analysis unit <em>one</em> class and places that unit's whole PiN there, so at
         the level shown here it is the unit's area classification. Where a unit's
         caseload does span classes, the fill is the class holding the most of it and
-        the tooltip lists the rest (one unit in the current payload). Where the PbS
+        the tooltip lists the rest (one unit in the current payload — Bourem, Mali).
+        Where the PbS
         carries no usable class for a unit, the class falls back to the
         <strong>severity analysis</strong>'s own population-by-class for that area —
-        the same source, read per area rather than per PiN row, which is what gives
-        DR Congo, Mozambique, Nigeria, Mali, Niger and Haiti their classes (466
-        units). Tooltips say when a class came from there rather than from the PiN
-        split. What remains classless is genuinely unpublished: Myanmar (330 units),
-        Burkina Faso, Chad, CAR, Cameroon and a dozen Somali districts have a PiN and
-        no severity anywhere in the plan data — 427 units, which keep their PiN and
-        show no class.
+        the same source, read per area rather than per PiN row. That is what
+        classifies 1,346 units: Colombia (671), DR Congo (286), Mozambique (135),
+        Guatemala (116), Honduras (43), Nigeria (21), Mali (19), Niger (17), Haiti
+        (15), Chad (14), El Salvador (8) and one in CAR. Tooltips say when a class
+        came from there rather than from the PiN split, and list both classes for
+        the eight such units that span two.
+        What remains classless is genuinely unpublished: 441 units inside an HNRP
+        carry no severity anywhere in the plan data — Myanmar (330), Burkina Faso
+        (35), Chad (17), CAR (14), Cameroon (13), twelve Somali districts, Syria (8),
+        Guatemala (6), Honduras (3), and one each in Colombia, Mozambique and Sudan.
+        They keep their PiN and show no class. How many you actually meet depends on
+        the plan year: under the default 2026 cycle only 27 units have a PiN and no
+        class (Chad 17, Syria 8, one each in Cameroon and Colombia); under 2025 it is
+        415, most of them Myanmar's.
         <strong>IPC/CH acute food insecurity phases</strong> (via <a
         href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>) is the
         alternative. IPC publishes a genuine within-area phase distribution, so a
@@ -313,26 +322,30 @@
         with no plan) are on the map in either mode: muted body, since there is no
         severity to colour, but their forecast outline in full, since the forecast is
         just as real there. Only IPC analyses valid in 2025 or
-        later are included; countries whose series stalled earlier (Ethiopia 2021,
-        Angola/El Salvador 2022, Burkina Faso Aug 2024, Timor-Leste 2024) carry no IPC
-        here.
+        later are included — 39 countries; an analysis exercised in late 2024 still
+        counts where its projection runs into 2025, which is how the Dominican
+        Republic and Pakistan are here. Countries whose series stalled earlier
+        (Ethiopia 2021, Angola/El Salvador 2022, Burkina Faso Aug 2024, Timor-Leste
+        2024) carry no IPC here.
       </p>
 
       <h4>Admin levels</h4>
       <p>
         Every country is shown at the <strong>finest level we can</strong> — the level
         the plan itself publishes, where each unit carries a single severity class:
-        admin-3 where plans publish it against boundaries we hold
-        (Burkina Faso communes, Myanmar townships, Syria sub-districts, and DR Congo's
-        519 zones de santé — via the SNIS/OCHA health-zone shapefile, which matches the
-        plan's zone codes exactly), admin-2 for the
-        21-country admin-2 scope, admin-1 elsewhere. (Fixed single-level views remain
+        admin-3 for the four countries whose plans publish it against boundaries we
+        hold — Burkina Faso's 351 communes, Myanmar's 330 townships, Syria's 270
+        sub-districts and DR Congo's 519 zones de santé (via the SNIS/OCHA
+        health-zone shapefile, which matches the plan's zone codes exactly);
+        admin-2 for nineteen more (AFG, CAF, CMR, COL, GTM, HND, HTI, MLI, MOZ, NER,
+        NGA, SDN, SLV, SOM, SSD, TCD, UKR, VEN, YEM); admin-1 for the remaining
+        twenty-three. (Fixed single-level views remain
         reachable at <code>?adm=1</code>, <code>?adm=2</code> or <code>?adm=3</code>,
-        without a picker.) Admin-2 covers ~4,900 units across 21 countries with admin-2
-        boundaries and zonal statistics in our database (AFG, BFA, CAF, CMR, COD, COL,
-        GTM, HND, HTI, MLI, MOZ, NER, NGA, SDN, SLV, SOM, SSD, TCD, UKR, VEN, YEM —
-        the rest lack admin-2 polygons on our side and are excluded on that basis;
-        Myanmar publishes admin-1/3 only). <strong>No admin-3 forecast exists</strong>: admin-3 units inherit
+        without a picker.) The admin-2 scope is ~4,900 units across 21 countries with
+        admin-2 boundaries and zonal statistics in our database — the nineteen above
+        plus Burkina Faso and DR Congo, which this view shows finer still. The rest
+        lack admin-2 polygons on our side and are excluded on that basis; Myanmar
+        publishes admin-1/3 only. <strong>No admin-3 forecast exists</strong>: admin-3 units inherit
         their parent admin-2's forecast (skill, return period, rainy season)
         verbatim — only the humanitarian figures are finer. IPC is published at admin-1/2;
         units finer than a country's published IPC level inherit the <em>parent</em>
@@ -388,13 +401,19 @@
         Every figure's tooltip names the base used.
       </p>
       <p>
-        <strong>Shares over 100%.</strong> For 63 of 3,260 areas the caseload exceeds
-        every population figure we hold, so the share column reads <em>&gt;100%</em>
-        — muted, with the real ratio in the tooltip — rather than a spurious 1,656%.
+        <strong>Shares over 100%.</strong> Where the caseload exceeds every
+        population figure we hold, the share column reads <em>&gt;100%</em> — muted,
+        with the real ratio in the tooltip — rather than a spurious 6,126%. How often
+        that happens depends on the cycle: 105 of 3,466 areas under 2026, 63 of 3,303
+        under 2025, 91 of 3,038 under 2024.
         Mostly this is real: a plan counts displaced people the resident baseline
-        never had, which is most of Burkina Faso's 13 cases (Djibo's PiN is 4.9× a
-        WorldPop 2020 that predates the influx). Sudan (14) and Myanmar (11) make up
-        much of the rest.
+        never had. Under 2026, 91 of the 105 are Syrian sub-districts, which have no
+        COD-PS figure and fall back to WorldPop 2020 — a baseline predating both the
+        displacement into north-west Idleb and Aleppo (Dana's PiN is 13× it) and the
+        returns to a Quneitra it counted at 221 people. Syria's national PiN is still
+        only 90% of its own summed baseline, so this is a distribution problem, not
+        an inflated total. Under 2025 the cases are Sudan (14), Burkina Faso (13) and
+        Myanmar (11) — Djibo's PiN is 4.9× a WorldPop 2020 that predates the influx.
       </p>
       <p>
         <strong>Misaligned plan cycles.</strong> One cause was neither of those.
@@ -406,10 +425,12 @@
         is a faithful 26% of the number next to it. National totals are untouched,
         which is why nothing caught it. The export now drops any cycle showing that
         signature — a baseline that IS the COD-PS multiset yet misassigns a material
-        share of it — and the country falls back to its previous cycle, visible in
-        its plan year. It fires on Venezuela 2025 alone across every cycle we hold.
-        Venezuela therefore shows its 2024 cycle, in which no unit's PiN exceeds its
-        population.
+        share of it — and it fires on Venezuela 2025 alone across every cycle we
+        hold. What Venezuela's 2025 shows instead is the JIAF severity analysis for
+        the same year, which carries those units correctly attributed: Cardenal
+        Quintero's PiN is 3,493 against its 9,441 people, and no Venezuelan unit's
+        PiN exceeds 37% of its population. That source publishes no targets, so
+        Venezuela's targeting is only available under 2024.
       </p>
     </details>
   </section>
@@ -608,7 +629,8 @@
       JIAF severity (<a href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>) ·
       IPC/CH acute food insecurity (<a
       href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>; IPC,
-      CC&nbsp;BY-NC-SA&nbsp;3.0&nbsp;IGO) · COD administrative boundaries.
+      CC&nbsp;BY-NC-SA&nbsp;3.0&nbsp;IGO) · COD administrative boundaries &amp;
+      population statistics · WorldPop (admin-3 denominators).
       OCHA Centre for Humanitarian Data.</p>
   </footer>
 
