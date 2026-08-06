@@ -407,6 +407,22 @@ Promise.all([
   // ── Mode toggle (Country / Pixel) ─────────────────────────────────────────────
   let mode = "country";
   const isLatest = () => fc && fc.issued_year === latest.year && fc.issued_month === latest.month;
+  // The baked pixel layer refreshes on a separate MANUAL pipeline: if raster/
+  // is a month behind the country data, rendering it would put last month's
+  // pixels under this month's labels — an error that reads as a weather
+  // anomaly, not a bug (Aug 2026: July pixels shipped under the August site).
+  // A stale raster disables Pixel mode outright instead.
+  const rasterCurrent = () => !!rmeta && rmeta.issued_year === latest.year
+    && rmeta.issued_month === latest.month;
+  if (!rasterCurrent()) {
+    const pb = document.querySelector('#view-toggle .seg-btn[data-view="pixel"]');
+    if (pb) {
+      pb.disabled = true;
+      pb.title = rmeta
+        ? `Pixel layer is still the ${rmeta.issued_label} issuance — awaiting its (manual) refresh`
+        : "Pixel layer unavailable";
+    }
+  }
   function setControlsEnabled(on) {
     yearSel.disabled = !on; monthSel.disabled = !on;
     document.getElementById("issued-lock-note").hidden = on;

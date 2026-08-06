@@ -95,6 +95,13 @@ jobs:
       - name: Export plan headline caseloads (plan_caseloads.json)
         run: uv run python pipeline/export_plan_caseloads.py
 
+      # Vintage gate: every payload must show the issuance it claims (in-season
+      # trimesters present, exporters numerically consistent, raster honest).
+      # Fails the run BEFORE anything is committed — a refresh that raced the
+      # ERA5 upload must be rerun later, not shipped without in-season data.
+      - name: Verify payload vintages & consistency
+        run: uv run python pipeline/verify_site_data.py
+
       # main is branch-protected (PRs required, 0 approvals) — a direct push is
       # rejected, so the refresh lands via a self-merged PR instead.
       - name: Commit updated data via PR
