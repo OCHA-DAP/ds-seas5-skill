@@ -136,8 +136,22 @@ def main():
     sl = ds.sel(issued_month=im)
     # Only trimesters the cube actually has data for — an older cube without the
     # in-season combos would otherwise bake fully-transparent PNGs for them.
-    tris = sorted([t for t in TRIMESTERS if tri_valid(TRIMESTERS[t], im)
-                   and np.isfinite(float(cfy.sel(issued_month=im, trimester=t)))],
+    # ALSO require the combo's forecast year to belong to THIS issuance: when the
+    # cube is computed before the current ERA5 month lands (Aug 2026 run: no July
+    # ERA5 yet), the in-season composites silently fall back to LAST YEAR's
+    # issuance — baking e.g. Aug-2025 pixels under an Aug-2026 label (South Sudan
+    # JAS read wet while the country layer said record dry). Dropping the stale
+    # trimester shows the site's "pixel not available" note instead.
+    def tri_current(t):
+        v = float(cfy.sel(issued_month=im, trimester=t))
+        return np.isfinite(v) and issue_year(v, im, t) == issued_year
+    stale = [t for t in TRIMESTERS if tri_valid(TRIMESTERS[t], im)
+             and np.isfinite(float(cfy.sel(issued_month=im, trimester=t)))
+             and not tri_current(t)]
+    if stale:
+        print(f"WARNING: dropping stale trimesters (forecast year != {issued_year}): {stale}",
+              flush=True)
+    tris = sorted([t for t in TRIMESTERS if tri_valid(TRIMESTERS[t], im) and tri_current(t)],
                   key=lambda t: min_signed(TRIMESTERS[t], im))
     print(f"Issuance: {issued_label} (month {im}); trimesters: {tris}", flush=True)
 
