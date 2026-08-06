@@ -165,9 +165,13 @@
         <span class="row-tag">Severity</span>
         <label class="ctl">Source
           <select id="hnrp-sev-type" class="map-select">
-            <option value="pin" selected>PiN</option>
+            <option value="pin" selected>HNRP PiN</option>
             <option value="ipc">IPC/CH phases</option>
           </select>
+        </label>
+        <!-- Options are filled from the cycles the payload actually carries. -->
+        <label class="ctl" id="hnrp-plan-yr-wrap">Plan year
+          <select id="hnrp-plan-yr" class="map-select"></select>
         </label>
         <label class="ctl" id="hnrp-ipc-period-wrap" hidden>IPC estimate
           <select id="hnrp-ipc-period" class="map-select">
@@ -202,6 +206,7 @@
           </select>
         </label>
       </div>
+      <p id="hnrp-no-tgt" class="lock-note" hidden></p>
       <svg id="hnrp-bars"></svg>
       <div id="hnrp-bars-legend"></div>
     </div>
@@ -250,19 +255,21 @@
         people in need, shown alongside (not split by) the unit's severity class.
         All PiN/targeted figures shown are the plans'
         <strong>intersectoral</strong> ones.
-        Each country shows <strong>one plan cycle: its latest</strong>, named in the
-        country selector, the bar-chart title and every tooltip. Areas that cycle does
-        not cover are simply absent — no figure is carried forward from an earlier
-        plan to stand in for one the current plan never made. That is visible where
-        coverage narrowed between cycles: Mozambique's 2025 plan reaches 15 districts
-        where its 2024 one reached 117, Niger's 36 where 2024 had 67, and CAR
-        publishes no admin-2 caseload at all for 2026, so it shows its 2025 one. In
-        total 322 areas that previously carried an older cycle's PiN now show none.
-        Where a country's <strong>severity analysis</strong> is newer than its
-        caseload, both years are named rather than the newer one standing for both
-        ("HNRP 2025, severity analysis 2026"). A country can still be absent from a
-        given caseload when its plan never publishes that sector subnationally —
-        those figures then show dashes.
+        A <strong>Plan year</strong> selector picks the cycle, and nothing is ever
+        blended across cycles: an area the chosen plan does not cover shows dashes
+        rather than an older year's figures. That matters because coverage moves
+        between cycles — Mozambique's 2025 plan reaches 15 districts where its 2024
+        one reached 117.
+        The <strong>2026</strong> cycle is a special case. Its subnational figures
+        come from the JIAF needs analysis (the "PiN par gravité" workbooks), which
+        publishes PiN by severity and <em>no targets</em>: HPC's 2026 targeting
+        exists only as a national total. So 2026 shows a PiN column and an empty
+        Targeted column, with a note above the chart saying so — pick 2025 to see
+        targeting. The 2026 PiN is the real cycle, not a projection: where it and
+        the needs table both cover a unit-year they agree, and the 2026 subnational
+        sums reconcile to the published national PiN (Sudan, to the person).
+        A country can still be absent from a given caseload when its plan never
+        publishes that sector subnationally — those figures then show dashes.
       </p>
 
       <h4>Severity sources</h4>
@@ -603,7 +610,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260805v"></script>
+  <script src="hnrp.js?v=20260805w"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

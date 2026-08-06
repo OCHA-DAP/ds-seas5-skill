@@ -42,7 +42,7 @@
   const CTLS = {
     skill: "hnrp-skill", rp: "hnrp-rp", tri: "hnrp-tri",
     sev: "hnrp-sev-type", lvl: "hnrp-sev-lvl", ipcp: "hnrp-ipc-period",
-    country: "hnrp-country",
+    country: "hnrp-country", yr: "hnrp-plan-yr",
   };
   function stateURL() {
     const u = new URL(location.href);
@@ -93,60 +93,54 @@
 
   // Plan cycle varies by country (e.g. Guatemala's latest is the 2025 HNRP) — surface
   // the year everywhere caseload figures appear.
-  // The cycle a unit's CASELOAD comes from. The severity analysis can be a year
-  // newer (CAR: 2025 caseloads, 2026 analysis) — taking the max of the two, as
-  // this used to, labelled 2025 figures as 2026.
   const sevYrOf = (r) => {
     const ys = [r.sev_year, r.pbs_yr].filter((y) => y != null);
     return ys.length ? Math.max(...ys) : null;
   };
-  const planYrOf = (r) => r.ref_year ?? sevYrOf(r);
-  // "2025" or, where the analysis is newer than the caseload, "2025, severity
-  // analysis 2026" — never one year standing in for both.
-  const cycleTxt = (r) => {
-    const py = planYrOf(r), sy = sevYrOf(r);
-    return py == null ? "–"
-      : sy != null && sy !== py && r.ref_year != null ? `${py}, severity analysis ${sy}`
-      : `${py}`;
-  };
-  // The country's CASELOAD cycle — the year its PiN and targeted figures are
-  // from. A country whose severity analysis is newer must not be labelled with
-  // the analysis year, and one with no caseload at all gets no year.
-  const planYrByCountry = new Map();
-  for (const r of data.rows) {
-    if (r.country && r.ref_year) {
-      planYrByCountry.set(r.country, Math.max(planYrByCountry.get(r.country) ?? 0, r.ref_year));
-    }
+  // ── Plan year ────────────────────────────────────────────────────────────────
+  // Each unit carries its caseloads per cycle in r.cyc = {"2026": [pin, targeted]},
+  // and the selector says which one to read. Nothing is ever blended: a unit with
+  // no figures for the chosen year shows dashes rather than an older cycle's.
+  const planYrSel = document.getElementById("hnrp-plan-yr");
+  const cycYears = [...new Set(data.rows.flatMap((r) => Object.keys(r.cyc ?? {})))]
+    .map(Number).sort((a, b) => b - a);
+  for (const y of cycYears) {
+    const o = document.createElement("option");
+    o.value = String(y);
+    o.textContent = String(y);
+    planYrSel.appendChild(o);
   }
-  const allYrs = [...new Set(planYrByCountry.values())].sort();
-  // Which cycles are in play, no more; each country's own is in its selector entry.
-  const yrTxt = allYrs.length > 1
-    ? `${allYrs.slice(0, -1).join(", ")} or ${allYrs[allYrs.length - 1]}`
-    : `${allYrs[0]}`;
-  issuedEl.textContent = `Forecast issued ${data.issued_label}. HNRP plan data ${yrTxt}.`;
+  const planYr = () => planYrSel.value || String(cycYears[0] ?? "");
+  const cycOf = (r) => (r.cyc ?? {})[planYr()] ?? null;
+  // Cycles that publish a PiN but no targets anywhere — the 2026 HNRPs, whose
+  // subnational figures come from the JIAF needs analysis (PiN by severity, no
+  // targeting). Worth saying out loud rather than leaving a column of dashes.
+  const yearsWithTgt = new Set();
+  for (const r of data.rows) {
+    for (const [y, v] of Object.entries(r.cyc ?? {})) if (v[1] != null) yearsWithTgt.add(y);
+  }
+  issuedEl.textContent = `Forecast issued ${data.issued_label}.`;
 
   const countries = [...new Set(data.rows.map((r) => r.country).filter(Boolean))].sort();
   for (const c of countries) {
     const o = document.createElement("option");
     o.value = c;
-    // Countries with no plan year are IPC-covered but outside any HNRP — nothing
-    // to bracket, and naming a plan they don't have would be wrong.
-    o.textContent = planYrByCountry.has(c) ? `${c} (HNRP ${planYrByCountry.get(c)})` : c;
+    o.textContent = c;
     countrySel.appendChild(o);
   }
 
   const fmtN = (v) => (v == null ? "–" : Math.round(v).toLocaleString("en-US"));
   const fmt = (v, d) => (v == null ? "–" : Number(v).toFixed(d));
   const pctOf = (num, den) => (num == null || !den ? null : (100 * num) / den);
-  // PiN/targeted are always the plan's INTERSECTORAL figures (per-sector series
-  // remain in the payload's r.sec should a sector view ever return).
-  const pinOf = (r) => r.pin ?? null;
-  const tgtOf = (r) => r.targeted ?? null;
+  // PiN/targeted are always the plan's INTERSECTORAL figures, for the selected
+  // plan year (per-sector series remain in r.sec should a sector view return).
+  const pinOf = (r) => cycOf(r)?.[0] ?? null;
+  const tgtOf = (r) => cycOf(r)?.[1] ?? null;
   const secTag = () => "";
 
   // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
   // shown only in IPC mode, where surfacing needs the plan does NOT capture is the point.
-  const inHnrp = (r) => r.sev_total > 0 || r.pin != null || r.targeted != null
+  const inHnrp = (r) => r.sev_total > 0 || r.cyc != null || r.targeted != null
     || r.sec != null || r.pbs_tot != null;
 
   // ── Severity source: the plan's PiN (default) or IPC/CH phase N+ ────────────
@@ -383,7 +377,10 @@
       rows += `<div>${sevLabel()}: ${fmtN(sevValOf(r))}${c ? ` (${comboDesc(c)})` : ""}</div>`;
     }
     if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
-    if (planYrOf(r)) rows += `<div>HNRP ${cycleTxt(r)}</div>`;
+    if (cycOf(r)) rows += `<div>HNRP ${planYr()}</div>`;
+    if (sevYrOf(r) && sevYrOf(r) !== +planYr()) {
+      rows += `<div style="color:#9db1b3">severity analysis ${sevYrOf(r)}</div>`;
+    }
     if (ADM === "low") {
       const cls = sevClassOf(r);
       if (cls) {
@@ -883,6 +880,7 @@
   const barsSvg = document.getElementById("hnrp-bars");
   const barsTitle = document.getElementById("hnrp-bars-title");
   const barsLegend = document.getElementById("hnrp-bars-legend");
+  const noTgtEl = document.getElementById("hnrp-no-tgt");
   const BARS_HINT = barsHint.textContent; // restored whenever it applies again
   // Denominator for the share columns: the LARGEST population figure we hold
   // for the unit — its COD-PS/HNO/WorldPop total, the IPC analysed base, or the
@@ -995,15 +993,22 @@
     // caseload reads differently at admin 2 than at admin 3.
     const lvls = [...new Set(rows.map((r) => r.lvl).filter((v) => v != null))].sort();
     const lvlTxt = lvls.length ? `admin ${lvls.join("–")}` : ADM_LABEL[ADM];
+    // One year in the title: which HNRP these figures are from. What each column
+    // holds is written on the column.
     if (pinMode()) {
-      barsTitle.textContent = `${country} — PiN${secTag()} and severity class, ` +
-        `per ${lvlTxt} (HNRP ${cycleTxt(rows[0])}` +
-        `${rows[0].pba ? ", class from the area classification" : ""})`;
+      barsTitle.textContent = `${country} — HNRP ${planYr()}, per ${lvlTxt}`;
     } else {
       const c = ipcComboOf(rows[0]);
       barsTitle.textContent = `${country} — population by IPC/CH phase, per ${lvlTxt}` +
         (c ? ` (${comboDesc(c)})` : "");
     }
+    // A cycle can publish needs without targets — say so once, above the chart,
+    // rather than leaving a column of dashes to be read as missing data.
+    noTgtEl.hidden = yearsWithTgt.has(planYr());
+    noTgtEl.textContent = `No targeted figures published for the HNRP ${planYr()} cycle yet` +
+      ` — its subnational figures come from the needs analysis, which carries PiN only.` +
+      (cycYears.some((y) => yearsWithTgt.has(String(y)))
+        ? ` Pick an earlier plan year to see targeting.` : "");
 
     const W = barsSvg.parentElement.clientWidth || 900;
     // Left gutter holds three labelled columns: forecast swatch, severity
@@ -1326,7 +1331,7 @@
     refreshLegendDim();
     renderMap(); renderBars();
   }
-  for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel, triSel, ipcPeriodSel]) {
+  for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel, triSel, ipcPeriodSel, planYrSel]) {
     el.addEventListener("change", renderAll);
   }
   // finally: whatever happens during re-render, the zoom step must still run.

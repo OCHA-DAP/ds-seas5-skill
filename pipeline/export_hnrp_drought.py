@@ -492,28 +492,36 @@ def load_pin_adm1(sub_parent: dict | None = None) -> tuple[pd.DataFrame, dict[st
 
     rows: dict[str, dict] = {}
     for (loc, sector), g in df.groupby(["location_code", "sector_code"]):
-        # ONE cycle per country and sector: the newest. A unit the current plan
-        # does not cover has no current caseload, and carrying its previous
-        # cycle's figure forward said otherwise — a 2024 PiN sitting in a row the
-        # 2025 plan never made, indistinguishable at a glance from a real one.
-        # CAR is the case that shows why: it publishes no admin-2 PiN at all for
-        # 2026, so a per-unit fallback dressed the whole country in 2024 figures.
+        # EVERY cycle is kept, each in its own pinY<year> / tgtY<year> column, and
+        # they are never mixed: the site puts a plan-year selector in front of them
+        # so a unit shows the figures of the cycle you asked for, or nothing. What
+        # this must never become again is a per-unit walk newest→oldest, which
+        # dressed units the current plan never covered in an older cycle's numbers.
+        # (Non-intersectoral sectors keep newest-only — nothing reads them per year.)
         refs = sorted(g["reference_period_start"].unique(), reverse=True)
-        gr = g[g["reference_period_start"] == refs[0]]
-        yr = int(pd.Timestamp(refs[0]).year)
-        lvl = min(gr["admin_level"].unique())  # prefer the coarsest at/below LEVEL
-        gr = gr[gr["admin_level"] == lvl]
-        a1names = gr.drop_duplicates(ACODE).set_index(ACODE)[ANAME]
-        agg = gr.groupby([ACODE, "population_status"])["population"].sum().unstack()
-        k_inn, k_tgt = (("pin", "targeted") if sector == "Intersectoral"
-                        else (f"pin__{sector}", f"tgt__{sector}"))
-        for pcode, r in agg.iterrows():
-            row = rows.setdefault(pcode, {"pcode": pcode, "iso3": loc,
-                                          "name": a1names.get(pcode)})
-            row[k_inn] = int(r["INN"]) if pd.notna(r.get("INN")) else None
-            row[k_tgt] = int(r["TGT"]) if pd.notna(r.get("TGT")) else None
-            row["ref_year"] = max(row.get("ref_year", 0), yr)
-            row["pin_admin_level"] = lvl
+        inter = sector == "Intersectoral"
+        for ref in (refs if inter else refs[:1]):
+            gr = g[g["reference_period_start"] == ref]
+            yr = int(pd.Timestamp(ref).year)
+            lvl = min(gr["admin_level"].unique())  # prefer the coarsest at/below LEVEL
+            gr = gr[gr["admin_level"] == lvl]
+            a1names = gr.drop_duplicates(ACODE).set_index(ACODE)[ANAME]
+            agg = gr.groupby([ACODE, "population_status"])["population"].sum().unstack()
+            k_inn, k_tgt = ((f"pinY{yr}", f"tgtY{yr}") if inter
+                            else (f"pin__{sector}", f"tgt__{sector}"))
+            for pcode, r in agg.iterrows():
+                row = rows.setdefault(pcode, {"pcode": pcode, "iso3": loc,
+                                              "name": a1names.get(pcode)})
+                row[k_inn] = int(r["INN"]) if pd.notna(r.get("INN")) else None
+                row[k_tgt] = int(r["TGT"]) if pd.notna(r.get("TGT")) else None
+                if ref == refs[0]:
+                    row["ref_year"] = max(row.get("ref_year", 0), yr)
+                    row["pin_admin_level"] = lvl
+                if inter and ref == refs[0]:
+                    # The newest needs-table cycle still fills pin/targeted, which
+                    # everything downstream (pruning, adm1 rollups) keys on.
+                    row["pin"] = row[k_inn]
+                    row["targeted"] = row[k_tgt]
     out = pd.DataFrame(rows.values())
     for col in ["pin", "targeted"]:
         if col not in out.columns:
@@ -1042,7 +1050,8 @@ def main() -> None:
     ipc_lists = _ipc_lists(df_ipc)
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
     _sum = lambda s: s.sum(min_count=1)  # noqa: E731 — all-NaN stays None, not 0
-    sec_cols = [c for c in df_pin.columns if c.startswith(("pin__", "tgt__"))]
+    sec_cols = [c for c in df_pin.columns
+                if c.startswith(("pin__", "tgt__", "pinY", "tgtY"))]
     df_pin = (df_pin.groupby(["pcode", "iso3"], as_index=False)
               .agg({"name": "first", "pin": _sum, "targeted": _sum,
                     **{c: _sum for c in sec_cols},
@@ -1342,18 +1351,19 @@ def main() -> None:
     # Per-sector PiN/targeted travel the pipeline as wide numeric columns; fold them
     # into a compact per-row dict {sector: [pin, targeted]} for the payload.
     def _row(rec: dict) -> dict:
-        sec, stale = {}, {}
-        for c in sec_cols:
+        # Caseloads per plan cycle: {"2026": [pin, targeted], …}. The site's plan-year
+        # selector reads this; a year a unit has no figures for is simply absent.
+        cyc: dict[str, list] = {}
+        for c in [c for c in sec_cols if c.startswith(("pinY", "tgtY"))]:
+            v = rec.pop(c, None)
+            if v is not None and pd.notna(v):
+                cyc.setdefault(c[4:], [None, None])[0 if c.startswith("pinY") else 1] = int(v)
+        sec = {}
+        for c in [c for c in sec_cols if "__" in c]:
             v = rec.pop(c, None)
             if v is not None and pd.notna(v):
                 pref, code = c.split("__", 1)
-                if pref == "tgtyr":
-                    stale[code] = int(v)
-                else:
-                    sec.setdefault(code, [None, None])[0 if pref == "pin" else 1] = int(v)
-        for code, yr in stale.items():
-            if code in sec and sec[code][1] is not None:
-                sec[code].append(yr)  # [pin, targeted, staleTargetedYear]
+                sec.setdefault(code, [None, None])[0 if pref == "pin" else 1] = int(v)
         # PiN-by-severity travels as wide pb1..pb5 columns; fold into "pb": [c1..c5]
         # (only when the plan publishes a class breakdown — else pbs_tot alone).
         pbs_tot = rec.pop("pbs_tot", None)
@@ -1370,6 +1380,15 @@ def main() -> None:
                     out["pba"] = 1  # classes come from the AREA classification
         if out.get("pbs_yr") is not None:
             out["pbs_yr"] = int(out["pbs_yr"])
+            # The JIAF PiN-by-severity workbooks carry the newest cycle's caseload
+            # (2026) a year before the needs table publishes it subnationally — same
+            # measure, verified: where both cover a unit-year they agree, and the
+            # 2026 sums reconcile to the published national PiN (Sudan, to the
+            # person). Targets are not part of that product, so those cycles carry
+            # a PiN and no targeted, which the site says plainly.
+            cyc.setdefault(str(out["pbs_yr"]), [None, None])[0] = out["pbs_tot"]
+        if cyc:
+            out["cyc"] = {y: v for y, v in sorted(cyc.items()) if v[0] is not None or v[1] is not None}
         for k in ("pop", "pop_year"):
             if out.get(k) is not None:
                 out[k] = int(out[k])
