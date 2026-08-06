@@ -103,14 +103,21 @@
     if (r.country && y) planYrByCountry.set(r.country, Math.max(planYrByCountry.get(r.country) ?? 0, y));
   }
   const allYrs = [...new Set(planYrByCountry.values())].sort();
+  // Where the per-country year is actually legible: in brackets after each
+  // country in the selector below. (It used to be a column of the ranked table,
+  // which is gone.)
   issuedEl.textContent = `Forecast issued ${data.issued_label}. HNRP plan data ` +
-    (allYrs.length > 1 ? `${allYrs[0]}–${allYrs[allYrs.length - 1]} (year varies by country — shown per row)` : `${allYrs[0]}`) + ".";
+    (allYrs.length > 1
+      ? `${allYrs[0]}–${allYrs[allYrs.length - 1]} — the year each country's plan comes from is in brackets beside it`
+      : `${allYrs[0]}`) + ".";
 
   const countries = [...new Set(data.rows.map((r) => r.country).filter(Boolean))].sort();
   for (const c of countries) {
     const o = document.createElement("option");
     o.value = c;
-    o.textContent = planYrByCountry.has(c) ? `${c} — ${planYrByCountry.get(c)}` : c;
+    // Countries with no plan year are IPC-covered but outside any HNRP — no
+    // bracket to add.
+    o.textContent = planYrByCountry.has(c) ? `${c} (${planYrByCountry.get(c)})` : c;
     countrySel.appendChild(o);
   }
 
