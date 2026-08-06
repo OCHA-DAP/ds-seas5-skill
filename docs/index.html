@@ -8,7 +8,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Merriweather:wght@700&display=swap" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="style.css" />
+  <!-- versioned: the HNRP legend's box strip and clear button need this
+       stylesheet and hnrp.js to arrive as a pair, never one from cache -->
+  <link rel="stylesheet" href="style.css?v=20260805p" />
 </head>
 <body>
   <header>
@@ -158,26 +160,18 @@
             <option value="auto-in">Worst drought — incl. in-season</option>
           </select>
         </label>
-        <label class="toggle">
-          <input type="checkbox" id="hnrp-drought-only" />
-          Show only drought signals
-        </label>
       </div>
       <div class="ctl-row">
         <span class="row-tag">Severity</span>
         <label class="ctl">Source
           <select id="hnrp-sev-type" class="map-select">
-            <option value="ipc" selected>IPC/CH phases</option>
-            <option value="jiaf">PiN by severity</option>
-            <option value="pin">PiN (no severity)</option>
+            <option value="pin" selected>HNRP PiN</option>
+            <option value="ipc">IPC/CH phases</option>
           </select>
         </label>
-        <label class="ctl" id="hnrp-sev-lvl-wrap">Level
-          <select id="hnrp-sev-lvl" class="map-select">
-            <option value="3" selected>3+</option>
-            <option value="4">4+</option>
-            <option value="5">5</option>
-          </select>
+        <!-- Options are filled from the cycles the payload actually carries. -->
+        <label class="ctl" id="hnrp-plan-yr-wrap">Plan year
+          <select id="hnrp-plan-yr" class="map-select"></select>
         </label>
         <label class="ctl" id="hnrp-ipc-period-wrap" hidden>IPC estimate
           <select id="hnrp-ipc-period" class="map-select">
@@ -191,14 +185,6 @@
         <label class="ctl">
           <select id="hnrp-country" class="map-select"><option value="">All</option></select>
         </label>
-        <label class="ctl">Admin level
-          <select id="hnrp-adm" class="map-select">
-            <option value="low" selected>Lowest available</option>
-            <option value="1">Admin 1</option>
-            <option value="2">Admin 2</option>
-            <option value="3">Admin 3</option>
-          </select>
-        </label>
         <span id="hnrp-issued" class="lock-note"></span>
       </div>
     </div>
@@ -209,36 +195,27 @@
     <div id="hnrp-bars-wrap" hidden>
       <div id="hnrp-bars-head">
         <h3 id="hnrp-bars-title"></h3>
-        <label class="ctl">Sort by
-          <select id="hnrp-bar-sort" class="map-select">
-            <option value="sev4" selected>Severity (JIAF 4+)</option>
-            <option value="total">Analysed population</option>
-            <option value="targeted">Targeted</option>
-            <option value="forecast">Forecast category</option>
-            <option value="name">Name</option>
+        <!-- The phase level only ever changed what the BARS count — the map
+             classifies each area by the IPC area rule, whatever level is set —
+             so it lives with the chart it drives. -->
+        <label class="ctl" id="hnrp-sev-lvl-wrap">Level
+          <select id="hnrp-sev-lvl" class="map-select">
+            <option value="3" selected>3+</option>
+            <option value="4">4+</option>
+            <option value="5">5</option>
           </select>
         </label>
-        <label class="toggle">
-          <input type="checkbox" id="hnrp-bars-full" />
-          Include classes 1–2
-        </label>
       </div>
+      <p id="hnrp-no-tgt" class="lock-note" hidden></p>
       <svg id="hnrp-bars"></svg>
       <div id="hnrp-bars-legend"></div>
     </div>
     <p id="hnrp-bars-hint" class="lock-note">Select a country above to see its per-admin
-      severity breakdown (PiN at each JIAF severity class or population per IPC phase, targeted
-      population, and the forecast category).</p>
-
-    <h3 class="hnrp-h">Matching areas, ranked</h3>
-    <table id="hnrp-table">
-      <thead></thead>
-      <tbody></tbody>
-    </table>
-    <p id="hnrp-empty" class="lock-note" hidden>No admin-1 units match the current filters.</p>
+      breakdown (PiN or population per IPC phase, the area's severity class, targeted
+      population, and the forecast category). Click a column header to sort.</p>
 
     <p class="note">
-      Admin-1 areas where the latest SEAS5 seasonal forecast points to drought, weighted by
+      Areas where the latest SEAS5 seasonal forecast points to drought, weighted by
       food-insecurity severity and HNRP caseloads — so the largest at-risk populations with
       the worst forecasts rise to the top.
     </p>
@@ -258,6 +235,8 @@
         that season's forecast for every area. The trimester actually used is shown as its
         compact code (e.g. MJJ) — centred on
         each area when a country is selected on the map, and bold in every tooltip.
+        Areas below the skill floor carry no code: with no usable skill there is no
+        alert, so which season it would have been is beside the point.
         Forecast data are detrended, matching the Map tab's defaults.
       </p>
 
@@ -272,48 +251,62 @@
         cycle is this year or last: Ethiopia (last subnational needs 2024, no newer
         plan) and Syria (last needs 2024; its 2025 severity analysis publishes no
         population figures) are absent entirely. PiN is the plan's headline total for
-        the intersectoral caseload — <em>not</em> a severity band (it has no JIAF-class or
-        IPC-phase breakdown). All PiN/targeted figures shown are the plans'
+        the intersectoral caseload — <em>not</em> a severity band: it is a count of
+        people in need, shown alongside (not split by) the unit's severity class.
+        All PiN/targeted figures shown are the plans'
         <strong>intersectoral</strong> ones.
-        Each country shows its <strong>latest plan cycle</strong> (year in the country
-        selector, the Plan column, and tooltips); where no newer plan exists the previous
-        cycle is shown (e.g. Guatemala, latest 2025). Where the current cycle publishes a
-        unit's PiN but no targeted figure (or omits a unit entirely), the newest earlier
-        cycle fills the gap — a stale targeted is flagged with its year (* in the table,
-        "(2024 plan)" in tooltips), and a wholly carried-over unit shows the older year in
-        its Plan column. A country can still be absent from a given caseload when its plan
-        never publishes that sector subnationally — the columns then show dashes.
+        A <strong>Plan year</strong> selector picks the cycle, and nothing is ever
+        blended across cycles: an area the chosen plan does not cover shows dashes
+        rather than an older year's figures. That matters because coverage moves
+        between cycles — Mozambique's 2025 plan reaches 15 districts where its 2024
+        one reached 117.
+        The <strong>2026</strong> cycle is a special case. Its subnational figures
+        come from the JIAF needs analysis (the "PiN par gravité" workbooks), which
+        publishes PiN by severity and <em>no targets</em>: HPC's 2026 targeting
+        exists only as a national total. So 2026 shows a PiN column and an empty
+        Targeted column, with a note above the chart saying so — pick 2025 to see
+        targeting. The 2026 PiN is the real cycle, not a projection: where it and
+        the needs table both cover a unit-year they agree, and the 2026 subnational
+        sums reconcile to the published national PiN (Sudan, to the person).
+        A country can still be absent from a given caseload when its plan never
+        publishes that sector subnationally — those figures then show dashes.
       </p>
 
       <h4>Severity sources</h4>
       <p>
-        The <strong>Severity</strong> row picks the source and level. <strong>IPC/CH acute
-        food insecurity phases</strong> (default, via <a
-        href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>), <strong>JIAF
-        severity</strong> from the HNRP severity analysis (latest analysis year per country),
-        or the plan's <strong>PiN</strong> itself (no severity level; shares then divide by
-        the plan's JIAF analysed population). JIAF figures are <em>people-level</em>:
-        the plan's <strong>PiN-by-Severity distribution</strong> (JIAF 2.0 PbS workbooks,
-        latest analysis cycle — mostly 2026), i.e. the number of people in need at each
-        intersectoral severity class per area ("JIAF PiN 3+" = PiN at classes 3–5). Note
-        the granularity: the PbS assigns each finest analysis unit (× population group)
-        <em>one</em> class and places that unit's whole PiN there — within-unit splits
-        exist only where plans publish them (Yemen and Syria, at most two classes). So at
-        admin-2 most units show a single class (matching the unit's area classification),
-        and a mixed distribution emerges only where sub-units or population groups sit at
-        different classes — admin-1 bars mix their districts; IPC, by contrast, publishes
-        genuine within-area phase distributions. Some
-        plans publish PiN without a usable class breakdown (Guatemala, El Salvador and
-        Venezuela publish no classes; South Sudan fills one constant class on every unit —
-        a template artifact) — there, each unit's PiN is placed at its <em>area
-        classification</em> from the severity analysis, the same one-class-per-unit
-        semantic the PbS encodes everywhere else (flagged in the bar-chart title).
-        IPC and JIAF figures do <em>not</em> line up:
+        The <strong>Severity</strong> row picks the source. <strong>PiN</strong> (the
+        default) is the plan's own figure for the area: one intersectoral PiN and one
+        <strong>severity class</strong> per unit, exactly as the plan publishes them.
+        The class comes from the plan's PiN-by-Severity distribution (JIAF 2.0 PbS
+        workbooks, latest analysis cycle — mostly 2026): the PbS assigns each finest
+        analysis unit <em>one</em> class and places that unit's whole PiN there, so at
+        the level shown here it is the unit's area classification. Where a unit's
+        caseload does span classes, the fill is the class holding the most of it and
+        the tooltip lists the rest (one unit in the current payload). Where the PbS
+        carries no usable class for a unit, the class falls back to the
+        <strong>severity analysis</strong>'s own population-by-class for that area —
+        the same source, read per area rather than per PiN row, which is what gives
+        DR Congo, Mozambique, Nigeria, Mali, Niger and Haiti their classes (466
+        units). Tooltips say when a class came from there rather than from the PiN
+        split. What remains classless is genuinely unpublished: Myanmar (330 units),
+        Burkina Faso, Chad, CAR, Cameroon and a dozen Somali districts have a PiN and
+        no severity anywhere in the plan data — 427 units, which keep their PiN and
+        show no class.
+        <strong>IPC/CH acute food insecurity phases</strong> (via <a
+        href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>) is the
+        alternative. IPC publishes a genuine within-area phase distribution, so a
+        <strong>Level</strong> selector — above the bar chart, since that is all it
+        changes — picks how much of it to count: 3+, 4+ or 5. The area's class on the
+        map follows the IPC rule instead (highest phase reaching ≥20% of the analysed
+        population) and does not move with the level. IPC and plan figures do
+        <em>not</em> line up:
         they measure different things (acute food insecurity vs inter-sectoral needs) over
         different analysed populations, scopes, and periods — compare shapes, not values.
-        In IPC mode the map and table also include IPC-covered areas
-        <strong>outside any HNRP</strong> (no PiN/severity/targeted)
-        — surfacing possible shocks beyond plan scope. Only IPC analyses valid in 2025 or
+        Areas <strong>outside any HNRP</strong> (no PiN/severity/targeted — most of
+        Nigeria, whose plan covers Borno, Adamawa and Yobe, and IPC-covered countries
+        with no plan) are on the map in either mode: muted body, since there is no
+        severity to colour, but their forecast outline in full, since the forecast is
+        just as real there. Only IPC analyses valid in 2025 or
         later are included; countries whose series stalled earlier (Ethiopia 2021,
         Angola/El Salvador 2022, Burkina Faso Aug 2024, Timor-Leste 2024) carry no IPC
         here.
@@ -321,14 +314,15 @@
 
       <h4>Admin levels</h4>
       <p>
-        The <strong>Admin level</strong> selector switches the whole tab between four
-        views. <em>Lowest available</em> (the default) shows each country at the finest
-        level we can: admin-3 where plans publish it against boundaries we hold
+        Every country is shown at the <strong>finest level we can</strong> — the level
+        the plan itself publishes, where each unit carries a single severity class:
+        admin-3 where plans publish it against boundaries we hold
         (Burkina Faso communes, Myanmar townships, Syria sub-districts, and DR Congo's
         519 zones de santé — via the SNIS/OCHA health-zone shapefile, which matches the
         plan's zone codes exactly), admin-2 for the
-        21-country admin-2 scope, admin-1 elsewhere. Fixed admin-1/2/3 views show one
-        level only. Admin-2 covers ~4,900 units across 21 countries with admin-2
+        21-country admin-2 scope, admin-1 elsewhere. (Fixed single-level views remain
+        reachable at <code>?adm=1</code>, <code>?adm=2</code> or <code>?adm=3</code>,
+        without a picker.) Admin-2 covers ~4,900 units across 21 countries with admin-2
         boundaries and zonal statistics in our database (AFG, BFA, CAF, CMR, COD, COL,
         GTM, HND, HTI, MLI, MOZ, NER, NGA, SDN, SLV, SOM, SSD, TCD, UKR, VEN, YEM —
         the rest lack admin-2 polygons on our side and are excluded on that basis;
@@ -342,8 +336,8 @@
         (1&nbsp;km UN-adjusted, summed over the same admin-3 boundaries). Figures published only at admin-1 cannot be downscaled
         and show dashes at admin-2. Forecast skill at admin-2 is computed identically,
         per unit; smaller units are noisier, so treat marginal signals with extra
-        caution. The table shows at most 500 rows at a time; admin-2 unit names carry
-        their admin-1 parent in parentheses.
+        caution. Where district names repeat across regions, an area's tooltip carries
+        its admin-1 parent in parentheses.
       </p>
 
       <h4>IPC estimate periods</h4>
@@ -358,18 +352,58 @@
 
       <h4>Reading the map</h4>
       <p>
-        In the <em>Lowest available</em> view the map <strong>fills</strong> each unit
-        with its <strong>severity class colour</strong> (1→5; IPC convention colours in
-        IPC mode, the humanitarianaction.info blue ramp for intersectoral severity) and
-        draws the <strong>forecast category</strong> as each unit's boundary line
-        (dashed = moderate skill, solid = high) — PbS mode uses the class holding the
-        unit's PiN; IPC mode applies the IPC area-classification rule (highest phase
-        reaching ≥20% of the analysed population); PiN mode has no classes, so the
-        classic colouring returns. Hovering a legend entry highlights matching units
-        and dims the rest. The same class appears in map tooltips, the table's Class
-        column, and beside each bar-chart row. The severity bars plot classes 3–5 by
-        default (classes 1–2 dominate populous areas and drown the signal — a checkbox
-        restores them).
+        The map <strong>fills</strong> each unit with its <strong>severity class
+        colour</strong> (1→5; the humanitarianaction.info blue ramp for the plan's own
+        classes, IPC convention colours in IPC mode) and draws the <strong>forecast
+        category</strong> as each unit's boundary line (dashed = moderate skill, solid
+        = high). Hovering a legend entry highlights matching units
+        and dims the rest; <strong>clicking</strong> one pins it, so several can be
+        combined — entries within a strip are OR-ed, strips AND together (e.g.
+        <em>strongly below</em> × <em>moderate skill</em> × <em>class 4</em>). Pinned
+        entries stay outlined in the legend; <em>Clear all filters</em>, or Escape,
+        drops them all. Pinning also filters the bar chart outright: non-matching
+        areas leave it, and return when the pin is dropped. The same class appears in
+        map tooltips and, written into its swatch, beside each bar-chart row — where
+        the valid season's code sits beside the forecast swatch too.
+        Selecting a country opens the per-area
+        bars: in PiN mode one bar per unit, carrying that unit's severity colour; in
+        IPC mode the phase distribution from the selected <strong>Level</strong> up,
+        stacked (phases 1–2 dwarf the rest in populous areas and drown the signal, so
+        the bars never start below 3). The dark tick on each bar is the targeted
+        population, on the same scale. Four figure columns follow — the caseload and
+        the targeted population, each as a <strong>headcount</strong> and as a
+        <strong>share of the area's population</strong> — and each column header
+        sorts by what it shows, so the same chart answers "where are the most people"
+        and "where is the largest share of an area affected". The population base is
+        the <strong>largest</strong> figure held for the area — its COD-PS total, the
+        plan's own HNO or WorldPop baseline, the IPC analysed base, or the plan's
+        JIAF analysed base. Largest, not "total first": where an analysis covers more
+        people than the baseline says live there, the baseline is the stale number.
+        Every figure's tooltip names the base used.
+      </p>
+      <p>
+        <strong>Shares over 100%.</strong> For 63 of 3,260 areas the caseload exceeds
+        every population figure we hold, so the share column reads <em>&gt;100%</em>
+        — muted, with the real ratio in the tooltip — rather than a spurious 1,656%.
+        Mostly this is real: a plan counts displaced people the resident baseline
+        never had, which is most of Burkina Faso's 13 cases (Djibo's PiN is 4.9× a
+        WorldPop 2020 that predates the influx). Sudan (14) and Myanmar (11) make up
+        much of the rest.
+      </p>
+      <p>
+        <strong>Misaligned plan cycles.</strong> One cause was neither of those.
+        Venezuela's 2025 cycle carries its rows against the wrong p-codes: 156,307
+        PiN on Cardenal Quintero (9,441 people) while Libertador (217,537) gets
+        4,387. Its own population baseline gives it away — in 2024 that baseline is
+        the COD-PS population exactly, unit for unit; in 2025 it is the same multiset
+        of values with 135 of 335 units holding another unit's number, and each PiN
+        is a faithful 26% of the number next to it. National totals are untouched,
+        which is why nothing caught it. The export now drops any cycle showing that
+        signature — a baseline that IS the COD-PS multiset yet misassigns a material
+        share of it — and the country falls back to its previous cycle, visible in
+        its plan year. It fires on Venezuela 2025 alone across every cycle we hold.
+        Venezuela therefore shows its 2024 cycle, in which no unit's PiN exceeds its
+        population.
       </p>
     </details>
   </section>
@@ -576,7 +610,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260804d"></script>
+  <script src="hnrp.js?v=20260805x"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

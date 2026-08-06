@@ -242,6 +242,12 @@ def normalize_pcodes(
     Genuinely new admin units (e.g. Mali's 2023
     regions, Burkina's new provinces) have no COD polygon or forecast in our vintage —
     they stay unmatched and are reported so drift is visible on every run.
+
+    A name-matched placeholder NEVER lands on a unit another row already holds:
+    the frames reaching here carry one row per unit, so a collision would mean
+    adding a second, and the merge downstream sums them. That guard is what makes
+    xxx_name_match safe on caseloads — the hazard it was withheld from was exactly
+    a plan-wide row whose name collides with a real unit ("Djibouti").
     """
     ref_by_iso = poly.groupby("iso3")["pcode"].apply(set).to_dict()
     name_ix = {
@@ -249,7 +255,10 @@ def normalize_pcodes(
         for iso3, g in poly.groupby("iso3")
     }
     out = df.copy()
-    fixed, dropped, unmatched = [], [], []
+    # Units already spoken for by a real (non-placeholder) row.
+    _ph = out["pcode"].fillna("").str.upper().str.endswith("-XXX")
+    taken = set(zip(out.loc[~_ph, "iso3"], out.loc[~_ph, "pcode"]))
+    fixed, dropped, unmatched, blocked = [], [], [], []
     for i, row in out.iterrows():
         code, iso3 = row["pcode"], row["iso3"]
         ref = ref_by_iso.get(iso3, set())
@@ -268,9 +277,13 @@ def normalize_pcodes(
         if code.upper().endswith("-XXX") or _fold(row.get("name") or "") in {"pdi land", "unspecified"}:
             cand = (name_ix.get(iso3, {}).get(_fold(row.get("name") or ""))
                     if xxx_name_match else None)
+            if cand is not None and (iso3, cand) in taken:
+                blocked.append(f"{code} ({row.get('name')}) → {cand} already held")
+                cand = None
             if cand is not None:
                 fixed.append(f"{code}→{cand} (name)")
                 out.loc[i, "pcode"] = cand
+                taken.add((iso3, cand))
             else:
                 dropped.append(f"{code} ({row.get('name')})")
                 out.loc[i, "pcode"] = None
@@ -297,12 +310,75 @@ def normalize_pcodes(
     if fixed:
         print(f"  {label}: normalized {len(fixed)} pcodes ({', '.join(fixed[:8])}"
               f"{'…' if len(fixed) > 8 else ''})")
+    if blocked:
+        print(f"  {label}: {len(blocked)} placeholder(s) NOT name-matched — the unit "
+              f"already has a row: {blocked}")
     if dropped:
         print(f"  {label}: dropped {len(dropped)} unattributable placeholder(s): {dropped}")
     if unmatched:
         print(f"  {label}: {len(unmatched)} unit(s) have no polygon in our COD vintage "
               f"(new admin divisions?): {unmatched}")
     return out
+
+
+def _scrambled_cycles(engine) -> set[tuple[str, pd.Timestamp]]:
+    """Plan cycles whose unit-level attribution is provably misaligned upstream.
+
+    The signature, found in VEN 2025: a cycle's own admin population baseline
+    (Intersectoral / population_status 'all') is EXACTLY the COD-PS population
+    MULTISET — the plan is quoting COD-PS, unit for unit — yet a large share of
+    units carry another unit's number. Same values, wrong owners: the rows were
+    shuffled against their p-codes somewhere upstream, and everything sitting on
+    those rows (PiN, targeted, every sector) belongs to a different unit.
+    VEN 2025 puts 156,307 PiN on Cardenal Quintero (9,441 people) and 4,387 on
+    Libertador (217,537) — and its baseline hands Cardenal Quintero the 600,351
+    that belongs to Sucre in Miranda. 135 of 335 units are affected; the national
+    total is untouched, which is why it survives every aggregate check.
+
+    Only an EXACT multiset match licenses this call. Plans that publish their own
+    population estimates (MLI, SDN, CAF — 50–100% of units differ from COD-PS in
+    VALUE) are a different, legitimate thing and are never flagged. Across the 17
+    country-cycles that carry a baseline, this fires on VEN 2025 alone: VEN 2024
+    and HTI 2025 also quote COD-PS exactly, and assign every unit correctly.
+
+    Un-scrambling is possible in principle — each row's baseline value identifies
+    the unit it belongs to — but that would mean publishing an attribution the
+    source never made, silently. Dropping the cycle lets the loader's existing
+    fallback take the previous one, which is visible: the unit's plan year.
+    """
+    q_base = """
+    SELECT location_code, reference_period_start,
+           COALESCE(admin2_code, admin1_code) AS pcode, population
+    FROM hpc.needs_admin
+    WHERE sector_code = 'Intersectoral' AND category = 'total'
+      AND population_status = 'all' AND population IS NOT NULL
+      AND COALESCE(admin2_code, admin1_code) IS NOT NULL
+    """
+    q_pop = """
+    SELECT COALESCE(admin2_code, admin1_code) AS pcode, population, reference_period_start
+    FROM pop.population_admin WHERE population IS NOT NULL
+    """
+    with engine.connect() as conn:
+        base = pd.read_sql(q_base, conn, parse_dates=["reference_period_start"])
+        pop = pd.read_sql(q_pop, conn, parse_dates=["reference_period_start"])
+    ref = (pop.sort_values("reference_period_start").groupby("pcode")["population"].last())
+    bad: set[tuple[str, pd.Timestamp]] = set()
+    for (loc, period), g in base.groupby(["location_code", "reference_period_start"]):
+        g = g.drop_duplicates("pcode")
+        cod = g["pcode"].map(ref)
+        ok = cod.notna()
+        if ok.sum() < 10:
+            continue
+        plan_v, cod_v = g["population"][ok].astype("int64"), cod[ok].astype("int64")
+        if sorted(plan_v) != sorted(cod_v):
+            continue  # the plan is not quoting COD-PS — nothing to conclude
+        mis = int((plan_v.values != cod_v.values).sum())
+        if mis >= 5 and mis / len(plan_v) > 0.02:
+            bad.add((loc, period))
+            print(f"  PiN: {loc} {period:%Y} cycle DROPPED — its baseline is the COD-PS "
+                  f"population but {mis} of {len(plan_v)} units carry another unit's "
+                  f"value; every figure on those rows is misattributed upstream")
+    return bad
 
 
 def load_pin_adm1(sub_parent: dict | None = None) -> tuple[pd.DataFrame, dict[str, str]]:
@@ -384,6 +460,16 @@ def load_pin_adm1(sub_parent: dict | None = None) -> tuple[pd.DataFrame, dict[st
         print(f"  PiN: dropped {stale_locs} — newest plan cycle predates {cutoff.year}")
     df = df[newest >= cutoff]
 
+    # Then drop individual cycles whose rows are misaligned against their p-codes.
+    # AFTER the staleness cut, deliberately: a country with a corrupt current cycle
+    # still HAS a current plan, so it stays in the tab on its previous cycle rather
+    # than vanishing — the same fallback a unit missing from this cycle already gets.
+    scrambled = _scrambled_cycles(engine)
+    if scrambled:
+        keep = [(l, p) not in scrambled for l, p in
+                zip(df["location_code"], df["reference_period_start"])]
+        df = df[keep]
+
     # 'ALL' ("Final HRP caseload") is the intersectoral-equivalent of the admin-3
     # publishers: promote it where the country has no subnational Intersectoral
     # rows (COD, SYR); drop it where it would duplicate them (BFA, MMR).
@@ -405,49 +491,37 @@ def load_pin_adm1(sub_parent: dict | None = None) -> tuple[pd.DataFrame, dict[st
     }
 
     rows: dict[str, dict] = {}
-    n_stale_tgt = 0
     for (loc, sector), g in df.groupby(["location_code", "sector_code"]):
-        # Walk reference periods newest -> oldest: each unit takes the NEWEST
-        # available PiN and targeted independently. Units (or targeted figures)
-        # missing from the current cycle fall back to the previous one — flagged:
-        # a stale targeted carries its cycle year; a whole-unit fallback shows in
-        # the row's plan year.
+        # EVERY cycle is kept, each in its own pinY<year> / tgtY<year> column, and
+        # they are never mixed: the site puts a plan-year selector in front of them
+        # so a unit shows the figures of the cycle you asked for, or nothing. What
+        # this must never become again is a per-unit walk newest→oldest, which
+        # dressed units the current plan never covered in an older cycle's numbers.
+        # (Non-intersectoral sectors keep newest-only — nothing reads them per year.)
         refs = sorted(g["reference_period_start"].unique(), reverse=True)
-        latest_year = int(pd.Timestamp(refs[0]).year)
-        ent: dict[str, dict] = {}
-        for ref in refs:
+        inter = sector == "Intersectoral"
+        for ref in (refs if inter else refs[:1]):
             gr = g[g["reference_period_start"] == ref]
+            yr = int(pd.Timestamp(ref).year)
             lvl = min(gr["admin_level"].unique())  # prefer the coarsest at/below LEVEL
             gr = gr[gr["admin_level"] == lvl]
             a1names = gr.drop_duplicates(ACODE).set_index(ACODE)[ANAME]
             agg = gr.groupby([ACODE, "population_status"])["population"].sum().unstack()
-            yr = int(pd.Timestamp(ref).year)
+            k_inn, k_tgt = ((f"pinY{yr}", f"tgtY{yr}") if inter
+                            else (f"pin__{sector}", f"tgt__{sector}"))
             for pcode, r in agg.iterrows():
-                e = ent.setdefault(pcode, {"name": a1names.get(pcode), "lvl": lvl})
-                if "pin" not in e and pd.notna(r.get("INN")):
-                    e["pin"], e["pin_yr"] = int(r["INN"]), yr
-                if "tgt" not in e and pd.notna(r.get("TGT")):
-                    e["tgt"], e["tgt_yr"] = int(r["TGT"]), yr
-        k_inn, k_tgt = (("pin", "targeted") if sector == "Intersectoral"
-                        else (f"pin__{sector}", f"tgt__{sector}"))
-        for pcode, e in ent.items():
-            row = rows.setdefault(pcode, {"pcode": pcode, "iso3": loc, "name": e["name"]})
-            row[k_inn] = e.get("pin")
-            row[k_tgt] = e.get("tgt")
-            # Plan year of the figures actually used for this unit (not the plan's
-            # newest cycle — a unit dropped from the current plan keeps its old year).
-            used_yr = max(e.get("pin_yr", 0), e.get("tgt_yr", 0)) or latest_year
-            row["ref_year"] = max(row.get("ref_year", 0), used_yr)
-            row["pin_admin_level"] = e["lvl"]
-            if e.get("tgt") is not None and e["tgt_yr"] < max(e.get("pin_yr", 0), latest_year):
-                n_stale_tgt += 1
-                if sector == "Intersectoral":
-                    row["tgt_year"] = e["tgt_yr"]
-                else:
-                    row[f"tgtyr__{sector}"] = e["tgt_yr"]
-    if n_stale_tgt:
-        print(f"  PiN: {n_stale_tgt} targeted figure(s) fall back to an older plan cycle "
-              f"(flagged per unit)")
+                row = rows.setdefault(pcode, {"pcode": pcode, "iso3": loc,
+                                              "name": a1names.get(pcode)})
+                row[k_inn] = int(r["INN"]) if pd.notna(r.get("INN")) else None
+                row[k_tgt] = int(r["TGT"]) if pd.notna(r.get("TGT")) else None
+                if ref == refs[0]:
+                    row["ref_year"] = max(row.get("ref_year", 0), yr)
+                    row["pin_admin_level"] = lvl
+                if inter and ref == refs[0]:
+                    # The newest needs-table cycle still fills pin/targeted, which
+                    # everything downstream (pruning, adm1 rollups) keys on.
+                    row["pin"] = row[k_inn]
+                    row["targeted"] = row[k_tgt]
     out = pd.DataFrame(rows.values())
     for col in ["pin", "targeted"]:
         if col not in out.columns:
@@ -950,7 +1024,11 @@ def main() -> None:
 
     print("Reconciling humanitarian pcodes to the COD vintage...")
     df_pin_raw, sector_names = load_pin_adm1(sub_parent)
-    df_pin = normalize_pcodes(df_pin_raw, poly, "PiN")
+    # Caseloads opt into placeholder name-matching: CAR files 16 units (777k PiN)
+    # under CF31-XXX / CAF-XXX-XXX with perfectly good names, and dropping them
+    # left Paoua, Batangafo, Bouca, Kabo carrying a severity class and no PiN.
+    # The collision guard is what makes it safe — nothing lands on a held unit.
+    df_pin = normalize_pcodes(df_pin_raw, poly, "PiN", xxx_name_match=True)
     df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
     df_pbs = normalize_pcodes(load_pbs_adm1(), poly, "pbs")
     df_pbs = (df_pbs.groupby("pcode", as_index=False)
@@ -972,11 +1050,11 @@ def main() -> None:
     ipc_lists = _ipc_lists(df_ipc)
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
     _sum = lambda s: s.sum(min_count=1)  # noqa: E731 — all-NaN stays None, not 0
-    sec_cols = [c for c in df_pin.columns if c.startswith(("pin__", "tgt__", "tgtyr__"))]
+    sec_cols = [c for c in df_pin.columns
+                if c.startswith(("pin__", "tgt__", "pinY", "tgtY"))]
     df_pin = (df_pin.groupby(["pcode", "iso3"], as_index=False)
               .agg({"name": "first", "pin": _sum, "targeted": _sum,
-                    **{c: ("max" if c.startswith("tgtyr__") else _sum) for c in sec_cols},
-                    **({"tgt_year": "max"} if "tgt_year" in df_pin.columns else {}),
+                    **{c: _sum for c in sec_cols},
                     "ref_year": "max", "pin_admin_level": "max"}))
     df_sev = (df_sev.groupby(["pcode", "iso3"], as_index=False)
               .agg({"name": "first", "sev4": "sum", "sev_total": "sum", "sev_year": "max",
@@ -1273,18 +1351,19 @@ def main() -> None:
     # Per-sector PiN/targeted travel the pipeline as wide numeric columns; fold them
     # into a compact per-row dict {sector: [pin, targeted]} for the payload.
     def _row(rec: dict) -> dict:
-        sec, stale = {}, {}
-        for c in sec_cols:
+        # Caseloads per plan cycle: {"2026": [pin, targeted], …}. The site's plan-year
+        # selector reads this; a year a unit has no figures for is simply absent.
+        cyc: dict[str, list] = {}
+        for c in [c for c in sec_cols if c.startswith(("pinY", "tgtY"))]:
+            v = rec.pop(c, None)
+            if v is not None and pd.notna(v):
+                cyc.setdefault(c[4:], [None, None])[0 if c.startswith("pinY") else 1] = int(v)
+        sec = {}
+        for c in [c for c in sec_cols if "__" in c]:
             v = rec.pop(c, None)
             if v is not None and pd.notna(v):
                 pref, code = c.split("__", 1)
-                if pref == "tgtyr":
-                    stale[code] = int(v)
-                else:
-                    sec.setdefault(code, [None, None])[0 if pref == "pin" else 1] = int(v)
-        for code, yr in stale.items():
-            if code in sec and sec[code][1] is not None:
-                sec[code].append(yr)  # [pin, targeted, staleTargetedYear]
+                sec.setdefault(code, [None, None])[0 if pref == "pin" else 1] = int(v)
         # PiN-by-severity travels as wide pb1..pb5 columns; fold into "pb": [c1..c5]
         # (only when the plan publishes a class breakdown — else pbs_tot alone).
         pbs_tot = rec.pop("pbs_tot", None)
@@ -1301,8 +1380,15 @@ def main() -> None:
                     out["pba"] = 1  # classes come from the AREA classification
         if out.get("pbs_yr") is not None:
             out["pbs_yr"] = int(out["pbs_yr"])
-        if out.get("tgt_year") is not None:
-            out["tgt_year"] = int(out["tgt_year"])
+            # The JIAF PiN-by-severity workbooks carry the newest cycle's caseload
+            # (2026) a year before the needs table publishes it subnationally — same
+            # measure, verified: where both cover a unit-year they agree, and the
+            # 2026 sums reconcile to the published national PiN (Sudan, to the
+            # person). Targets are not part of that product, so those cycles carry
+            # a PiN and no targeted, which the site says plainly.
+            cyc.setdefault(str(out["pbs_yr"]), [None, None])[0] = out["pbs_tot"]
+        if cyc:
+            out["cyc"] = {y: v for y, v in sorted(cyc.items()) if v[0] is not None or v[1] is not None}
         for k in ("pop", "pop_year"):
             if out.get(k) is not None:
                 out[k] = int(out[k])
