@@ -335,14 +335,15 @@
       const has = (k) => rs.some((x) => x[k] != null);
       const ds = [];
       if (has("pct") || has("fb_pct")) ds.push("SEAS5 forecast");
-      if (has("pin")) ds.push("PiN");
-      if (has("targeted")) ds.push("targeted");
+      if (has("cyc")) ds.push("PiN");
+      if (rs.some((x) => Object.values(x.cyc ?? {}).some((v) => v[1] != null))) ds.push("targeted");
       if (has("pb") || has("pba")) ds.push("PiN by severity");
       if (has("ipc")) ds.push("IPC");
-      const py = planYrByCountry.get(country);
+      // Which plan cycles this country has, since the year is a control now.
+      const yrs = [...new Set(rs.flatMap((x) => Object.keys(x.cyc ?? {})))].sort();
       countryTipCache.set(key,
         `<div class="name">${country}</div>` +
-        `<div>${py ? `Plan data ${py} · ` : ""}${ds.join(", ")}</div>` +
+        `<div>${yrs.length ? `HNRP ${yrs.join(", ")} · ` : ""}${ds.join(", ")}</div>` +
         `<div class="cat" style="color:#9db1b3">${hint}</div>`);
     }
     return countryTipCache.get(key);
