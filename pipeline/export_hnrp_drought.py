@@ -26,9 +26,13 @@ DATA SEMANTICS & AGGREGATION RULES (hard-won — read before editing a loader):
    admin-2 units equal max(sector); SDN 0% equal but 98% ≥ it, the signature of
    mosaic at a finer unit). From HPC 2026 overall PiN counts only areas in
    intersectoral severity 3+ (2025-cycle PiN can include class-1/2 areas — why
-   PiN > pop(3+ areas) in COD/MOZ). A PiN-BY-SEVERITY distribution exists in JIAF
-   ("PiN par gravité" workbook sheets, reintroduced by the 2025 Humanitarian
-   Reset) but is NOT in the mirror — only the area classification is.
+   PiN > pop(3+ areas) in COD/MOZ). The PiN-BY-SEVERITY distribution ("PiN par
+   gravité" workbook sheets, reintroduced by the 2025 Humanitarian Reset) IS in
+   the mirror, as hpc.pin_admin — final_pin per unit × population group, classed
+   by COALESCE(final_severity, severity). load_pbs_adm1() below is its consumer and
+   the site's default severity source; severity_admin is the area-classification
+   fallback for units the PbS does not class. (This block said the opposite until
+   2026-08; the PbS landed in the mirror after it was written.)
 
 2. PREFER THE COARSEST PUBLISHED LEVEL. Where a country publishes the same series
    at admin-1 AND finer, the admin-1 figures equal the finer sums (ratio 1.000)
@@ -60,6 +64,24 @@ DATA SEMANTICS & AGGREGATION RULES (hard-won — read before editing a loader):
 
 8. pop.population_admin is totals-only (gender='all', age_range='all') — safe to
    take rows as-is; its *-XXX rows are distinct areas (one row per name).
+
+9. NO SUBNATIONAL TARGETED EXISTS FOR 2026, anywhere (checked 2026-08 four ways:
+   needs_admin population_status='TGT', the HAPI humanitarian-needs endpoint, the
+   HPC v2 API, and humanitarianaction.info). HPC's 2026 targeting is a national
+   total only, because the 2026 subnational figures come from the JIAF needs
+   analysis, which publishes PiN by severity and no targets. Do NOT go looking
+   again, and do NOT carry 2025 targets forward: the 2025 subnational sums match
+   the 2025 national totals exactly (ratio 1.00 for all 20 countries) and NOT
+   2026's (0.63–1.88), so they are last year's targets, not mislabelled ones.
+
+10. THE POPULATION DENOMINATOR IS THE WEAKEST FIGURE IN THE PAYLOAD. popBase takes
+   the LARGEST of COD-PS / HNO / WorldPop, IPC analysed and JIAF analysed, and it
+   is still exceeded by the caseload in ~3% of units. Worst where a country has no
+   COD-PS and falls back to WorldPop 2020: SYR (270 admin-3 units, 91 over 100% —
+   displacement into NW Idleb/Aleppo and returns to a Quneitra WorldPop counted at
+   221 people) — though SYR's national PiN is still only 90% of its summed
+   baseline, i.e. a distribution problem, not an inflated total. Treat >100% as
+   informative about the baseline, not as a bug to clamp away.
 
 Run:  uv run python pipeline/export_hnrp_drought.py [--level 2] [--rebuild-geometry]
 """
@@ -343,8 +365,16 @@ def _scrambled_cycles(engine) -> set[tuple[str, pd.Timestamp]]:
 
     Un-scrambling is possible in principle — each row's baseline value identifies
     the unit it belongs to — but that would mean publishing an attribution the
-    source never made, silently. Dropping the cycle lets the loader's existing
-    fallback take the previous one, which is visible: the unit's plan year.
+    source never made, silently.
+
+    What the drop actually does (checked against the 2026-08 payload, because the
+    obvious guess is wrong): it removes the cycle from needs_admin ONLY. VEN 2025
+    survives in the payload, seeded instead from that year's PbS (pin_admin,
+    pbs_yr=2025), which carries the same units correctly attributed — Cardenal
+    Quintero 3,493 against 9,441 people, no unit above 37% of its population.
+    needs_admin is the only source of TARGETED figures, so the visible effect is
+    that VEN 2025 has a PiN and no targets; targeting is available under 2024.
+    It is not a whole-country fallback to the previous cycle.
     """
     q_base = """
     SELECT location_code, reference_period_start,
