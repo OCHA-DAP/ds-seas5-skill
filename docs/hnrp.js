@@ -93,14 +93,30 @@
 
   // Plan cycle varies by country (e.g. Guatemala's latest is the 2025 HNRP) — surface
   // the year everywhere caseload figures appear.
-  const planYrOf = (r) => {
-    const ys = [r.ref_year, r.sev_year, r.pbs_yr].filter((y) => y != null);
+  // The cycle a unit's CASELOAD comes from. The severity analysis can be a year
+  // newer (CAR: 2025 caseloads, 2026 analysis) — taking the max of the two, as
+  // this used to, labelled 2025 figures as 2026.
+  const sevYrOf = (r) => {
+    const ys = [r.sev_year, r.pbs_yr].filter((y) => y != null);
     return ys.length ? Math.max(...ys) : null;
   };
+  const planYrOf = (r) => r.ref_year ?? sevYrOf(r);
+  // "2025" or, where the analysis is newer than the caseload, "2025, severity
+  // analysis 2026" — never one year standing in for both.
+  const cycleTxt = (r) => {
+    const py = planYrOf(r), sy = sevYrOf(r);
+    return py == null ? "–"
+      : sy != null && sy !== py && r.ref_year != null ? `${py}, severity analysis ${sy}`
+      : `${py}`;
+  };
+  // The country's CASELOAD cycle — the year its PiN and targeted figures are
+  // from. A country whose severity analysis is newer must not be labelled with
+  // the analysis year, and one with no caseload at all gets no year.
   const planYrByCountry = new Map();
   for (const r of data.rows) {
-    const y = planYrOf(r);
-    if (r.country && y) planYrByCountry.set(r.country, Math.max(planYrByCountry.get(r.country) ?? 0, y));
+    if (r.country && r.ref_year) {
+      planYrByCountry.set(r.country, Math.max(planYrByCountry.get(r.country) ?? 0, r.ref_year));
+    }
   }
   const allYrs = [...new Set(planYrByCountry.values())].sort();
   // Which cycles are in play, no more; each country's own is in its selector entry.
@@ -126,10 +142,6 @@
   // remain in the payload's r.sec should a sector view ever return).
   const pinOf = (r) => r.pin ?? null;
   const tgtOf = (r) => r.targeted ?? null;
-  // Plan-cycle year of a targeted figure that fell back to an OLDER cycle than the
-  // unit's PiN (none published in the current one) — flagged wherever it appears.
-  const tgtYrOf = (r) => r.tgt_year ?? null;
-  const tgtFlag = (r) => (tgtYrOf(r) ? ` (${tgtYrOf(r)} plan)` : "");
   const secTag = () => "";
 
   // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
@@ -370,9 +382,8 @@
       const c = ipcMode() ? ipcComboOf(r) : null;
       rows += `<div>${sevLabel()}: ${fmtN(sevValOf(r))}${c ? ` (${comboDesc(c)})` : ""}</div>`;
     }
-    if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}${tgtFlag(r)}</div>`;
-    const py = planYrOf(r);
-    if (py) rows += `<div>Plan data: ${py}</div>`;
+    if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
+    if (planYrOf(r)) rows += `<div>HNRP ${cycleTxt(r)}</div>`;
     if (ADM === "low") {
       const cls = sevClassOf(r);
       if (cls) {
@@ -979,13 +990,18 @@
       ? "No areas in this country match the pinned legend filters."
       : BARS_HINT;
     if (!rows.length) { resetBarRows(); return; }
+    // Name the level these rows actually sit at, not "lowest available" — the
+    // whole point of the lowest view is that it differs by country, and a
+    // caseload reads differently at admin 2 than at admin 3.
+    const lvls = [...new Set(rows.map((r) => r.lvl).filter((v) => v != null))].sort();
+    const lvlTxt = lvls.length ? `admin ${lvls.join("–")}` : ADM_LABEL[ADM];
     if (pinMode()) {
       barsTitle.textContent = `${country} — PiN${secTag()} and severity class, ` +
-        `per ${ADM_LABEL[ADM]} (plan data ${planYrOf(rows[0]) ?? "–"}` +
+        `per ${lvlTxt} (HNRP ${cycleTxt(rows[0])}` +
         `${rows[0].pba ? ", class from the area classification" : ""})`;
     } else {
       const c = ipcComboOf(rows[0]);
-      barsTitle.textContent = `${country} — population by IPC/CH phase, per ${ADM_LABEL[ADM]}` +
+      barsTitle.textContent = `${country} — population by IPC/CH phase, per ${lvlTxt}` +
         (c ? ` (${comboDesc(c)})` : "");
     }
 
@@ -1210,7 +1226,7 @@
       if (tgt != null) {
         titled(gr("line", { x1: X(tgt), x2: X(tgt), y1: y + 1, y2: y + ROW - 3,
                             stroke: "#1d2021", "stroke-width": 2 }),
-          `${r.name ?? r.pcode} — targeted: ${fmtN(tgt)}${tgtFlag(r)} · ${pctTxt(tgt)}`);
+          `${r.name ?? r.pcode} — targeted: ${fmtN(tgt)} · ${pctTxt(tgt)}`);
       }
       // ── The same four quantities as figures, one sortable column each ────
       [[val, fmtSI(val), pctTxt(val)],

@@ -250,13 +250,19 @@
         people in need, shown alongside (not split by) the unit's severity class.
         All PiN/targeted figures shown are the plans'
         <strong>intersectoral</strong> ones.
-        Each country shows its <strong>latest plan cycle</strong> (year in the country
-        selector, the bar-chart title, and tooltips); where no newer plan exists the previous
-        cycle is shown (e.g. Guatemala, latest 2025). Where the current cycle publishes a
-        unit's PiN but no targeted figure (or omits a unit entirely), the newest earlier
-        cycle fills the gap — a stale targeted is flagged with its year in the tooltip
-        ("(2024 plan)"). A country can still be absent from a given caseload when its plan
-        never publishes that sector subnationally — those figures then show dashes.
+        Each country shows <strong>one plan cycle: its latest</strong>, named in the
+        country selector, the bar-chart title and every tooltip. Areas that cycle does
+        not cover are simply absent — no figure is carried forward from an earlier
+        plan to stand in for one the current plan never made. That is visible where
+        coverage narrowed between cycles: Mozambique's 2025 plan reaches 15 districts
+        where its 2024 one reached 117, Niger's 36 where 2024 had 67, and CAR
+        publishes no admin-2 caseload at all for 2026, so it shows its 2025 one. In
+        total 322 areas that previously carried an older cycle's PiN now show none.
+        Where a country's <strong>severity analysis</strong> is newer than its
+        caseload, both years are named rather than the newer one standing for both
+        ("HNRP 2025, severity analysis 2026"). A country can still be absent from a
+        given caseload when its plan never publishes that sector subnationally —
+        those figures then show dashes.
       </p>
 
       <h4>Severity sources</h4>
@@ -369,12 +375,13 @@
         Every figure's tooltip names the base used.
       </p>
       <p>
-        <strong>Shares over 100%.</strong> Where a caseload exceeds every population
-        figure we hold, the share column reads <em>&gt;100%</em> — muted, with the
-        real ratio in the tooltip — rather than a spurious 1,656%. Mostly this is
-        real: a plan counts displaced people the resident baseline never had, which
-        is most of Burkina Faso's cases (Djibo's PiN is 4.9× a WorldPop 2020 that
-        predates the influx). Sudan and Myanmar make up much of the rest.
+        <strong>Shares over 100%.</strong> For 63 of 3,260 areas the caseload exceeds
+        every population figure we hold, so the share column reads <em>&gt;100%</em>
+        — muted, with the real ratio in the tooltip — rather than a spurious 1,656%.
+        Mostly this is real: a plan counts displaced people the resident baseline
+        never had, which is most of Burkina Faso's 13 cases (Djibo's PiN is 4.9× a
+        WorldPop 2020 that predates the influx). Sudan (14) and Myanmar (11) make up
+        much of the rest.
       </p>
       <p>
         <strong>Misaligned plan cycles.</strong> One cause was neither of those.
@@ -388,9 +395,8 @@
         signature — a baseline that IS the COD-PS multiset yet misassigns a material
         share of it — and the country falls back to its previous cycle, visible in
         its plan year. It fires on Venezuela 2025 alone across every cycle we hold.
-        Venezuela's figures therefore revert to its 2024 cycle, where no unit's PiN
-        exceeds its population, <em>from the next data refresh onward</em>; the
-        figures shipped here still predate that.
+        Venezuela therefore shows its 2024 cycle, in which no unit's PiN exceeds its
+        population.
       </p>
     </details>
   </section>
@@ -597,7 +603,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260805s"></script>
+  <script src="hnrp.js?v=20260805v"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

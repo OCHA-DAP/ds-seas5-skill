@@ -242,6 +242,12 @@ def normalize_pcodes(
     Genuinely new admin units (e.g. Mali's 2023
     regions, Burkina's new provinces) have no COD polygon or forecast in our vintage —
     they stay unmatched and are reported so drift is visible on every run.
+
+    A name-matched placeholder NEVER lands on a unit another row already holds:
+    the frames reaching here carry one row per unit, so a collision would mean
+    adding a second, and the merge downstream sums them. That guard is what makes
+    xxx_name_match safe on caseloads — the hazard it was withheld from was exactly
+    a plan-wide row whose name collides with a real unit ("Djibouti").
     """
     ref_by_iso = poly.groupby("iso3")["pcode"].apply(set).to_dict()
     name_ix = {
@@ -249,7 +255,10 @@ def normalize_pcodes(
         for iso3, g in poly.groupby("iso3")
     }
     out = df.copy()
-    fixed, dropped, unmatched = [], [], []
+    # Units already spoken for by a real (non-placeholder) row.
+    _ph = out["pcode"].fillna("").str.upper().str.endswith("-XXX")
+    taken = set(zip(out.loc[~_ph, "iso3"], out.loc[~_ph, "pcode"]))
+    fixed, dropped, unmatched, blocked = [], [], [], []
     for i, row in out.iterrows():
         code, iso3 = row["pcode"], row["iso3"]
         ref = ref_by_iso.get(iso3, set())
@@ -268,9 +277,13 @@ def normalize_pcodes(
         if code.upper().endswith("-XXX") or _fold(row.get("name") or "") in {"pdi land", "unspecified"}:
             cand = (name_ix.get(iso3, {}).get(_fold(row.get("name") or ""))
                     if xxx_name_match else None)
+            if cand is not None and (iso3, cand) in taken:
+                blocked.append(f"{code} ({row.get('name')}) → {cand} already held")
+                cand = None
             if cand is not None:
                 fixed.append(f"{code}→{cand} (name)")
                 out.loc[i, "pcode"] = cand
+                taken.add((iso3, cand))
             else:
                 dropped.append(f"{code} ({row.get('name')})")
                 out.loc[i, "pcode"] = None
@@ -297,6 +310,9 @@ def normalize_pcodes(
     if fixed:
         print(f"  {label}: normalized {len(fixed)} pcodes ({', '.join(fixed[:8])}"
               f"{'…' if len(fixed) > 8 else ''})")
+    if blocked:
+        print(f"  {label}: {len(blocked)} placeholder(s) NOT name-matched — the unit "
+              f"already has a row: {blocked}")
     if dropped:
         print(f"  {label}: dropped {len(dropped)} unattributable placeholder(s): {dropped}")
     if unmatched:
@@ -475,49 +491,29 @@ def load_pin_adm1(sub_parent: dict | None = None) -> tuple[pd.DataFrame, dict[st
     }
 
     rows: dict[str, dict] = {}
-    n_stale_tgt = 0
     for (loc, sector), g in df.groupby(["location_code", "sector_code"]):
-        # Walk reference periods newest -> oldest: each unit takes the NEWEST
-        # available PiN and targeted independently. Units (or targeted figures)
-        # missing from the current cycle fall back to the previous one — flagged:
-        # a stale targeted carries its cycle year; a whole-unit fallback shows in
-        # the row's plan year.
+        # ONE cycle per country and sector: the newest. A unit the current plan
+        # does not cover has no current caseload, and carrying its previous
+        # cycle's figure forward said otherwise — a 2024 PiN sitting in a row the
+        # 2025 plan never made, indistinguishable at a glance from a real one.
+        # CAR is the case that shows why: it publishes no admin-2 PiN at all for
+        # 2026, so a per-unit fallback dressed the whole country in 2024 figures.
         refs = sorted(g["reference_period_start"].unique(), reverse=True)
-        latest_year = int(pd.Timestamp(refs[0]).year)
-        ent: dict[str, dict] = {}
-        for ref in refs:
-            gr = g[g["reference_period_start"] == ref]
-            lvl = min(gr["admin_level"].unique())  # prefer the coarsest at/below LEVEL
-            gr = gr[gr["admin_level"] == lvl]
-            a1names = gr.drop_duplicates(ACODE).set_index(ACODE)[ANAME]
-            agg = gr.groupby([ACODE, "population_status"])["population"].sum().unstack()
-            yr = int(pd.Timestamp(ref).year)
-            for pcode, r in agg.iterrows():
-                e = ent.setdefault(pcode, {"name": a1names.get(pcode), "lvl": lvl})
-                if "pin" not in e and pd.notna(r.get("INN")):
-                    e["pin"], e["pin_yr"] = int(r["INN"]), yr
-                if "tgt" not in e and pd.notna(r.get("TGT")):
-                    e["tgt"], e["tgt_yr"] = int(r["TGT"]), yr
+        gr = g[g["reference_period_start"] == refs[0]]
+        yr = int(pd.Timestamp(refs[0]).year)
+        lvl = min(gr["admin_level"].unique())  # prefer the coarsest at/below LEVEL
+        gr = gr[gr["admin_level"] == lvl]
+        a1names = gr.drop_duplicates(ACODE).set_index(ACODE)[ANAME]
+        agg = gr.groupby([ACODE, "population_status"])["population"].sum().unstack()
         k_inn, k_tgt = (("pin", "targeted") if sector == "Intersectoral"
                         else (f"pin__{sector}", f"tgt__{sector}"))
-        for pcode, e in ent.items():
-            row = rows.setdefault(pcode, {"pcode": pcode, "iso3": loc, "name": e["name"]})
-            row[k_inn] = e.get("pin")
-            row[k_tgt] = e.get("tgt")
-            # Plan year of the figures actually used for this unit (not the plan's
-            # newest cycle — a unit dropped from the current plan keeps its old year).
-            used_yr = max(e.get("pin_yr", 0), e.get("tgt_yr", 0)) or latest_year
-            row["ref_year"] = max(row.get("ref_year", 0), used_yr)
-            row["pin_admin_level"] = e["lvl"]
-            if e.get("tgt") is not None and e["tgt_yr"] < max(e.get("pin_yr", 0), latest_year):
-                n_stale_tgt += 1
-                if sector == "Intersectoral":
-                    row["tgt_year"] = e["tgt_yr"]
-                else:
-                    row[f"tgtyr__{sector}"] = e["tgt_yr"]
-    if n_stale_tgt:
-        print(f"  PiN: {n_stale_tgt} targeted figure(s) fall back to an older plan cycle "
-              f"(flagged per unit)")
+        for pcode, r in agg.iterrows():
+            row = rows.setdefault(pcode, {"pcode": pcode, "iso3": loc,
+                                          "name": a1names.get(pcode)})
+            row[k_inn] = int(r["INN"]) if pd.notna(r.get("INN")) else None
+            row[k_tgt] = int(r["TGT"]) if pd.notna(r.get("TGT")) else None
+            row["ref_year"] = max(row.get("ref_year", 0), yr)
+            row["pin_admin_level"] = lvl
     out = pd.DataFrame(rows.values())
     for col in ["pin", "targeted"]:
         if col not in out.columns:
@@ -1020,7 +1016,11 @@ def main() -> None:
 
     print("Reconciling humanitarian pcodes to the COD vintage...")
     df_pin_raw, sector_names = load_pin_adm1(sub_parent)
-    df_pin = normalize_pcodes(df_pin_raw, poly, "PiN")
+    # Caseloads opt into placeholder name-matching: CAR files 16 units (777k PiN)
+    # under CF31-XXX / CAF-XXX-XXX with perfectly good names, and dropping them
+    # left Paoua, Batangafo, Bouca, Kabo carrying a severity class and no PiN.
+    # The collision guard is what makes it safe — nothing lands on a held unit.
+    df_pin = normalize_pcodes(df_pin_raw, poly, "PiN", xxx_name_match=True)
     df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
     df_pbs = normalize_pcodes(load_pbs_adm1(), poly, "pbs")
     df_pbs = (df_pbs.groupby("pcode", as_index=False)
@@ -1042,11 +1042,10 @@ def main() -> None:
     ipc_lists = _ipc_lists(df_ipc)
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
     _sum = lambda s: s.sum(min_count=1)  # noqa: E731 — all-NaN stays None, not 0
-    sec_cols = [c for c in df_pin.columns if c.startswith(("pin__", "tgt__", "tgtyr__"))]
+    sec_cols = [c for c in df_pin.columns if c.startswith(("pin__", "tgt__"))]
     df_pin = (df_pin.groupby(["pcode", "iso3"], as_index=False)
               .agg({"name": "first", "pin": _sum, "targeted": _sum,
-                    **{c: ("max" if c.startswith("tgtyr__") else _sum) for c in sec_cols},
-                    **({"tgt_year": "max"} if "tgt_year" in df_pin.columns else {}),
+                    **{c: _sum for c in sec_cols},
                     "ref_year": "max", "pin_admin_level": "max"}))
     df_sev = (df_sev.groupby(["pcode", "iso3"], as_index=False)
               .agg({"name": "first", "sev4": "sum", "sev_total": "sum", "sev_year": "max",
@@ -1371,8 +1370,6 @@ def main() -> None:
                     out["pba"] = 1  # classes come from the AREA classification
         if out.get("pbs_yr") is not None:
             out["pbs_yr"] = int(out["pbs_yr"])
-        if out.get("tgt_year") is not None:
-            out["tgt_year"] = int(out["tgt_year"])
         for k in ("pop", "pop_year"):
             if out.get(k) is not None:
                 out[k] = int(out[k])
