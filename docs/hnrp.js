@@ -93,17 +93,22 @@
 
   // Plan cycle varies by country (e.g. Guatemala's latest is the 2025 HNRP) — surface
   // the year everywhere caseload figures appear.
-  const sevYrOf = (r) => {
-    const ys = [r.sev_year, r.pbs_yr].filter((y) => y != null);
-    return ys.length ? Math.max(...ys) : null;
-  };
+  // The severity entry for the plan year in force — {tot, pb?, a?} or null.
+  const sevcOf = (r) => (r.sevc ?? {})[planYr()] ?? null;
   // ── Plan year ────────────────────────────────────────────────────────────────
   // Each unit carries its caseloads per cycle in r.cyc = {"2026": [pin, targeted]},
   // and the selector says which one to read. Nothing is ever blended: a unit with
   // no figures for the chosen year shows dashes rather than an older cycle's.
   const planYrSel = document.getElementById("hnrp-plan-yr");
   const planYrWrap = document.getElementById("hnrp-plan-yr-wrap");
+  // Only cycles that publish a severity distribution are offered. The JIAF PbS
+  // starts at 2025, so an older cycle could show a caseload but never a class —
+  // a plan year that greys the whole map is worse than one that isn't offered.
+  // (2024 is dropped on that rule: it costs 109 units their only cycle and 626
+  // their only targeting, Venezuela's included.)
+  const sevYears = new Set(data.rows.flatMap((r) => Object.keys(r.sevc ?? {})));
   const cycYears = [...new Set(data.rows.flatMap((r) => Object.keys(r.cyc ?? {})))]
+    .filter((y) => sevYears.has(y))
     .map(Number).sort((a, b) => b - a);
   for (const y of cycYears) {
     const o = document.createElement("option");
@@ -142,7 +147,7 @@
   // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
   // shown only in IPC mode, where surfacing needs the plan does NOT capture is the point.
   const inHnrp = (r) => r.sev_total > 0 || r.cyc != null || r.targeted != null
-    || r.sec != null || r.pbs_tot != null;
+    || r.sec != null || r.sevc != null;
 
   // ── Severity source: the plan's PiN (default) or IPC/CH phase N+ ────────────
   // PiN mode is the plain plan figure per area — one PiN and one severity class
@@ -472,8 +477,8 @@
     // Targeted and the plan-year stamp come from the HNRP cycle — not shown in IPC mode.
     if (pinMode() && tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
     if (pinMode() && cycOf(r)) rows += `<div>HNRP ${planYr()}</div>`;
-    if (sevYrOf(r) && sevYrOf(r) !== +planYr()) {
-      rows += `<div style="color:#9db1b3">severity analysis ${sevYrOf(r)}</div>`;
+    if (pinMode() && r.sevc && !r.sevc[planYr()]) {
+      rows += `<div style="color:#9db1b3">not classified in the ${planYr()} cycle</div>`;
     }
     if (ADM === "low") {
       const cls = sevClassOf(r);
@@ -678,11 +683,14 @@
       }
       return { cls: 1, src: "ipc", split: spread(c.p) };
     }
-    const fromPin = dominant(r.pb);
-    if (fromPin) return { cls: fromPin, src: r.pba ? "area" : "pin", split: spread(r.pb) };
-    const sev = [r.s1, r.s2, r.s3, r.s4, r.s5];
-    const fromAnalysis = dominant(sev);
-    if (fromAnalysis) return { cls: fromAnalysis, src: "analysis", split: spread(sev) };
+    // THE CLASS FOLLOWS THE PLAN YEAR. Each cycle carries its own PiN-by-severity
+    // distribution in r.sevc, and 29% of units that publish both 2025 and 2026 are
+    // classed differently between them — pinning the colour to the newest cycle
+    // painted an older year's caseload with the newest year's class. A cycle this
+    // unit was not classified in is NOT assessed; it never borrows another year's.
+    const e = sevcOf(r);
+    const fromPin = dominant(e?.pb);
+    if (fromPin) return { cls: fromPin, src: e.a ? "area" : "pin", split: spread(e.pb) };
     return { cls: null };
   }
   const sevClassOf = (r) => sevClassInfo(r).cls;

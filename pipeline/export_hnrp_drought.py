@@ -758,18 +758,24 @@ def load_pbs_adm1() -> pd.DataFrame:
         sev = pd.read_sql(qa, conn)
     # Per-unit dominant area class (population-weighted; row count where the
     # sheet publishes no populations — BFA/SYR adm3).
-    sev = sev[sev["year"] == sev.groupby("iso3")["year"].transform("max")]
+    # Area classifications, per YEAR — the fallback has to move with the cycle too.
     sev["_wt"] = sev["population"].fillna(1)
-    cls_w = (sev.groupby(["iso3", "pcode", "final_severity"])["_wt"].sum()
+    cls_w = (sev.groupby(["iso3", "year", "pcode", "final_severity"])["_wt"].sum()
              .reset_index())
-    cls_w = cls_w.sort_values("_wt", ascending=False).drop_duplicates(["iso3", "pcode"])
-    area_cls = {(r["iso3"], r["pcode"]): int(r["final_severity"])
+    cls_w = cls_w.sort_values("_wt", ascending=False).drop_duplicates(
+        ["iso3", "year", "pcode"])
+    area_cls = {(r["iso3"], int(r["year"]), r["pcode"]): int(r["final_severity"])
                 for _, r in cls_w.iterrows()}
-    df = df[df["year"] == df.groupby("iso3")["year"].transform("max")]
+    # EVERY cycle is kept, not just the newest. The severity class has to follow the
+    # plan-year selector: 851 of 2,961 units that carry both 2025 and 2026 (29%) are
+    # classed differently between them, so pinning the colour to the newest cycle
+    # painted 2025 caseloads with 2026 classes — the vintage blend we removed from
+    # IPC mode. Each cycle travels as its own pbY<year>_<class> columns and is folded
+    # into the payload's per-year "sevc" dict by _row().
     df["population_group"] = df["population_group"].fillna("")
 
     rows = []
-    for iso3, g in df.groupby("iso3"):
+    for (iso3, year), g in df.groupby(["iso3", "year"]):
         units = g.groupby("population_group")[ACODE].nunique()
         n_units = g[ACODE].nunique()
         if units.get("", 0) >= 0.5 * n_units:
@@ -785,7 +791,7 @@ def load_pbs_adm1() -> pd.DataFrame:
         # pipelines/hnrp-mirror). One distinct class across a whole country's
         # units is a template artifact, not analysis — degrade to total-only.
         if classed["severity"].nunique() == 1 and classed[ACODE].nunique() >= 10:
-            print(f"  pbs: {iso3} fills one constant class "
+            print(f"  pbs: {iso3} {year} fills one constant class "
                   f"({int(classed['severity'].iloc[0])}) on every unit — "
                   f"degenerate, kept as total-only")
             classed = classed.iloc[0:0]
@@ -793,33 +799,39 @@ def load_pbs_adm1() -> pd.DataFrame:
             index=ACODE, columns="severity", values="final_pin", aggfunc="sum")
         total = g.groupby(ACODE)["final_pin"].sum()
         a1names = g.drop_duplicates(ACODE).set_index(ACODE)["name"]
+        yr = int(year)
         n_area = 0
         for pcode, tot in total.items():
             row = {"pcode": pcode, "iso3": iso3, "name": a1names.get(pcode),
-                   "pbs_tot": int(tot), "pbs_yr": int(g["year"].iloc[0]),
-                   "pbs_area": 0}
+                   f"pbsTotY{yr}": int(tot), f"pbsAreaY{yr}": 0}
             if pcode in by_class.index:
                 for cls in range(1, 6):
                     v = (by_class.loc[pcode, cls]
                          if cls in by_class.columns else None)
-                    row[f"pb{cls}"] = int(v) if pd.notna(v) else 0
-                row["pbs_classed"] = 1
+                    row[f"pbY{yr}_{cls}"] = int(v) if pd.notna(v) else 0
+                row[f"pbsClassedY{yr}"] = 1
             else:
                 # No usable published classes — place the unit's PiN at its
-                # AREA classification (severity_admin), if one exists.
-                acls = area_cls.get((iso3, pcode))
+                # AREA classification (severity_admin) FOR THAT SAME YEAR.
+                acls = area_cls.get((iso3, yr, pcode))
                 for cls in range(1, 6):
-                    row[f"pb{cls}"] = int(tot) if cls == acls else 0
-                row["pbs_classed"] = int(acls is not None)
-                row["pbs_area"] = int(acls is not None)
-                n_area += row["pbs_area"]
+                    row[f"pbY{yr}_{cls}"] = int(tot) if cls == acls else 0
+                row[f"pbsClassedY{yr}"] = int(acls is not None)
+                row[f"pbsAreaY{yr}"] = int(acls is not None)
+                n_area += row[f"pbsAreaY{yr}"]
             rows.append(row)
         if n_area:
-            print(f"  pbs: {iso3}: {n_area} unit(s) classed from the AREA "
+            print(f"  pbs: {iso3} {yr}: {n_area} unit(s) classed from the AREA "
                   f"classification (no usable published classes)")
+    # One row per unit again: the per-year columns are disjoint, so a groupby-first
+    # over them recombines each unit's cycles without any of them overwriting another.
     out = pd.DataFrame(rows)
-    print(f"PiN-by-severity: {out['iso3'].nunique()} countries, {len(out)} units "
-          f"({int(out['pbs_classed'].sum())} with class breakdown)")
+    if not out.empty:
+        out = (out.groupby(["pcode", "iso3"], as_index=False)
+                  .agg({c: "first" for c in out.columns if c not in ("pcode", "iso3")}))
+    yrs = sorted({c.split("_")[0][3:] for c in out.columns if c.startswith("pbY")})
+    print(f"PiN-by-severity: {out['iso3'].nunique()} countries, {len(out)} units, "
+          f"cycles {', '.join(yrs)}")
     return out
 
 
@@ -1088,11 +1100,23 @@ def main() -> None:
     df_pin = normalize_pcodes(df_pin_raw, poly, "PiN", xxx_name_match=True)
     df_sev = normalize_pcodes(load_severity_adm1(), poly, "severity")
     df_pbs = normalize_pcodes(load_pbs_adm1(), poly, "pbs")
+    # Normalization can merge units (reforms, renumberings) — recombine to one row
+    # per pcode. Headcounts sum; the per-cycle flags take the max. Column names are
+    # discovered because they are per-year (pbY2026_3, pbsTotY2025, …).
+    _pbs_num = [c for c in df_pbs.columns
+                if c.startswith(("pbY", "pbsTotY"))]
+    _pbs_flag = [c for c in df_pbs.columns
+                 if c.startswith(("pbsClassedY", "pbsAreaY"))]
+    # min_count=1, NOT a plain sum: a unit with no row for a cycle has NaN in that
+    # cycle's columns, and pandas sums all-NaN to 0.0 — which invents a zero-caseload
+    # cycle. That put a phantom 2026 on Venezuela, Burkina Faso, Ukraine and Honduras,
+    # none of which publish a 2026 PbS at all. A genuine published zero (Colombia
+    # files 672 for 2026) still comes through as 0.
+    _sum1 = lambda s: s.sum(min_count=1)  # noqa: E731
     df_pbs = (df_pbs.groupby("pcode", as_index=False)
               .agg({"iso3": "first", "name": "first",
-                    **{f"pb{c}": "sum" for c in range(1, 6)},
-                    "pbs_tot": "sum", "pbs_yr": "max", "pbs_classed": "max",
-                    "pbs_area": "max"}))
+                    **{c: _sum1 for c in _pbs_num},
+                    **{c: "max" for c in _pbs_flag}}))
     df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
     df_pop = normalize_pcodes(load_population_adm1(), poly, "population",
                               xxx_name_match=True)
@@ -1354,7 +1378,8 @@ def main() -> None:
             return None, None, None
 
         w = merged["pop"].astype(float)
-        for col in ["sev_total", "pbs_tot"]:
+        for col in ["sev_total", *[c for c in merged.columns
+                                   if c.startswith("pbsTotY")]]:
             if col in merged.columns:
                 w = w.fillna(merged[col].astype(float))
         merged["_w"] = w
@@ -1421,29 +1446,46 @@ def main() -> None:
             if v is not None and pd.notna(v):
                 pref, code = c.split("__", 1)
                 sec.setdefault(code, [None, None])[0 if pref == "pin" else 1] = int(v)
-        # PiN-by-severity travels as wide pb1..pb5 columns; fold into "pb": [c1..c5]
-        # (only when the plan publishes a class breakdown — else pbs_tot alone).
-        pbs_tot = rec.pop("pbs_tot", None)
-        pbs_classed = rec.pop("pbs_classed", None)
-        pbs_area = rec.pop("pbs_area", None)
-        pbs = [rec.pop(f"pb{c}", None) for c in range(1, 6)]
+        # PiN-by-severity, PER CYCLE. Each year travels as pbY<yr>_1..5 plus its
+        # total/classed/area flags, and folds into "sevc": {"2026": {...}, …} so the
+        # site's plan-year selector moves the CLASS as well as the caseload. 29% of
+        # units carrying both cycles are classed differently between them.
+        sevc: dict[str, dict] = {}
+        for c in [c for c in list(rec) if c.startswith("pbsTotY")]:
+            yr = c[len("pbsTotY"):]
+            tot = rec.pop(c, None)
+            classed = rec.pop(f"pbsClassedY{yr}", None)
+            area = rec.pop(f"pbsAreaY{yr}", None)
+            split = [rec.pop(f"pbY{yr}_{k}", None) for k in range(1, 6)]
+            # A zero caseload is a real published figure — the plan covers the unit
+            # and finds nobody in need (COL files 672 such units for 2026, COD 286).
+            # Only a MISSING total means the cycle does not cover this unit.
+            if tot is None or pd.isna(tot):
+                continue
+            ent: dict = {"tot": int(tot)}
+            if classed and pd.notna(classed) and int(classed):
+                pb = [int(v) if pd.notna(v) else 0 for v in split]
+                if sum(pb) > 0:
+                    ent["pb"] = pb
+                    if area and pd.notna(area) and int(area):
+                        ent["a"] = 1  # classes come from the AREA classification
+            sevc[yr] = ent
+        # Stray per-year columns for cycles this unit has no total for.
+        for c in [c for c in list(rec)
+                  if c.startswith(("pbY", "pbsClassedY", "pbsAreaY"))]:
+            rec.pop(c, None)
         out = {k: (v if isinstance(v, (list, dict)) else None if pd.isna(v) else v)
                for k, v in rec.items()}
-        if pbs_tot is not None and pd.notna(pbs_tot):
-            out["pbs_tot"] = int(pbs_tot)
-            if pbs_classed:
-                out["pb"] = [int(v) if pd.notna(v) else 0 for v in pbs]
-                if pbs_area and pd.notna(pbs_area) and int(pbs_area):
-                    out["pba"] = 1  # classes come from the AREA classification
-        if out.get("pbs_yr") is not None:
-            out["pbs_yr"] = int(out["pbs_yr"])
+        if sevc:
+            out["sevc"] = {y: sevc[y] for y in sorted(sevc)}
             # The JIAF PiN-by-severity workbooks carry the newest cycle's caseload
             # (2026) a year before the needs table publishes it subnationally — same
             # measure, verified: where both cover a unit-year they agree, and the
             # 2026 sums reconcile to the published national PiN (Sudan, to the
             # person). Targets are not part of that product, so those cycles carry
             # a PiN and no targeted, which the site says plainly.
-            cyc.setdefault(str(out["pbs_yr"]), [None, None])[0] = out["pbs_tot"]
+            for y, ent in sevc.items():
+                cyc.setdefault(y, [None, None])[0] = ent["tot"]
         if cyc:
             out["cyc"] = {y: v for y, v in sorted(cyc.items()) if v[0] is not None or v[1] is not None}
         for k in ("pop", "pop_year"):
@@ -1480,7 +1522,7 @@ def main() -> None:
                 for rec in merged.drop(columns=["pin_admin_level"]).to_dict("records"))
             if row.get("pin") is not None or row.get("targeted") is not None
             or row.get("sec") or row.get("ipc") or (row.get("sev_total") or 0) > 0
-            or row.get("pbs_tot") is not None
+            or row.get("sevc")
         ],
     }
     OUT.write_text(json.dumps(payload, separators=(",", ":")))
