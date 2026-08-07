@@ -10,12 +10,21 @@
   // picker: switching would reload the page with that level's payload).
   const ADM_FILES = {
     low: ["data/hnrp_drought_low.json", "data/hnrp_low.geojson"],
+    // IPC's own units. The plan view and the IPC view disagree about what a unit
+    // IS — DR Congo's plan speaks in 519 zones de santé, its IPC analysis in 26
+    // provinces — so each source is drawn on its own geometry rather than one
+    // being prorated onto the other. Selected by the Severity source, not ?adm.
+    ipc: ["data/hnrp_drought_ipc.json", "data/hnrp_ipc.geojson"],
     1: ["data/hnrp_drought.json", "data/hnrp_adm1.geojson"],
     2: ["data/hnrp_drought_adm2.json", "data/hnrp_adm2.geojson"],
     3: ["data/hnrp_drought_adm3.json", "data/hnrp_adm3.geojson"],
   };
-  let ADM = new URLSearchParams(location.search).get("adm") ?? "low";
-  if (!(ADM in ADM_FILES)) ADM = "low";
+  const QS = new URLSearchParams(location.search);
+  let ADM = QS.get("adm") ?? "low";
+  if (!(ADM in ADM_FILES) || ADM === "ipc") ADM = "low";
+  // Which payload this page load needs. A fixed ?adm= level pins the geometry and
+  // keeps both sources on it; the default view follows the source.
+  const PAYLOAD = (ADM === "low" && QS.get("sev") === "ipc") ? "ipc" : ADM;
   const ADM_LABEL = { low: "lowest available level", 1: "admin 1", 2: "admin 2", 3: "admin 3" };
   let data, geo, world;
   try {
@@ -25,7 +34,7 @@
       .then((r) => (r.ok ? r.json() : Promise.reject(r)));
     world = await fj("data/countries.geojson");
     try {
-      [data, geo] = await Promise.all(ADM_FILES[ADM].map(fj));
+      [data, geo] = await Promise.all(ADM_FILES[PAYLOAD].map(fj));
     } catch {
       if (ADM !== "1") { // payload not built yet — fall back rather than a blank tab
         ADM = "1";
@@ -247,7 +256,7 @@
     return new Date(Date.UTC(y, m - 1)).toLocaleString("en", { month: "short", timeZone: "UTC" }) + " " + y;
   };
   const comboDesc = (c) => `${c.t}, exercise ${fmtYM(c.a)}, valid ${c.label}` +
-    (c.d ? ` — downscaled from admin-${c.d} by population share` : "");
+    (c.d ? ` — downscaled from admin-${c.d} by population share` : "");  // legacy flag: no longer produced
 
   const IPC_OPT_BASE = { now: "Now", fwd: "Forecast window" };
   // Every period the country publishes, newest exercise first, with how many of its
@@ -1460,9 +1469,19 @@
     refreshLegendDim();
     renderMap(); renderBars();
   }
-  for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel, triSel, ipcPeriodSel, planYrSel]) {
+  for (const el of [skillSel, rpSel, srcLvlSel, triSel, ipcPeriodSel, planYrSel]) {
     el.addEventListener("change", renderAll);
   }
+  // Changing the source changes the GEOMETRY, not just the colours: the plan view
+  // and the IPC view are drawn on different units. Reload with the other payload —
+  // the same plain navigation the ?adm= switch uses, rather than tearing down and
+  // rebuilding three Leaflet layers in place. Every control is already in the URL,
+  // so the only thing the user loses is the map's pan/zoom.
+  srcTypeSel.addEventListener("change", () => {
+    const want = (ADM === "low" && srcTypeSel.value === "ipc") ? "ipc" : ADM;
+    if (want !== PAYLOAD) location.href = stateURL();
+    else renderAll();
+  });
   // finally: whatever happens during re-render, the zoom step must still run.
   countrySel.addEventListener("change", () => {
     try { renderAll(); } finally { fitCountry(); }

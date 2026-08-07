@@ -374,15 +374,31 @@
         admin-2 boundaries and zonal statistics in our database — the nineteen above
         plus Burkina Faso and DR Congo, which this view shows finer still. The rest
         lack admin-2 polygons on our side and are excluded on that basis; Myanmar
-        publishes admin-1/3 only. <strong>No admin-3 forecast exists</strong>: admin-3 units inherit
+        publishes admin-1/3 only.
+        <strong>Tanzania</strong> is the exception to that rule: IPC publishes it at
+        admin-2, and although our polygon table holds only its 31 regions, its 170
+        districts come straight from the COD shapefile and each inherits its region's
+        forecast — the same arrangement as admin-3, below.
+        <strong>No admin-3 forecast exists</strong>: admin-3 units inherit
         their parent admin-2's forecast (skill, return period, rainy season)
-        verbatim — only the humanitarian figures are finer. IPC is published at admin-1/2;
-        units finer than a country's published IPC level inherit the <em>parent</em>
-        analysis, prorated by each unit's population share — tooltips flag these as
-        "downscaled from admin-N", and they are shares of an area-level analysis, not
-        unit-level assessments. Admin-3 population denominators come from WorldPop 2020
-        (1&nbsp;km UN-adjusted, summed over the same admin-3 boundaries). Figures published only at admin-1 cannot be downscaled
-        and show dashes at admin-2. Forecast skill at admin-2 is computed identically,
+        verbatim — only the humanitarian figures are finer. <strong>The map's units change with the Severity
+        source</strong>, because the two sources disagree about what a unit is: DR
+        Congo's plan is written in 519 zones de santé, its IPC analysis in 168
+        territories; Haiti's plan covers 140 communes, its IPC 10 departments. Each
+        source is drawn on the units it is actually published for, and the chart
+        title always names the level in force. Switching source reloads the tab with
+        the other geometry — every control is carried in the URL, so only the map's
+        pan and zoom are lost. Per country the IPC view takes whichever published
+        level classifies the most of it: Afghanistan is drawn at admin-1, where 34
+        areas carry an analysis, rather than admin-2, where 9 do.
+        <strong>Nothing is prorated onto the other source's units any more.</strong>
+        Until 2026-08 a unit finer than its country's published IPC level was filled
+        with a population-share slice of the parent analysis, flagged "downscaled".
+        That was a modelled number wearing the same colour as a published one, for
+        1,591 of 3,630 units — every DR Congo zone, every Afghan district, all of
+        Guatemala and Honduras. It is gone.
+        Admin-3 population denominators come from WorldPop 2020
+        (1&nbsp;km UN-adjusted, summed over the same admin-3 boundaries). Forecast skill at admin-2 is computed identically,
         per unit; smaller units are noisier, so treat marginal signals with extra
         caution. Where district names repeat across regions, an area's tooltip carries
         its admin-1 parent in parentheses.
@@ -742,7 +758,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260807i"></script>
+  <script src="hnrp.js?v=20260807j"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

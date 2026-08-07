@@ -147,6 +147,22 @@ ACODE, ANAME = "admin1_code", "admin1_name"
 # HDX dr-congo-health-0, mirrored to our dev blob) joins hpc.* 519/519 by ZSCode.
 ADM3_ISO3S = ["BFA", "COD", "MMR", "SYR"]
 
+# Countries whose ADMIN-2 boundaries are not in public.polygon (so the reference
+# table would prune them) but DO exist as a COD shapefile layer. Tanzania is here
+# because IPC publishes it at admin-2 — 170 districts — while our polygon table
+# holds only its 31 regions. Their adm2 units carry no zonal statistics either, so
+# they inherit their adm1 parent's forecast, exactly as adm3 inherits from adm2.
+ADM2_SHP_ISO3S = ["TZA"]
+
+
+def load_adm2_shp(iso3: str):
+    """The adm2 boundary layer + (pcode, name, parent-adm1) column names."""
+    g = stratus.load_shp_from_blob(
+        f"{iso3.lower()}_shp.zip", shapefile=f"{iso3.lower()}_adm2.shp",
+        stage="prod", container_name="polygon")
+    ncol = next((c for c in ("ADM2_EN", "ADM2_FR", "ADM2_ES") if c in g.columns), None)
+    return g, "ADM2_PCODE", ncol, "ADM1_PCODE"
+
 
 def load_adm3_shp(iso3: str):
     """The adm3 boundary layer + (pcode, name, parent-adm2) column names."""
@@ -1065,17 +1081,78 @@ def build_lowest() -> None:
           f"({gout.stat().st_size / 1e6:.1f} MB)")
 
 
+def combine_ipc_view() -> None:
+    """Each country at the level IPC ACTUALLY PUBLISHES -> hnrp_drought_ipc.json +
+    hnrp_ipc.geojson.
+
+    The plan view and the IPC view disagree about what a unit is, and pretending
+    otherwise is what the population-share downscale used to paper over. DR Congo's
+    plan speaks in 519 zones de sante; its IPC analysis speaks in 26 provinces.
+    So the site ships two geometries and swaps them with the Severity source: each
+    source is drawn on its own units, and neither is prorated onto the other's.
+
+    Level per country = the DEEPEST level at which it carries its own IPC rows.
+    """
+    base = HERE.parent / "docs" / "data"
+    data, geo = {}, {}
+    for lvl, suffix in [(1, ""), (2, "_adm2"), (3, "_adm3")]:
+        dp = base / f"hnrp_drought{suffix}.json"
+        gp = base / f"hnrp_adm{lvl}.geojson"
+        if not dp.exists() or not gp.exists():
+            sys.exit(f"Missing level-{lvl} outputs — run --level {lvl} first")
+        data[lvl] = json.loads(dp.read_text())
+        geo[lvl] = json.loads(gp.read_text())
+
+    # Level per country = the one that CLASSIFIES THE MOST OF IT, not the deepest
+    # that has any rows at all. HAPI publishes the same analysis at several levels,
+    # and the deepest is not always the fullest: Afghanistan carries 35 areas at
+    # admin-1 but only 9 at admin-2, so "deepest with any IPC" put 401 districts on
+    # the map with 9 of them classified. DR Congo goes the other way — 26 provinces
+    # at admin-1, 168 territories at admin-2 — and should use the finer one.
+    per_level: dict[str, dict[int, int]] = {}
+    for lvl in (1, 2, 3):
+        for r in data[lvl]["rows"]:
+            if r.get("ipc"):
+                per_level.setdefault(r["iso3"], {})[lvl] = \
+                    per_level.setdefault(r["iso3"], {}).get(lvl, 0) + 1
+    # Ties go to the finer level (more resolution for the same coverage).
+    level_of = {iso: max(counts, key=lambda lv: (counts[lv], lv))
+                for iso, counts in per_level.items()}
+    rows = [dict(r, lvl=lvl) for lvl in (1, 2, 3) for r in data[lvl]["rows"]
+            if level_of.get(r["iso3"]) == lvl]
+    feats = [f for lvl in (1, 2, 3) for f in geo[lvl]["features"]
+             if level_of.get(f["properties"].get("iso3")) == lvl]
+
+    payload = {**data[1], "adm_level": "ipc", "rows": rows}
+    out = base / "hnrp_drought_ipc.json"
+    out.write_text(json.dumps(payload, separators=(",", ":")))
+    gout = base / "hnrp_ipc.geojson"
+    gout.write_text(json.dumps({"type": "FeatureCollection", "features": feats},
+                               separators=(",", ":")))
+    from collections import Counter
+    mix = Counter(level_of.values())
+    with_ipc = sum(1 for r in rows if r.get("ipc"))
+    print(f"IPC-native view: {len(rows)} units ({with_ipc} with IPC), {len(feats)} polygons "
+          f"({mix.get(3, 0)} countries at adm3, {mix.get(2, 0)} at adm2, "
+          f"{mix.get(1, 0)} at adm1)")
+    print(f"Wrote {out} ({out.stat().st_size / 1024:.0f} KB) and {gout.name} "
+          f"({gout.stat().st_size / 1e6:.1f} MB)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rebuild-geometry", action="store_true",
                     help="Rewrite the geojson even if it already exists (it is "
                          "stable between runs; the default skips it when present).")
-    ap.add_argument("--level", choices=("1", "2", "3", "low"), default="1",
+    ap.add_argument("--level", choices=("1", "2", "3", "low", "ipc"), default="1",
                     help="Admin level of the export (2/3 write *_admN outputs; "
                          "'low' combines the three per-country finest levels)")
     args = ap.parse_args()
     if args.level == "low":
         build_lowest()
+        return
+    if args.level == "ipc":
+        combine_ipc_view()
         return
     _set_level(int(args.level))
 
@@ -1111,6 +1188,21 @@ def main() -> None:
             poly = pd.read_sql(
                 f"SELECT pcode, iso3, name FROM public.polygon WHERE adm_level={LEVEL}",
                 conn)
+            # Countries whose adm2 the polygon table does not carry: take the units
+            # from the COD shapefile instead, and remember each one's adm1 parent so
+            # the forecast can be inherited below. Without this their rows are pruned
+            # for "no polygon" before geometry is ever built.
+            if LEVEL == 2:
+                for iso3 in ADM2_SHP_ISO3S:
+                    if (poly["iso3"] == iso3).any():
+                        continue
+                    g2, pcol, ncol, parcol = load_adm2_shp(iso3)
+                    poly = pd.concat([poly, pd.DataFrame({
+                        "pcode": g2[pcol], "iso3": iso3, "name": g2[ncol]})],
+                        ignore_index=True)
+                    parent2.update(dict(zip(g2[pcol], g2[parcol])))
+                    print(f"  {iso3}: {len(g2)} adm2 units from the COD shapefile "
+                          f"(absent from public.polygon)")
         country_names = pd.read_sql(
             "SELECT iso3, name FROM public.polygon WHERE adm_level=0", conn,
         ).set_index("iso3")["name"].to_dict()
@@ -1224,6 +1316,24 @@ def main() -> None:
         )
         print(f"Scope: +{len(extra)} IPC-covered ADM1 units outside HNRP plans "
               f"({len(set(ipc_iso3[p] for p in extra))} countries)")
+    if LEVEL == 2 and parent2:
+        # Same inheritance as adm3-from-adm2: these adm2 units have no zonal stats
+        # of their own, so each carries its parent ADM1's skill rows verbatim. The
+        # forecast is therefore adm1-resolution for them — only the humanitarian
+        # figures are finer, which is what the site's note already says for adm3.
+        kids = pd.DataFrame({"pcode": list(parent2), "_par": list(parent2.values())})
+        kids = kids[~kids["pcode"].isin(set(skill["pcode"]))]
+        if len(kids):
+            # The parents are ADM1 units, so their skill lives in the adm1 parquet —
+            # the frame loaded above is keyed by adm2 pcode and would match nothing.
+            skill1 = stratus.load_parquet_from_blob(
+                f"{PROJECT_PREFIX}/processed/skill_stats_detrended_adm1.parquet",
+                stage="dev")
+            inherited = (skill1.rename(columns={"pcode": "_par"})
+                         .merge(kids, on="_par").drop(columns=["_par"]))
+            skill = pd.concat([skill, inherited], ignore_index=True)
+            print(f"Skill inherited from parent adm1 for {kids['pcode'].nunique()} "
+                  f"adm2 units with no zonal stats")
     if LEVEL == 3:
         # Forecast inheritance: each adm3 unit carries its parent adm2's skill
         # rows verbatim (no adm3 zonal stats exist).
@@ -1403,80 +1513,13 @@ def main() -> None:
     n_signal = merged["rp"].notna().sum()
     print(f"{len(merged)} HNRP ADM1 units; {n_signal} with a qualifying drought signal")
 
-    # IPC downscaling: HAPI publishes IPC at admin-1/2 — units finer than the
-    # published level (AFG districts, COD zones de santé…) have no IPC rows and
-    # showed zeros. Fill them from the PARENT analysis, prorated by each unit's
-    # population weight within the parent, marked "d": <source level> so every
-    # tooltip says the numbers are downscaled shares, not unit-level analysis.
-    if LEVEL >= 2:
-        with engine.connect() as conn:
-            poly1 = pd.read_sql(
-                "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=1", conn)
-        par1 = normalize_pcodes(load_ipc_adm1(key="admin1_code"), poly1, "IPC-adm1",
-                                xxx_name_match=True)
-        lists1 = _ipc_lists(par1)
-        lists2 = {}
-        if LEVEL == 3:
-            with engine.connect() as conn:
-                poly2 = pd.read_sql(
-                    "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=2",
-                    conn)
-            par2 = normalize_pcodes(load_ipc_adm1(key="admin2_code"), poly2, "IPC-adm2",
-                                    xxx_name_match=True)
-            lists2 = _ipc_lists(par2)
-        a1_by_iso = {i: sorted(g_["pcode"], key=len, reverse=True)
-                     for i, g_ in poly1.groupby("iso3")}
-
-        def _src_of(pcode: str, iso3: str):
-            if LEVEL == 3:
-                p2 = parent2.get(pcode)
-                if p2 and p2 in lists2:
-                    return p2, 2, lists2[p2]
-                base = p2 or pcode
-            else:
-                base = pcode
-            p1 = next((c for c in a1_by_iso.get(iso3, [])
-                       if str(base).startswith(c)), None)
-            if p1 and p1 in lists1:
-                return p1, 1, lists1[p1]
-            return None, None, None
-
-        w = merged["pop"].astype(float)
-        for col in ["sev_total", *[c for c in merged.columns
-                                   if c.startswith("pbsTotY")]]:
-            if col in merged.columns:
-                w = w.fillna(merged[col].astype(float))
-        merged["_w"] = w
-        # Σ weight per source parent (over ALL its units, so own-IPC and
-        # downscaled units together still sum to ~the parent's figures).
-        src_key, src_lvl, src_lists = {}, {}, {}
-        for _, r in merged.iterrows():
-            k, lv, ls = _src_of(r["pcode"], r["iso3"])
-            if k:
-                src_key[r["pcode"]], src_lvl[r["pcode"]], src_lists[r["pcode"]] = k, lv, ls
-        wsum: dict[str, float] = {}
-        for _, r in merged.iterrows():
-            k = src_key.get(r["pcode"])
-            if k and pd.notna(r["_w"]):
-                wsum[k] = wsum.get(k, 0) + float(r["_w"])
-        n_ds = 0
-        for _, r in merged.iterrows():
-            pcode = r["pcode"]
-            if pcode in ipc_lists or pcode not in src_key:
-                continue
-            if pd.isna(r["_w"]) or not wsum.get(src_key[pcode]):
-                continue
-            frac = float(r["_w"]) / wsum[src_key[pcode]]
-            ipc_lists[pcode] = [
-                {**c, "p": [round(v * frac) for v in c["p"]],
-                 "tot": round(c["tot"] * frac), "d": src_lvl[pcode]}
-                for c in src_lists[pcode]
-            ]
-            n_ds += 1
-        merged = merged.drop(columns=["_w"])
-        if n_ds:
-            print(f"IPC downscaled to {n_ds} unit(s) from parent analyses "
-                  f"(population-share proration, flagged 'd')")
+    # NO DOWNSCALING. Units finer than the level IPC publishes at simply have no
+    # IPC — the tab now shows each source at ITS OWN unit of analysis, and the map
+    # swaps geometry when the source changes, so there is nothing to prorate onto.
+    # What was here before filled 1,591 of 3,630 units (44%) with a population-share
+    # slice of the parent's analysis, flagged "d". That was a modelled figure wearing
+    # the same colour as a published one, and for whole countries at once: every DRC
+    # zone de sante, every Afghan district, all of Guatemala and Honduras.
 
     # Coverage report: every humanitarian unit should have forecast data and a polygon.
     no_fc = merged.loc[~merged["pcode"].isin(set(skill["pcode"])), ["iso3", "pcode"]]
