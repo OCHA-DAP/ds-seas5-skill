@@ -553,6 +553,38 @@
     { interactive: false,
       style: { color: "#1d2021", weight: 1, opacity: 0.65, fill: false } },
   ).addTo(map);
+  // ── Whole-country hit layer (world view only) ────────────────────────────────
+  // With nothing selected the question the map answers is "which country?", so the
+  // hover target is the country, not the admin unit. Hovering the admin mosaic for
+  // that meant the tooltip closed and reopened on every boundary crossed — one
+  // Leaflet layer per unit, hundreds per country — which reads as flicker. This
+  // single transparent polygon per country sits above the mosaic and absorbs the
+  // pointer while the world view is up; selecting a country removes it, so the
+  // per-admin tooltips underneath work exactly as before.
+  const isoCountry = new Map(data.rows.map((r) => [r.iso3, r.country]).filter((x) => x[1]));
+  const countryHit = L.geoJSON(
+    { type: "FeatureCollection",
+      features: world.features.filter((f) => dataIsos.has(f.properties.iso3)) },
+    {
+      style: { stroke: false, fill: true, fillOpacity: 0, fillColor: "#000" },
+      onEachFeature: (f, l) => {
+        const c = isoCountry.get(f.properties.iso3);
+        if (!c) return;
+        l.bindTooltip(() => countryTip(c), { sticky: true });
+        l.on("click", (e) => {
+          L.DomEvent.stopPropagation(e);  // else the map handler clears it again
+          countrySel.value = c;
+          countrySel.dispatchEvent(new Event("change"));
+        });
+      },
+    },
+  ).addTo(map);
+  // Present only in the world view. Kept in sync by renderAll via syncCountryHit().
+  function syncCountryHit() {
+    if (countrySel.value) map.removeLayer(countryHit);
+    else if (!map.hasLayer(countryHit)) countryHit.addTo(map);
+  }
+
   map.fitBounds(layer.getBounds(), { animate: false });
 
   // ── Inset forecast-category rings (lowest view) ──────────────────────────────
@@ -1467,6 +1499,7 @@
     const sevStripTitle = document.getElementById("hnrp-sev-strip-title");
     if (sevStripTitle) sevStripTitle.textContent = sevLegendTitle();
     refreshLegendDim();
+    syncCountryHit();
     renderMap(); renderBars();
   }
   for (const el of [skillSel, rpSel, srcLvlSel, triSel, ipcPeriodSel, planYrSel]) {
