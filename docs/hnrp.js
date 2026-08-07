@@ -102,6 +102,7 @@
   // and the selector says which one to read. Nothing is ever blended: a unit with
   // no figures for the chosen year shows dashes rather than an older cycle's.
   const planYrSel = document.getElementById("hnrp-plan-yr");
+  const planYrWrap = document.getElementById("hnrp-plan-yr-wrap");
   const cycYears = [...new Set(data.rows.flatMap((r) => Object.keys(r.cyc ?? {})))]
     .map(Number).sort((a, b) => b - a);
   for (const y of cycYears) {
@@ -267,6 +268,9 @@
   function updateIpcPeriodUI() {
     ipcPeriodWrap.hidden = !ipcMode();
     srcLvlWrap.hidden = pinMode(); // PiN is a headline total, no severity level
+    // Plan year selects an HNRP cycle. It does nothing to IPC figures, so showing
+    // it beside the IPC controls just invites the reader to think it does.
+    if (planYrWrap) planYrWrap.hidden = ipcMode();
     if (!ipcMode()) return;
     // Explicit periods are only meaningful for one country at a time — across
     // countries the same window belongs to different exercises.
@@ -465,8 +469,9 @@
       const c = ipcMode() ? ipcComboOf(r) : null;
       rows += `<div>${sevLabel()}: ${fmtN(sevValOf(r))}${c ? ` (${comboDesc(c)})` : ""}</div>`;
     }
-    if (tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
-    if (cycOf(r)) rows += `<div>HNRP ${planYr()}</div>`;
+    // Targeted and the plan-year stamp come from the HNRP cycle — not shown in IPC mode.
+    if (pinMode() && tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
+    if (pinMode() && cycOf(r)) rows += `<div>HNRP ${planYr()}</div>`;
     if (sevYrOf(r) && sevYrOf(r) !== +planYr()) {
       rows += `<div style="color:#9db1b3">severity analysis ${sevYrOf(r)}</div>`;
     }
@@ -1031,7 +1036,7 @@
       (pinMode() ? `<span><i style="background:${PIN_COLOR}"></i> no severity published</span>`
         : sevColors().map((c, i) => (i < barC0() ? ""
             : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("")) +
-      `<span><i class="tick"></i> targeted</span>` +
+      (pinMode() ? `<span><i class="tick"></i> targeted</span>` : "") +
       `<span>% columns are of the area's population — hover any figure for the` +
       ` count, the share and the population base used</span>`;
   }
@@ -1069,6 +1074,9 @@
   function renderBars() {
     renderBarsLegend();
     const country = countrySel.value;
+    // Switching to IPC drops the targeted columns; a sort left pointing at one
+    // would order the chart by a quantity no longer on screen.
+    if (!pinMode() && barSort.startsWith("targeted")) { barSort = "value"; barSortFlip = false; }
     const [cmp, isText] = BAR_SORTS[barSort] ?? BAR_SORTS.value;
     const rows = country
       ? data.rows.filter((r) => r.country === country
@@ -1100,7 +1108,7 @@
     }
     // A cycle can publish needs without targets — say so once, above the chart,
     // rather than leaving a column of dashes to be read as missing data.
-    noTgtEl.hidden = yearsWithTgt.has(planYr());
+    noTgtEl.hidden = ipcMode() || yearsWithTgt.has(planYr());
     noTgtEl.textContent = `No targeted figures published for the HNRP ${planYr()} cycle yet` +
       ` — its subnational figures come from the needs analysis, which carries PiN only.` +
       (cycYears.some((y) => yearsWithTgt.has(String(y)))
@@ -1117,9 +1125,17 @@
     // caseload takes, with the headcount printed beside it. Fixed tracks, not one
     // scale across rows: the question here is "how much of this area", and the
     // absolute figure is right there in the label.
-    // Four numeric columns on the right — headcount and share, for the caseload
-    // and for targeted — each sortable. The bar takes whatever is left.
-    const NUMW = 72, NGAP = 4, NUMS = 4;
+    // Numeric columns on the right — headcount and share, each sortable; the bar
+    // takes whatever is left. TARGETED IS PLAN DATA: it comes from the HNRP cycle
+    // for the selected plan year, so it has no business on an IPC chart, where
+    // the plan year is not even a visible control. IPC mode shows two columns.
+    const NUM_COLS = [
+      ["value", pinMode() ? "PiN" : sevLabel()],
+      ...(pinMode() ? [["targeted", "Targeted"]] : []),
+      ["valuePct", `${pinMode() ? "PiN" : sevLabel()} %`],
+      ...(pinMode() ? [["targetedPct", "Targeted %"]] : []),
+    ];
+    const NUMW = 72, NGAP = 4, NUMS = NUM_COLS.length;
     const NUMBLOCK = NUMS * NUMW + (NUMS - 1) * NGAP;
     const numRight = (i) => W - M.r - NUMBLOCK + i * (NUMW + NGAP) + NUMW;
     const barRight = Math.max(M.l + 80, W - M.r - NUMBLOCK - 18);
@@ -1156,7 +1172,8 @@
     // column's job.
     const shownSum = (r) => (pinMode() ? (sevValOf(r) ?? 0)
       : (segsOf(r) ?? []).slice(barC0()).reduce((a, b) => a + (b ?? 0), 0));
-    const xmax = Math.max(...rows.map((r) => Math.max(shownSum(r), tgtOf(r) ?? 0)), 1) * 1.04;
+    const xmax = Math.max(...rows.map((r) => Math.max(shownSum(r),
+      pinMode() ? (tgtOf(r) ?? 0) : 0)), 1) * 1.04;
     const X = (v) => M.l + (v / xmax) * (barRight - M.l);
 
     // x grid: 4 round ticks.
@@ -1198,14 +1215,7 @@
     // The bar itself is not a sort target — the four numeric columns are, one
     // per quantity it draws (headcount and share, caseload and targeted).
     g("text", { x: M.l, y: M.t - 10, "font-size": 11, fill: "#555" }).textContent =
-      pinMode() ? "PiN (bar) · targeted (tick)"
-        : `IPC phases (bar) · targeted (tick)`;
-    const NUM_COLS = [
-      ["value", pinMode() ? "PiN" : sevLabel()],
-      ["targeted", "Targeted"],
-      ["valuePct", `${pinMode() ? "PiN" : sevLabel()} %`],
-      ["targetedPct", "Targeted %"],
-    ];
+      pinMode() ? "PiN (bar) · targeted (tick)" : "IPC phases (bar)";
     NUM_COLS.forEach(([key, label], i) => header(numRight(i), key, label, "end"));
     g("line", { x1: 0, x2: W - M.r, y1: M.t - 4, y2: M.t - 4, stroke: "#e2e8e8" });
 
@@ -1324,19 +1334,24 @@
           acc += v;
         }
       }
-      if (tgt != null) {
+      if (pinMode() && tgt != null) {
         titled(gr("line", { x1: X(tgt), x2: X(tgt), y1: y + 1, y2: y + ROW - 3,
                             stroke: "#1d2021", "stroke-width": 2 }),
           `${r.name ?? r.pcode} — targeted: ${fmtN(tgt)} · ${pctTxt(tgt)}`);
       }
-      // ── The same four quantities as figures, one sortable column each ────
-      [[val, fmtSI(val), pctTxt(val)],
-       [tgt, tgt == null ? "–" : fmtSI(tgt), pctTxt(tgt)],
-       [share(val), fmtPct(share(val)), pctTxt(val)],
-       [share(tgt), tgt == null ? "–" : fmtPct(share(tgt)), pctTxt(tgt)],
-      ].forEach(([v, text, tip], i) => {
+      // ── The same quantities as figures, one sortable column each ─────────
+      // Keyed off NUM_COLS so the cells stay aligned with the headers when IPC
+      // mode drops the two targeted columns — an index-based list silently
+      // shifted the shares under the wrong heading.
+      const CELL = {
+        value: [val, fmtSI(val), pctTxt(val)],
+        targeted: [tgt, tgt == null ? "–" : fmtSI(tgt), pctTxt(tgt)],
+        valuePct: [share(val), fmtPct(share(val)), pctTxt(val)],
+        targetedPct: [share(tgt), tgt == null ? "–" : fmtPct(share(tgt)), pctTxt(tgt)],
+      };
+      NUM_COLS.map(([k]) => [...CELL[k], k]).forEach(([v, text, tip, key], i) => {
         // ">100%" is a flag, not a figure — mute it like a missing value.
-        const flagged = v == null || (i >= 2 && v > 1);
+        const flagged = v == null || (key.endsWith("Pct") && v > 1);
         const t = gr("text", { x: numRight(i), y: y + ROW / 2 + 4, "text-anchor": "end",
                                "font-size": 11, fill: flagged ? "#aab6b7" : "#333",
                                "font-variant-numeric": "tabular-nums" });
