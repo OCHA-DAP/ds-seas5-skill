@@ -190,6 +190,14 @@
       for (const c of r.ipc ?? []) if (hasPhases(c) && !seen.has(periodKey(c))) seen.set(periodKey(c), c);
     }
     const list = [...seen.values()];
+    // An explicit period picked from the dropdown wins outright — that is the whole
+    // point of offering it. A country that does not publish it gets nothing rather
+    // than a silent substitution, which is what made the mixed-vintage map possible.
+    if (mode !== "now" && mode !== "fwd") {
+      const exact = list.find((c) => periodKey(c) === mode) ?? null;
+      periodCache.set(key, exact);
+      return exact;
+    }
     const pick = (arr) => (arr.length
       ? arr.sort((a, b) => (b.a ?? "").localeCompare(a.a ?? "") || ym(b.s) - ym(a.s))[0] : null);
     let chosen = null;
@@ -236,10 +244,52 @@
     (c.d ? ` — downscaled from admin-${c.d} by population share` : "");
 
   const IPC_OPT_BASE = { now: "Now", fwd: "Forecast window" };
+  // Every period the country publishes, newest exercise first, with how many of its
+  // units each one actually classifies. "Now" can legitimately resolve to a period
+  // covering very little (Afghanistan's only window over Aug 2026 reaches 9 of 401
+  // districts), so the earlier, fuller analyses have to be reachable — otherwise the
+  // honest default is also a dead end.
+  function ipcPeriodsFor(country) {
+    const seen = new Map();
+    for (const r of data.rows) {
+      if (!r.ipc || (country && r.country !== country)) continue;
+      for (const c of r.ipc) {
+        if (!hasPhases(c)) continue;
+        const k = periodKey(c);
+        const e = seen.get(k) ?? { c, units: 0 };
+        e.units++;
+        seen.set(k, e);
+      }
+    }
+    return [...seen.values()].sort((a, b) =>
+      (b.c.a ?? "").localeCompare(a.c.a ?? "") || ym(b.c.s) - ym(a.c.s));
+  }
   function updateIpcPeriodUI() {
     ipcPeriodWrap.hidden = !ipcMode();
     srcLvlWrap.hidden = pinMode(); // PiN is a headline total, no severity level
     if (!ipcMode()) return;
+    // Explicit periods are only meaningful for one country at a time — across
+    // countries the same window belongs to different exercises.
+    const keep = ipcPeriodSel.value;
+    for (const o of [...ipcPeriodSel.querySelectorAll("option[data-period]")]) o.remove();
+    if (countrySel.value) {
+      const list = ipcPeriodsFor(countrySel.value);
+      const chosen = ipcPeriodOf(
+        (data.rows.find((r) => r.country === countrySel.value) || {}).iso3, "now");
+      for (const { c, units } of list) {
+        const o = document.createElement("option");
+        o.value = periodKey(c);
+        o.dataset.period = "1";
+        o.textContent = `${c.t}, exercise ${fmtYM(c.a)}, valid ${c.label}`
+          + ` — ${units} unit${units === 1 ? "" : "s"}`
+          + (chosen && periodKey(chosen) === periodKey(c) ? " (current default)" : "");
+        ipcPeriodSel.appendChild(o);
+      }
+      if ([...ipcPeriodSel.options].some((o) => o.value === keep)) ipcPeriodSel.value = keep;
+      else if (keep !== "now" && keep !== "fwd") ipcPeriodSel.value = "now";
+    } else if (keep !== "now" && keep !== "fwd") {
+      ipcPeriodSel.value = "now"; // an explicit period cannot survive "All countries"
+    }
     // The dropdown options ALWAYS state the exercise (analysis) month and validity
     // window of the numbers each choice resolves to: the concrete analysis when a
     // country is selected, the cross-country range otherwise (periods differ by
@@ -255,6 +305,7 @@
       return [...per.values()];
     };
     for (const opt of ipcPeriodSel.options) {
+      if (opt.dataset.period) continue; // explicit periods label themselves
       const cs = perCountry(opt.value);
       if (!cs.length) {
         opt.textContent = IPC_OPT_BASE[opt.value];
