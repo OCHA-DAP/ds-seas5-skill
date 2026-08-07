@@ -804,25 +804,40 @@ def load_pbs_adm1() -> pd.DataFrame:
         for pcode, tot in total.items():
             row = {"pcode": pcode, "iso3": iso3, "name": a1names.get(pcode),
                    f"pbsTotY{yr}": int(tot), f"pbsAreaY{yr}": 0}
+            split = [0] * 5
             if pcode in by_class.index:
                 for cls in range(1, 6):
                     v = (by_class.loc[pcode, cls]
                          if cls in by_class.columns else None)
-                    row[f"pbY{yr}_{cls}"] = int(v) if pd.notna(v) else 0
-                row[f"pbsClassedY{yr}"] = 1
-            else:
-                # No usable published classes — place the unit's PiN at its
-                # AREA classification (severity_admin) FOR THAT SAME YEAR.
+                    split[cls - 1] = int(v) if pd.notna(v) else 0
+            # THE CLASS IS NOT THE SPLIT. A unit can be assessed and hold no PiN —
+            # Colombia classifies all 1,122 units for 2026 while 672 of them come to
+            # zero people in need. Reading the class off the argmax of the PiN split
+            # left those 672 unclassified and grey, when the plan had in fact
+            # assessed every one of them. So: take the class from the split where
+            # there IS a caseload to place, and otherwise from the same year's AREA
+            # classification, which covers all 672.
+            cls_from_split = (max(range(1, 6), key=lambda c: split[c - 1])
+                              if any(v > 0 for v in split) else None)
+            unit_cls = cls_from_split
+            if unit_cls is None:
                 acls = area_cls.get((iso3, yr, pcode))
-                for cls in range(1, 6):
-                    row[f"pbY{yr}_{cls}"] = int(tot) if cls == acls else 0
-                row[f"pbsClassedY{yr}"] = int(acls is not None)
-                row[f"pbsAreaY{yr}"] = int(acls is not None)
-                n_area += row[f"pbsAreaY{yr}"]
+                if acls is not None:
+                    unit_cls = acls
+                    row[f"pbsAreaY{yr}"] = 1
+                    n_area += 1
+                    # Nothing to distribute, but keep the class visible: a zero
+                    # caseload at class N is still class N on the map.
+                    if tot:
+                        split[acls - 1] = int(tot)
+            for cls in range(1, 6):
+                row[f"pbY{yr}_{cls}"] = split[cls - 1]
+            row[f"pbsClsY{yr}"] = unit_cls
+            row[f"pbsClassedY{yr}"] = int(unit_cls is not None)
             rows.append(row)
         if n_area:
             print(f"  pbs: {iso3} {yr}: {n_area} unit(s) classed from the AREA "
-                  f"classification (no usable published classes)")
+                  f"classification (no class carried by the PiN split)")
     # One row per unit again: the per-year columns are disjoint, so a groupby-first
     # over them recombines each unit's cycles without any of them overwriting another.
     out = pd.DataFrame(rows)
@@ -1106,7 +1121,7 @@ def main() -> None:
     _pbs_num = [c for c in df_pbs.columns
                 if c.startswith(("pbY", "pbsTotY"))]
     _pbs_flag = [c for c in df_pbs.columns
-                 if c.startswith(("pbsClassedY", "pbsAreaY"))]
+                 if c.startswith(("pbsClassedY", "pbsAreaY", "pbsClsY"))]
     # min_count=1, NOT a plain sum: a unit with no row for a cycle has NaN in that
     # cycle's columns, and pandas sums all-NaN to 0.0 — which invents a zero-caseload
     # cycle. That put a phantom 2026 on Venezuela, Burkina Faso, Ukraine and Honduras,
@@ -1456,6 +1471,7 @@ def main() -> None:
             tot = rec.pop(c, None)
             classed = rec.pop(f"pbsClassedY{yr}", None)
             area = rec.pop(f"pbsAreaY{yr}", None)
+            unit_cls = rec.pop(f"pbsClsY{yr}", None)
             split = [rec.pop(f"pbY{yr}_{k}", None) for k in range(1, 6)]
             # A zero caseload is a real published figure — the plan covers the unit
             # and finds nobody in need (COL files 672 such units for 2026, COD 286).
@@ -1463,16 +1479,20 @@ def main() -> None:
             if tot is None or pd.isna(tot):
                 continue
             ent: dict = {"tot": int(tot)}
-            if classed and pd.notna(classed) and int(classed):
+            # "c" is the unit's class and is what the map colours by — it exists
+            # even where the caseload is zero. "pb" is only the distribution behind
+            # it, for the tooltip, and is omitted when there is nothing to split.
+            if unit_cls is not None and pd.notna(unit_cls):
+                ent["c"] = int(unit_cls)
                 pb = [int(v) if pd.notna(v) else 0 for v in split]
                 if sum(pb) > 0:
                     ent["pb"] = pb
-                    if area and pd.notna(area) and int(area):
-                        ent["a"] = 1  # classes come from the AREA classification
+                if area and pd.notna(area) and int(area):
+                    ent["a"] = 1  # class comes from the AREA classification
             sevc[yr] = ent
         # Stray per-year columns for cycles this unit has no total for.
         for c in [c for c in list(rec)
-                  if c.startswith(("pbY", "pbsClassedY", "pbsAreaY"))]:
+                  if c.startswith(("pbY", "pbsClassedY", "pbsAreaY", "pbsClsY"))]:
             rec.pop(c, None)
         out = {k: (v if isinstance(v, (list, dict)) else None if pd.isna(v) else v)
                for k, v in rec.items()}

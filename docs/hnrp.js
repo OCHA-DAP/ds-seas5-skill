@@ -688,9 +688,12 @@
     // classed differently between them — pinning the colour to the newest cycle
     // painted an older year's caseload with the newest year's class. A cycle this
     // unit was not classified in is NOT assessed; it never borrows another year's.
+    // The class is carried explicitly ("c"), not inferred from the split: a unit
+    // can be assessed and hold no PiN at all — Colombia classifies all 1,122 of its
+    // units for 2026 while 672 of them come to zero people in need. "pb" is only
+    // the distribution behind the class, for the tooltip.
     const e = sevcOf(r);
-    const fromPin = dominant(e?.pb);
-    if (fromPin) return { cls: fromPin, src: e.a ? "area" : "pin", split: spread(e.pb) };
+    if (e?.c) return { cls: e.c, src: e.a ? "area" : "pin", split: spread(e.pb) };
     return { cls: null };
   }
   const sevClassOf = (r) => sevClassInfo(r).cls;
