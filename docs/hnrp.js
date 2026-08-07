@@ -35,31 +35,6 @@
   } catch {
     return; // data files not built yet — leave the tab empty
   }
-  // Some IPC combos arrive with their phase rows counted more than once while the
-  // 'all' row (the analysed population) is counted once — sum(phases) lands at an
-  // exact 2.00×, 1.75×, 1.55× of it. HAPI's duplicate-row hazard again, but as
-  // NEAR-duplicates the export's drop_duplicates does not catch. Left alone it
-  // inflates every headcount off that combo: South Sudan's Apr–Jul 2026 reads 9.15M
-  // in phase 3+ where IPC publishes 7.8M, DR Congo's Jan–Jun 2026 27.0M vs 23.9M.
-  // Rescaling the distribution back onto the analysed population reproduces IPC's
-  // published figures (SSD 7.71M vs 7.8M). Only ever scales DOWN: sum < tot is
-  // normal (not all of the analysed population need be classified).
-  let ipcRescaled = 0;
-  for (const r of data.rows) {
-    for (const c of r.ipc ?? []) {
-      const tot = c.tot ?? 0;
-      const s = c.p.reduce((a, b) => a + (b ?? 0), 0);
-      if (tot > 0 && s > tot * 1.02) {
-        const f = tot / s;
-        c.p = c.p.map((v) => (v ?? 0) * f);
-        ipcRescaled++;
-      }
-    }
-  }
-  if (ipcRescaled) {
-    console.warn(`hnrp: rescaled ${ipcRescaled} IPC combo(s) whose phase rows summed ` +
-      `above their analysed population (duplicate rows upstream)`);
-  }
   // Parent admin-1 name qualifies adm2 units (district names repeat across regions).
   const dispName = (r) => (r.parent ? `${r.name ?? r.pcode} (${r.parent})` : (r.name ?? r.pcode));
   // Every control survives a reload (and makes links shareable with their
@@ -185,12 +160,15 @@
   const lvl = () => +srcLvlSel.value;
   const ym = (s) => { const [y, m] = s.split("-").map(Number); return y * 12 + m - 1; };
   const NOW_YM = data.issued_year * 12 + data.issued_month - 1; // anchor: forecast issuance
-  // A combo can carry an analysed population with NO phase breakdown at all —
-  // HAPI publishes the 'all' row for a projection before (or without) the per-phase
-  // rows. Sudan's Jan-2026 exercise does exactly this for Jun–Sep 2026 and
-  // Oct–Jan 2027: 135 of 189 units, 37M people, every phase zero. Such a combo is
-  // NOT "nobody is in phase 3+" — it is no data, and it must never be selected
-  // while a combo with a real distribution exists, or the country reads as Phase 1.
+  // A combo can carry an analysed population with NO phase breakdown, because IPC
+  // projections often cover FEWER areas than the countrywide current period and the
+  // 'all' row is still carried at full country scope. Sudan's Jan-2026 exercise says
+  // so outright: Feb–May 2026 covers all 195 localities, but Jun–Sep 2026 and
+  // Oct–Jan 2027 cover 56 — "data was not available for a full nationwide projection
+  // analysis". So 135 of 189 units carry a population and no phases for those
+  // windows. That is a unit OUTSIDE the projection, not one with nobody in crisis;
+  // selected literally it walks the class search down from 5, finds nothing, and
+  // paints the area phase 1. Never select such a combo while a real one exists.
   const hasPhases = (c) => c.p.some((v) => (v ?? 0) > 0);
   function ipcComboOf(r, mode = ipcPeriodSel.value) {
     const list = (r.ipc || []).filter(hasPhases);

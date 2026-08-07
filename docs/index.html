@@ -390,20 +390,52 @@
         per-area tooltip is authoritative.
       </p>
       <p>
-        <strong>Two upstream defects are corrected here.</strong> A combo can arrive
-        carrying an analysed population with <em>no</em> phase breakdown — every phase
-        zero. That is missing data, not "nobody is in crisis", but read literally it
-        classifies an area as phase 1. Sudan's Jan-2026 exercise does this for
-        Jun–Sep 2026 and Oct–Jan 2027: 135 of 189 units, 37 million people, which
-        would have rendered the world's largest food crisis as
-        <em>Minimal</em> in the default view. Such combos are now skipped, so Sudan
-        shows its Feb–May 2026 analysis — 19.3 million in phase 3+, against the 19.5
-        million IPC publishes. Separately, some combos have their phase rows counted
-        more than once against a single analysed-population row, landing at an exact
-        2.00× or 1.75× of it (45 DR Congo units, 21 South Sudan). Those are rescaled
-        back onto the analysed population, which reproduces the published totals:
-        South Sudan's Apr–Jul 2026 becomes 7.71 million where IPC publishes 7.8,
-        rather than the 9.15 million the raw rows sum to.
+        <strong>Projections often cover fewer areas than the current period</strong>,
+        and the analysed-population row is still carried at full country scope — so
+        units outside the projection arrive with a population and every phase zero.
+        Sudan's Jan-2026 exercise says so outright: Feb–May 2026 covers all 195
+        localities, while Jun–Sep 2026 and Oct–Jan 2027 cover 56, because "data was
+        not available for a full nationwide projection analysis". Read literally
+        those zeros classify an area as phase 1, which would have rendered the
+        world's largest food crisis as <em>Minimal</em> in the default view. Such
+        periods are skipped for the units they do not cover, so Sudan shows its
+        Feb–May 2026 countrywide analysis instead.
+      </p>
+      <p>
+        <strong>Duplicated rows are removed at export.</strong> HAPI ships some units
+        twice per period, and because the two copies round the same published figure
+        independently (77,350 × 0.15 filed once as 11,603 and once as 11,602) a
+        naive de-duplication keeps both and the phase sums land at an exact 2.00× the
+        analysed population. Removing them on the unit key drops 1,023 rows at
+        admin-1 and 837 at admin-2, and reproduces IPC's published figures: South
+        Sudan's Apr–Jul 2026 gives 7.81 million in phase 3+ against IPC's 7.8
+        million, 2.54 million in phase 4+ against ~2.5, and 73,305 in phase 5
+        against ~73,000.
+      </p>
+      <p>
+        <strong>Where we still differ from IPC's headline.</strong> Sudan's Feb–May
+        2026 gives 17.97 million here against the 19.5 million IPC publishes, because
+        IPC analyses 195 localities <em>and IDP settlements</em> while we map 184
+        admin-2 units — the settlements and multi-locality caseloads
+        ("Abyei PCA", "Kutum, Tawila", "Sharg Aj Jazirah") carry no admin code we can
+        place, and are dropped rather than misattributed. Expect country totals read
+        off this tab to sit slightly below IPC's for the same reason.
+        Separately, a country's newest analysis is sometimes published <em>national
+        only</em>: Haiti's Mar–Jun 2026 projection update and Somalia's Apr–Jun 2026
+        one each carry a single subnational unit, so the map necessarily shows the
+        previous analysis, which does have the full breakdown. The per-area tooltip
+        always names the analysis actually used.
+      </p>
+      <p>
+        <strong>Sources.</strong> IPC figures here should match the country's page in
+        the <a href="https://www.ipcinfo.org/ipc-country-analysis/"
+        target="_blank" rel="noopener">IPC country analysis portal</a> (e.g.
+        <a href="https://www.ipcinfo.org/ipc-country-analysis/details-map/en/c/1163315/?iso3=SDN"
+        target="_blank" rel="noopener">Sudan, Feb 2026 – Jan 2027</a>), and the phase
+        colours are IPC's own ramp. Plan caseloads should match OCHA's
+        <a href="https://humanitarianaction.info/article/gho-country-plans-interactive-dashboard"
+        target="_blank" rel="noopener">GHO country plans dashboard</a>, whose
+        subnational severity uses the same blue ramp reproduced here.
       </p>
 
       <h4>Reading the map</h4>
@@ -675,7 +707,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260807a"></script>
+  <script src="hnrp.js?v=20260807b"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

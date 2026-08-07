@@ -664,12 +664,21 @@ def load_ipc_adm1(key: str | None = None) -> pd.DataFrame:
             "reference_period_start", "reference_period_end", "analysis_date"])
     df = df.merge(dates, how="left", on=[
         "location_code", "ipc_type", "reference_period_start", "reference_period_end"])
-    # HAPI ships some rows verbatim TWICE (same resource file, same value — COD 450
-    # keys, CAF 204, SSD 138…); summing them doubles those phase populations.
+    # HAPI ships some rows TWICE (same resource file, same unit — COD 450 keys,
+    # CAF 204, SSD 138…); the pivot below sums, so a survivor doubles that phase.
+    # Dedup on the KEY, never on the value: the two copies are the same published
+    # figure rounded independently, so they often differ by 1 and an all-column
+    # drop_duplicates keeps both. SSD Rumbek North Apr–Jul 2026 is the type case —
+    # 77,350 × 0.15 filed once as 11,603 and once as 11,602, summing to 23,205 and
+    # putting the whole country 19% over IPC's published total. The 'all' rows of
+    # the same pairs round identically, so they DID dedup, which is what made the
+    # phase sums land at a clean 2.00× their analysed population.
+    keys = [c for c in df.columns if c != "population_in_phase"]
     before = len(df)
-    df = df.drop_duplicates(subset=[c for c in df.columns])
+    df = df.drop_duplicates(subset=keys)
     if len(df) < before:
-        print(f"  IPC: dropped {before - len(df)} exact duplicate row(s) (upstream)")
+        print(f"  IPC: dropped {before - len(df)} duplicate row(s) on "
+              f"(unit × phase × type × period) (upstream)")
 
     rows = []
     for (loc, t, s, e), g in df.groupby(
