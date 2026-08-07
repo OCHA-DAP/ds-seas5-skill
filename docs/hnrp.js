@@ -93,17 +93,22 @@
 
   // Plan cycle varies by country (e.g. Guatemala's latest is the 2025 HNRP) — surface
   // the year everywhere caseload figures appear.
-  const sevYrOf = (r) => {
-    const ys = [r.sev_year, r.pbs_yr].filter((y) => y != null);
-    return ys.length ? Math.max(...ys) : null;
-  };
+  // The severity entry for the plan year in force — {tot, pb?, a?} or null.
+  const sevcOf = (r) => (r.sevc ?? {})[planYr()] ?? null;
   // ── Plan year ────────────────────────────────────────────────────────────────
   // Each unit carries its caseloads per cycle in r.cyc = {"2026": [pin, targeted]},
   // and the selector says which one to read. Nothing is ever blended: a unit with
   // no figures for the chosen year shows dashes rather than an older cycle's.
   const planYrSel = document.getElementById("hnrp-plan-yr");
   const planYrWrap = document.getElementById("hnrp-plan-yr-wrap");
+  // Only cycles that publish a severity distribution are offered. The JIAF PbS
+  // starts at 2025, so an older cycle could show a caseload but never a class —
+  // a plan year that greys the whole map is worse than one that isn't offered.
+  // (2024 is dropped on that rule: it costs 109 units their only cycle and 626
+  // their only targeting, Venezuela's included.)
+  const sevYears = new Set(data.rows.flatMap((r) => Object.keys(r.sevc ?? {})));
   const cycYears = [...new Set(data.rows.flatMap((r) => Object.keys(r.cyc ?? {})))]
+    .filter((y) => sevYears.has(y))
     .map(Number).sort((a, b) => b - a);
   for (const y of cycYears) {
     const o = document.createElement("option");
@@ -142,7 +147,7 @@
   // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
   // shown only in IPC mode, where surfacing needs the plan does NOT capture is the point.
   const inHnrp = (r) => r.sev_total > 0 || r.cyc != null || r.targeted != null
-    || r.sec != null || r.pbs_tot != null;
+    || r.sec != null || r.sevc != null;
 
   // ── Severity source: the plan's PiN (default) or IPC/CH phase N+ ────────────
   // PiN mode is the plain plan figure per area — one PiN and one severity class
@@ -472,8 +477,8 @@
     // Targeted and the plan-year stamp come from the HNRP cycle — not shown in IPC mode.
     if (pinMode() && tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
     if (pinMode() && cycOf(r)) rows += `<div>HNRP ${planYr()}</div>`;
-    if (sevYrOf(r) && sevYrOf(r) !== +planYr()) {
-      rows += `<div style="color:#9db1b3">severity analysis ${sevYrOf(r)}</div>`;
+    if (pinMode() && r.sevc && !r.sevc[planYr()]) {
+      rows += `<div style="color:#9db1b3">not classified in the ${planYr()} cycle</div>`;
     }
     if (ADM === "low") {
       const cls = sevClassOf(r);
@@ -678,11 +683,17 @@
       }
       return { cls: 1, src: "ipc", split: spread(c.p) };
     }
-    const fromPin = dominant(r.pb);
-    if (fromPin) return { cls: fromPin, src: r.pba ? "area" : "pin", split: spread(r.pb) };
-    const sev = [r.s1, r.s2, r.s3, r.s4, r.s5];
-    const fromAnalysis = dominant(sev);
-    if (fromAnalysis) return { cls: fromAnalysis, src: "analysis", split: spread(sev) };
+    // THE CLASS FOLLOWS THE PLAN YEAR. Each cycle carries its own PiN-by-severity
+    // distribution in r.sevc, and 29% of units that publish both 2025 and 2026 are
+    // classed differently between them — pinning the colour to the newest cycle
+    // painted an older year's caseload with the newest year's class. A cycle this
+    // unit was not classified in is NOT assessed; it never borrows another year's.
+    // The class is carried explicitly ("c"), not inferred from the split: a unit
+    // can be assessed and hold no PiN at all — Colombia classifies all 1,122 of its
+    // units for 2026 while 672 of them come to zero people in need. "pb" is only
+    // the distribution behind the class, for the tooltip.
+    const e = sevcOf(r);
+    if (e?.c) return { cls: e.c, src: e.a ? "area" : "pin", split: spread(e.pb) };
     return { cls: null };
   }
   const sevClassOf = (r) => sevClassInfo(r).cls;
@@ -713,7 +724,10 @@
       v === "skill_high" ? cat.endsWith("_high") || cat === "high_none"
       : v === "skill_mod" ? cat.endsWith("_mod") || cat === "mid_none"
       : cat === "low_skill"),
-    cls: (cat, cls, v) => cls != null && String(cls) === v,
+    // "na" is the unclassified bucket — the muted fill on the map. It sits in the
+    // cls dimension so it ORs with the numbered classes ("class 4 or not assessed")
+    // and still ANDs with forecast category and skill.
+    cls: (cat, cls, v) => (v === "na" ? cls == null : cls != null && String(cls) === v),
   };
   // OR within a dimension, AND across them: "strongly below" × "class 4" is the
   // intersection. A dimension with nothing selected constrains nothing.
@@ -835,8 +849,9 @@
     const root = document.getElementById("hnrp-legend");
     root.innerHTML = "";
     const wire = (el, dim, val) => {
-      // Purely explanatory swatches ("not assessed") carry no dimension: they key
-      // the map's muted fill rather than a value anything could be filtered on.
+      // A swatch with no dimension is decoration — nothing to hover, pin or dim by.
+      // Without this guard refreshLegendDim() reads pinned[undefined] and throws,
+      // taking the whole render with it.
       if (!dim) return;
       val = String(val);
       el.dataset.hlDim = dim; el.dataset.hlVal = val;
@@ -915,13 +930,16 @@
     // the area rule), so the class strip belongs to the lowest view outright.
     if (ADM === "low") {
       // Title and ramp both follow the source — renderAll() keeps them current.
-      // The muted fill needs saying out loud: on an IPC projection most of a country
-      // can be unclassified (Sudan blanks 140 of 189 units), and an unlabelled grey
-      // reads as "nothing here" rather than "not part of this analysis".
+      // The muted fill is a legend entry in its own right, and filterable like the
+      // rest: on an IPC projection most of a country can be unclassified (Sudan
+      // blanks 140 of 189 units), and "show me only what this cycle did NOT assess"
+      // is the question that follows. It lives in the cls dimension as "na", so it
+      // ORs with the numbered classes and ANDs with forecast category and skill.
       strip(sevLegendTitle(), [...[1, 2, 3, 4, 5].map((c) => ({
         fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
         border: c <= 2, dim: "cls", val: c,
-      })), { fill: HNRP_MUTED.fill, border: true, label: "not assessed" }],
+      })), { fill: HNRP_MUTED.fill, border: true, label: "not assessed",
+             dim: "cls", val: "na" }],
         44).querySelector(".lb-title").id = "hnrp-sev-strip-title";
     }
     // Pins outlive every other control change, so there is always one click
