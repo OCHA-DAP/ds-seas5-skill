@@ -243,6 +243,27 @@ def _fold(s: str) -> str:
 # (iso3, source pcode) -> (our pcode, {folded names that must match} | None).
 # The name guard disambiguates code reuse across vintages (Mali's 2026 system reuses
 # ML09 for Taoudenni where the old system means Bamako).
+# Source spellings our COD vintage does not share, folded on both sides. Only for
+# units we have positively identified — this is a rename, not a fuzzy match, and a
+# wrong entry silently moves a whole area's caseload onto another unit.
+# Djibouti's IPC analysis is admin-based, but the COD vintage carries two typos
+# ("Ali Sabeh", "Dilkhil") and names the capital region without its "Ville".
+# Keys and values are in _fold() form: accent-stripped and casefolded, but spaces
+# KEPT — "Djibouti Ville" folds to "djibouti ville", not "djiboutiville".
+NAME_ALIAS = {
+    # Djibouti: IPC spells the region with a trailing h, and our polygon table
+    # carries a typo for the capital ("Djiboutii").
+    ("DJI", "tadjourah"): "tadjoura",
+    ("DJI", "djibouti ville"): "djiboutii",
+    # Madagascar renamed Haute Matsiatra to Matsiatra Ambony. Same region.
+    ("MDG", "matsiatra ambony"): "haute matsiatra",
+    # NOT aliased, deliberately: VATOVAVY and FITOVINANY are the two halves of a
+    # SPLIT of Vatovavy Fitovinany — aliasing both onto the old unit would put two
+    # rows on one polygon, which the collision guard blocks and a sum would be
+    # needed for. AMBATOSOA and Commune Urbaine d'Antananarivo have no counterpart
+    # in our COD vintage at all. All four stay unmatched and are reported per run.
+}
+
 REFORM_XWALK = {
     # Mali 2023 reorganisation (19 regions + Bamako district):
     ("MLI", "ML09"): ("ML06", {"taoudenni", "taoudeni", "taoudenit"}),  # ⊂ old Tombouctou
@@ -294,10 +315,20 @@ def normalize_pcodes(
         iso3: {_fold(n): p for p, n in zip(g["pcode"], g["name"])}
         for iso3, g in poly.groupby("iso3")
     }
+    def _name_hit(iso3: str, raw) -> str | None:
+        f = _fold(raw or "")
+        return name_ix.get(iso3, {}).get(NAME_ALIAS.get((iso3, f), f))
+
     out = df.copy()
-    # Units already spoken for by a real (non-placeholder) row.
+    # Units already spoken for by a real (non-placeholder) row. The guard is per
+    # ANALYSIS PERIOD where the frame carries one: IPC ships a row per unit per
+    # (type, window), so a unit matched in one period would otherwise block itself
+    # in every later one — 148 legitimate matches lost that way, most of Madagascar.
+    _per = [c for c in ("t", "s", "e") if c in out.columns]
+    def _slot(iso3, pcode, row):
+        return (iso3, pcode, *(row[c] for c in _per))
     _ph = out["pcode"].fillna("").str.upper().str.endswith("-XXX")
-    taken = set(zip(out.loc[~_ph, "iso3"], out.loc[~_ph, "pcode"]))
+    taken = {_slot(r["iso3"], r["pcode"], r) for _, r in out.loc[~_ph].iterrows()}
     fixed, dropped, unmatched, blocked = [], [], [], []
     for i, row in out.iterrows():
         code, iso3 = row["pcode"], row["iso3"]
@@ -315,15 +346,14 @@ def normalize_pcodes(
         # where the caller opts in) or plan-wide caseloads not attributed to any
         # admin unit ("PDI land", "UNSPECIFIED") — droppable, but loudly.
         if code.upper().endswith("-XXX") or _fold(row.get("name") or "") in {"pdi land", "unspecified"}:
-            cand = (name_ix.get(iso3, {}).get(_fold(row.get("name") or ""))
-                    if xxx_name_match else None)
-            if cand is not None and (iso3, cand) in taken:
+            cand = _name_hit(iso3, row.get("name")) if xxx_name_match else None
+            if cand is not None and _slot(iso3, cand, row) in taken:
                 blocked.append(f"{code} ({row.get('name')}) → {cand} already held")
                 cand = None
             if cand is not None:
                 fixed.append(f"{code}→{cand} (name)")
                 out.loc[i, "pcode"] = cand
-                taken.add((iso3, cand))
+                taken.add(_slot(iso3, cand, row))
             else:
                 dropped.append(f"{code} ({row.get('name')})")
                 out.loc[i, "pcode"] = None
@@ -338,7 +368,7 @@ def normalize_pcodes(
                 if cand in ref:
                     new = cand
         if new is None and "name" in row and pd.notna(row.get("name")):
-            cand = name_ix.get(iso3, {}).get(_fold(row["name"]))
+            cand = _name_hit(iso3, row["name"])
             if cand is not None:
                 new = cand
         if new is not None:
@@ -704,15 +734,29 @@ def load_ipc_adm1(key: str | None = None) -> pd.DataFrame:
     ):
         lvl = min(g["admin_level"].unique())  # coarsest available
         g = g[g["admin_level"] == lvl]
-        piv = g.pivot_table(index=key, columns="ipc_phase",
+        namecol = key.replace("code", "name")
+        # NEVER PIVOT A WHOLE COUNTRY ONTO ONE PLACEHOLDER CODE. Where HAPI could not
+        # p-code a country it ships every area as the same "<ISO3>-XXX", so an index
+        # on the code silently SUMS the country into a single row and labels it with
+        # whichever area name happened to come first. Madagascar landed as one row
+        # holding all 32.7M analysed and 2.57M in phase 3+, named "MENABE" — the kind
+        # of mis-attribution that is invisible downstream and survives every national
+        # total check. Pivot on the NAME in that case so each area stays itself, and
+        # let normalize_pcodes(xxx_name_match=True) map the names onto real pcodes.
+        ph_all = (g[key].fillna("").str.upper().str.endswith("-XXX").all()
+                  and g[namecol].nunique() > 1)
+        idx = namecol if ph_all else key
+        piv = g.pivot_table(index=idx, columns="ipc_phase",
                             values="population_in_phase", aggfunc="sum")
-        a1names = g.drop_duplicates(key).set_index(key)[key.replace("code", "name")]
+        a1names = g.drop_duplicates(key).set_index(key)[namecol]
+        ph_code = g[key].iloc[0] if ph_all else None
         adate = g["analysis_date"].max()
-        for pcode in piv.index:
-            row = {"pcode": pcode, "iso3": loc, "name": a1names.get(pcode),
+        for ix in piv.index:
+            row = {"pcode": ph_code if ph_all else ix, "iso3": loc,
+                   "name": ix if ph_all else a1names.get(ix),
                    "t": t, "s": s, "e": e, "a": adate}
             for ph in ["1", "2", "3", "4", "5", "all"]:
-                v = piv.loc[pcode, ph] if ph in piv.columns else None
+                v = piv.loc[ix, ph] if ph in piv.columns else None
                 row[f"p{ph}"] = int(v) if pd.notna(v) else 0
             rows.append(row)
     out = pd.DataFrame(rows)
@@ -1132,7 +1176,10 @@ def main() -> None:
               .agg({"iso3": "first", "name": "first",
                     **{c: _sum1 for c in _pbs_num},
                     **{c: "max" for c in _pbs_flag}}))
-    df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC")
+    # HAPI ships whole countries' IPC with placeholder codes and real admin names —
+    # Madagascar, Tanzania and Djibouti were dropped entirely for it, ~8.2M people in
+    # phase 3+ invisible. Name-match them, with the collision guard doing the safety.
+    df_ipc = normalize_pcodes(load_ipc_adm1(), poly, "IPC", xxx_name_match=True)
     df_pop = normalize_pcodes(load_population_adm1(), poly, "population",
                               xxx_name_match=True)
     # Normalization can merge units (reforms, renumberings) — sum to one per pcode.
@@ -1365,7 +1412,8 @@ def main() -> None:
         with engine.connect() as conn:
             poly1 = pd.read_sql(
                 "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=1", conn)
-        par1 = normalize_pcodes(load_ipc_adm1(key="admin1_code"), poly1, "IPC-adm1")
+        par1 = normalize_pcodes(load_ipc_adm1(key="admin1_code"), poly1, "IPC-adm1",
+                                xxx_name_match=True)
         lists1 = _ipc_lists(par1)
         lists2 = {}
         if LEVEL == 3:
@@ -1373,7 +1421,8 @@ def main() -> None:
                 poly2 = pd.read_sql(
                     "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=2",
                     conn)
-            par2 = normalize_pcodes(load_ipc_adm1(key="admin2_code"), poly2, "IPC-adm2")
+            par2 = normalize_pcodes(load_ipc_adm1(key="admin2_code"), poly2, "IPC-adm2",
+                                    xxx_name_match=True)
             lists2 = _ipc_lists(par2)
         a1_by_iso = {i: sorted(g_["pcode"], key=len, reverse=True)
                      for i, g_ in poly1.groupby("iso3")}
