@@ -170,21 +170,48 @@
   // selected literally it walks the class search down from 5, finds nothing, and
   // paints the area phase 1. Never select such a combo while a real one exists.
   const hasPhases = (c) => c.p.some((v) => (v ?? 0) > 0);
-  function ipcComboOf(r, mode = ipcPeriodSel.value) {
-    const list = (r.ipc || []).filter(hasPhases);
-    if (!list.length) return null;
+  // ONE PERIOD PER COUNTRY, exactly as ipcinfo.org does it. Its country page draws
+  // Current / Projected 1 / Projected 2 as three separate maps, and on a projection
+  // map every area outside the projection is left WHITE — Sudan's Jun–Sep 2026 map
+  // shows 56 localities and blanks the other 139. Picking per unit instead would
+  // paint one map from up to four vintages at once (Sudan did exactly that) under a
+  // single title, which no reader could unpick. So the period is chosen for the
+  // whole country and a unit with no data for it is simply not classified.
+  const periodKey = (c) => `${c.t}|${c.a}|${c.s}|${c.e}`;
+  const periodCache = new Map();
+  function ipcPeriodOf(iso, mode) {
+    const key = `${iso}|${mode}`;
+    if (periodCache.has(key)) return periodCache.get(key);
     const covers = (c) => ym(c.s) <= NOW_YM && ym(c.e) >= NOW_YM;
-    const newest = (arr) => arr.sort((a, b) => ym(b.s) - ym(a.s))[0];
-    if (mode === "fwd") {
-      const proj = newest(list.filter((c) => c.t !== "current"
-        && ym(c.e) >= NOW_YM && ym(c.s) <= NOW_YM + 6));
-      if (proj) return proj;
+    // Every period the country publishes, deduped, newest exercise first.
+    const seen = new Map();
+    for (const r of data.rows) {
+      if (r.iso3 !== iso) continue;
+      for (const c of r.ipc ?? []) if (hasPhases(c) && !seen.has(periodKey(c))) seen.set(periodKey(c), c);
     }
-    const cur = newest(list.filter((c) => c.t === "current" && covers(c)));
-    if (cur) return cur;
-    const anyNow = newest(list.filter(covers));
-    if (anyNow) return anyNow;
-    return list.reduce((a, b) => (ym(a.e) >= ym(b.e) ? a : b)); // most recent past window
+    const list = [...seen.values()];
+    const pick = (arr) => (arr.length
+      ? arr.sort((a, b) => (b.a ?? "").localeCompare(a.a ?? "") || ym(b.s) - ym(a.s))[0] : null);
+    let chosen = null;
+    if (mode === "fwd") {
+      chosen = pick(list.filter((c) => c.t !== "current"
+        && ym(c.e) >= NOW_YM && ym(c.s) <= NOW_YM + 6));
+    }
+    chosen = chosen
+      || pick(list.filter((c) => c.t === "current" && covers(c)))
+      || pick(list.filter(covers))
+      // Nothing covers the issuance month: the most recent window that ended.
+      || list.reduce((a, b) => (a == null || ym(b.e) > ym(a.e) ? b : a), null);
+    periodCache.set(key, chosen);
+    return chosen;
+  }
+  function ipcComboOf(r, mode = ipcPeriodSel.value) {
+    const want = ipcPeriodOf(r.iso3, mode);
+    if (!want) return null;
+    const k = periodKey(want);
+    const c = (r.ipc ?? []).find((x) => periodKey(x) === k);
+    // Present but unclassified for this period = outside its coverage. Blank, not phase 1.
+    return c && hasPhases(c) ? c : null;
   }
   function sevValOf(r) {
     if (pinMode()) return pinOf(r);
@@ -752,6 +779,9 @@
     const root = document.getElementById("hnrp-legend");
     root.innerHTML = "";
     const wire = (el, dim, val) => {
+      // Purely explanatory swatches ("not assessed") carry no dimension: they key
+      // the map's muted fill rather than a value anything could be filtered on.
+      if (!dim) return;
       val = String(val);
       el.dataset.hlDim = dim; el.dataset.hlVal = val;
       // Hover only repaints (bars pale in place); a pin changes which rows the
@@ -829,10 +859,14 @@
     // the area rule), so the class strip belongs to the lowest view outright.
     if (ADM === "low") {
       // Title and ramp both follow the source — renderAll() keeps them current.
-      strip(sevLegendTitle(), [1, 2, 3, 4, 5].map((c) => ({
+      // The muted fill needs saying out loud: on an IPC projection most of a country
+      // can be unclassified (Sudan blanks 140 of 189 units), and an unlabelled grey
+      // reads as "nothing here" rather than "not part of this analysis".
+      strip(sevLegendTitle(), [...[1, 2, 3, 4, 5].map((c) => ({
         fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
         border: c <= 2, dim: "cls", val: c,
-      })), 44).querySelector(".lb-title").id = "hnrp-sev-strip-title";
+      })), { fill: HNRP_MUTED.fill, border: true, label: "not assessed" }],
+        44).querySelector(".lb-title").id = "hnrp-sev-strip-title";
     }
     // Pins outlive every other control change, so there is always one click
     // back to the unfiltered map.
