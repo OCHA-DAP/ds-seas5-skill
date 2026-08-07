@@ -380,14 +380,22 @@
         from <em>Now</em>. The dropdown states each choice's exercise (analysis) month and
         validity window — exactly, once a country is selected; as a cross-country range
         otherwise — and every tooltip names the analysis used for that area.
-        <strong>Read that window.</strong> For 17 of the 39 IPC countries no published
-        period covers the current issuance month at all, so <em>Now</em> falls back to
-        the most recent window that ended — sometimes long ago (Pakistan Apr–Jul 2025,
-        Gambia and Guinea-Bissau Jun–Aug 2025, Uganda Jun–Jul 2025). Coverage can also
-        be partial <em>within</em> a country: Yemen's Apr-2026 exercise reaches 118 of
-        its 333 units and Afghanistan's Oct-2025 one only 9 of 401, so the rest of
-        those countries sit on an older analysis and the map mixes vintages. The
-        per-area tooltip is authoritative.
+        <strong>One period per country, and areas outside it stay blank.</strong>
+        This follows ipcinfo.org, which draws Current, Projected 1 and Projected 2 as
+        three separate maps and leaves every area outside a projection <em>white</em>
+        — Sudan's Jun–Sep 2026 map shows 56 localities and blanks the rest. Choosing
+        per area instead would paint one map from up to four analysis vintages at
+        once under a single title, which is what this tab used to do (Sudan mixed
+        four; 14 of 39 countries mixed at least two). So the period is picked for the
+        whole country — the most recent exercise whose window covers the issuance
+        month — and a unit that analysis does not cover is drawn in the
+        <em>not assessed</em> grey rather than given a phase.
+        That is honest but sometimes sparse: Afghanistan's only period covering
+        August 2026 reaches 9 of its 401 districts, so the rest are blank; Yemen's
+        covers 118 of 333. Where no published period covers the issuance month at all,
+        the most recent window that ended is used instead, which for Pakistan means
+        Apr–Jul 2025. The dropdown and the chart title always name the exercise and
+        window in force, and the per-area tooltip is authoritative.
       </p>
       <p>
         <strong>Projections often cover fewer areas than the current period</strong>,
@@ -707,7 +715,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260807b"></script>
+  <script src="hnrp.js?v=20260807c"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
