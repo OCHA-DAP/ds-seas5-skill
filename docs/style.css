@@ -115,6 +115,10 @@ h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 .map-select:focus-visible { outline: 2px solid var(--hdx-primary-5); outline-offset: 2px; }
 .map-select:disabled { background-color: var(--hdx-neutral-05); color: var(--hdx-neutral-3); cursor: not-allowed; }
 .ctl { font-size: 0.9rem; display: inline-flex; align-items: center; }
+/* display:inline-flex above outranks the UA [hidden] rule, so every .ctl that is
+   toggled from JS needs this or it stays on screen while el.hidden is true —
+   the Plan year selector shipped visible in IPC mode for exactly this reason. */
+.ctl[hidden] { display: none; }
 .lock-note { font-size: 0.78rem; color: #888; font-style: italic; margin: 8px 0 0; }
 
 /* Map title overlay (CBPF standalone page) */
@@ -236,7 +240,6 @@ footer p { margin: 4px 0; }
 #hnrp-controls .row-tag { min-width: 60px; font-size: 0.72rem; font-weight: 600;
   color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 #hnrp-controls #hnrp-issued { margin: 0 0 0 auto; }
-#hnrp-sev-lvl-wrap[hidden] { display: none; }
 /* Chrome draws a focus ring (blue box) around a clicked SVG path / the map itself;
    selection feedback is the country outline + zoom, so the ring is just noise. */
 .leaflet-container path.leaflet-interactive:focus,
@@ -328,4 +331,3 @@ footer p { margin: 4px 0; }
 #hnrp-bars-legend i.tick { width: 2px; height: 14px; background: #1d2021; border: none; vertical-align: -3px; }
 #hnrp-bars-head { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
 #hnrp-bars-head h3 { margin-right: auto; }
-#hnrp-ipc-period-wrap[hidden] { display: none; }
