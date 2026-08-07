@@ -579,10 +579,17 @@
       },
     },
   ).addTo(map);
-  // Present only in the world view. Kept in sync by renderAll via syncCountryHit().
+  // Active only in the world view — but toggled with pointer-events, NEVER by
+  // adding and removing the layer. Adding or removing a layer next to an in-flight
+  // fitBounds wedges Leaflet's zoom animation and every later fit silently no-ops,
+  // which is the failure fitCountry() already carries a self-heal for. Deselecting
+  // by clicking the map fires the fit and this toggle in the same tick, so a
+  // layer-level toggle would sit exactly on that fault line. CSS does not.
   function syncCountryHit() {
-    if (countrySel.value) map.removeLayer(countryHit);
-    else if (!map.hasLayer(countryHit)) countryHit.addTo(map);
+    const on = !countrySel.value;
+    countryHit.eachLayer((l) => {
+      if (l._path) l._path.style.pointerEvents = on ? "" : "none";
+    });
   }
 
   map.fitBounds(layer.getBounds(), { animate: false });
