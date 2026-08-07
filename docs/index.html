@@ -273,8 +273,21 @@
         exists only as a national total. So 2026 shows a PiN column and an empty
         Targeted column, with a note above the chart saying so — pick 2025 to see
         targeting. The 2026 PiN is the real cycle, not a projection: where it and
-        the needs table both cover a unit-year they agree, and the 2026 subnational
-        sums reconcile to the published national PiN (Sudan, to the person).
+        the needs table both cover a unit-year they agree.
+        <strong>Subnational sums do not always reach the plan's headline.</strong>
+        Checked against HPC's own national figures, ten countries reconcile to
+        within a rounding error — Sudan, Afghanistan, Cameroon, DR Congo, Colombia,
+        Niger, Nigeria, Syria, Yemen and Honduras all at 1.00, Sudan to the person —
+        but five fall materially short: Mali 0.67, Mozambique 0.70, Chad 0.76, CAR
+        0.79 and Somalia 0.84 (South Sudan 0.94, Haiti 0.98). The workbook is a
+        subnational allocation over its own analysis scope, not the reconciled
+        headline, so the shortfall is the plan's, not an aggregation error here —
+        but it means a country total read off this chart can understate the
+        published PiN by up to a third.
+        Four countries with a released 2026 plan publish <em>no</em> 2026
+        subnational figures at all — Burkina Faso, Myanmar, Ukraine and Venezuela —
+        so at plan year 2026 they show nothing and their most recent
+        subnational cycle is 2025.
         A country can still be absent from a given caseload when its plan never
         publishes that sector subnationally — those figures then show dashes.
       </p>
@@ -367,6 +380,30 @@
         from <em>Now</em>. The dropdown states each choice's exercise (analysis) month and
         validity window — exactly, once a country is selected; as a cross-country range
         otherwise — and every tooltip names the analysis used for that area.
+        <strong>Read that window.</strong> For 17 of the 39 IPC countries no published
+        period covers the current issuance month at all, so <em>Now</em> falls back to
+        the most recent window that ended — sometimes long ago (Pakistan Apr–Jul 2025,
+        Gambia and Guinea-Bissau Jun–Aug 2025, Uganda Jun–Jul 2025). Coverage can also
+        be partial <em>within</em> a country: Yemen's Apr-2026 exercise reaches 118 of
+        its 333 units and Afghanistan's Oct-2025 one only 9 of 401, so the rest of
+        those countries sit on an older analysis and the map mixes vintages. The
+        per-area tooltip is authoritative.
+      </p>
+      <p>
+        <strong>Two upstream defects are corrected here.</strong> A combo can arrive
+        carrying an analysed population with <em>no</em> phase breakdown — every phase
+        zero. That is missing data, not "nobody is in crisis", but read literally it
+        classifies an area as phase 1. Sudan's Jan-2026 exercise does this for
+        Jun–Sep 2026 and Oct–Jan 2027: 135 of 189 units, 37 million people, which
+        would have rendered the world's largest food crisis as
+        <em>Minimal</em> in the default view. Such combos are now skipped, so Sudan
+        shows its Feb–May 2026 analysis — 19.3 million in phase 3+, against the 19.5
+        million IPC publishes. Separately, some combos have their phase rows counted
+        more than once against a single analysed-population row, landing at an exact
+        2.00× or 1.75× of it (45 DR Congo units, 21 South Sudan). Those are rescaled
+        back onto the analysed population, which reproduces the published totals:
+        South Sudan's Apr–Jul 2026 becomes 7.71 million where IPC publishes 7.8,
+        rather than the 9.15 million the raw rows sum to.
       </p>
 
       <h4>Reading the map</h4>
@@ -638,7 +675,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260805x"></script>
+  <script src="hnrp.js?v=20260807a"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
