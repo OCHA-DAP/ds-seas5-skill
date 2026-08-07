@@ -83,6 +83,24 @@ DATA SEMANTICS & AGGREGATION RULES (hard-won — read before editing a loader):
    baseline, i.e. a distribution problem, not an inflated total. Treat >100% as
    informative about the baseline, not as a bug to clamp away.
 
+11. ABSENT IS NOT ZERO, AND NOT "MINIMAL". An IPC projection covers FEWER areas than the
+   countrywide current period while its 'all' row stays at full country scope, so an
+   unassessed unit arrives with a population and no phase rows. Read literally that
+   classifies it phase 1 — in Aug 2026 the site painted most of Sudan, mid-famine, as
+   "Minimal" on exactly this. Anything consuming the sN/pN columns must test that the
+   distribution SUMS ABOVE ZERO before classifying, and treat zero as "not assessed".
+   The same trap is any `.get(k, 0)`, `fillna(0)` or `COALESCE(x, 0)` on a severity or
+   caseload column: it turns missing into reassuring. See the site's ipcComboOf(), the
+   KB's methods/absent-data.md, and NEVER verify this class of bug on national totals —
+   ours matched IPC to 1% while the map was wrong.
+
+12. IPC ROWS ARE DUPLICATED, AND drop_duplicates ON ALL COLUMNS DOES NOT CATCH IT. HAPI
+   ships some units twice per period; the copies round the same published figure
+   independently (SSD Rumbek North: 77,350 x 0.15 = 11,602.5 filed as both 11,603 and
+   11,602), so an all-column dedup keeps both and the pivot SUMS them. Their 'all' rows
+   round identically and do dedup, which is why phase sums land at a clean 2.00x their
+   analysed population — that ratio is the tell. Dedup on the KEY, never the value.
+
 Run:  uv run python pipeline/export_hnrp_drought.py [--level 2] [--rebuild-geometry]
 """
 
