@@ -721,7 +721,10 @@
       v === "skill_high" ? cat.endsWith("_high") || cat === "high_none"
       : v === "skill_mod" ? cat.endsWith("_mod") || cat === "mid_none"
       : cat === "low_skill"),
-    cls: (cat, cls, v) => cls != null && String(cls) === v,
+    // "na" is the unclassified bucket — the muted fill on the map. It sits in the
+    // cls dimension so it ORs with the numbered classes ("class 4 or not assessed")
+    // and still ANDs with forecast category and skill.
+    cls: (cat, cls, v) => (v === "na" ? cls == null : cls != null && String(cls) === v),
   };
   // OR within a dimension, AND across them: "strongly below" × "class 4" is the
   // intersection. A dimension with nothing selected constrains nothing.
@@ -843,8 +846,9 @@
     const root = document.getElementById("hnrp-legend");
     root.innerHTML = "";
     const wire = (el, dim, val) => {
-      // Purely explanatory swatches ("not assessed") carry no dimension: they key
-      // the map's muted fill rather than a value anything could be filtered on.
+      // A swatch with no dimension is decoration — nothing to hover, pin or dim by.
+      // Without this guard refreshLegendDim() reads pinned[undefined] and throws,
+      // taking the whole render with it.
       if (!dim) return;
       val = String(val);
       el.dataset.hlDim = dim; el.dataset.hlVal = val;
@@ -923,13 +927,16 @@
     // the area rule), so the class strip belongs to the lowest view outright.
     if (ADM === "low") {
       // Title and ramp both follow the source — renderAll() keeps them current.
-      // The muted fill needs saying out loud: on an IPC projection most of a country
-      // can be unclassified (Sudan blanks 140 of 189 units), and an unlabelled grey
-      // reads as "nothing here" rather than "not part of this analysis".
+      // The muted fill is a legend entry in its own right, and filterable like the
+      // rest: on an IPC projection most of a country can be unclassified (Sudan
+      // blanks 140 of 189 units), and "show me only what this cycle did NOT assess"
+      // is the question that follows. It lives in the cls dimension as "na", so it
+      // ORs with the numbered classes and ANDs with forecast category and skill.
       strip(sevLegendTitle(), [...[1, 2, 3, 4, 5].map((c) => ({
         fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
         border: c <= 2, dim: "cls", val: c,
-      })), { fill: HNRP_MUTED.fill, border: true, label: "not assessed" }],
+      })), { fill: HNRP_MUTED.fill, border: true, label: "not assessed",
+             dim: "cls", val: "na" }],
         44).querySelector(".lb-title").id = "hnrp-sev-strip-title";
     }
     // Pins outlive every other control change, so there is always one click

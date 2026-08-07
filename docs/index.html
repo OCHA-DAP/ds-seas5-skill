@@ -476,7 +476,12 @@
         <em>strongly below</em> × <em>moderate skill</em> × <em>class 4</em>). Pinned
         entries stay outlined in the legend; <em>Clear all filters</em>, or Escape,
         drops them all. Pinning also filters the bar chart outright: non-matching
-        areas leave it, and return when the pin is dropped. The same class appears in
+        areas leave it, and return when the pin is dropped.
+        <strong>Not assessed</strong> behaves as an entry of the severity strip like
+        any other, so "which areas did this cycle not classify?" is one hover — and
+        it ORs with the numbered classes, so <em>class 4 or not assessed</em> is a
+        single selection. On an IPC projection those areas carry no phase figures to
+        chart, so pinning it alone empties the bar chart while the map fills in. The same class appears in
         map tooltips and, written into its swatch, beside each bar-chart row — where
         the valid season's code sits beside the forecast swatch too.
         Selecting a country opens the per-area
@@ -733,7 +738,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260807g"></script>
+  <script src="hnrp.js?v=20260807h"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
