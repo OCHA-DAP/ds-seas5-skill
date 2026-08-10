@@ -805,10 +805,40 @@
       countrySel.dispatchEvent(new Event("change"));
     }
   });
+  // The pinned area is marked by tracing its OWN boundary, not by fading its
+  // neighbours: a country dimmed to pick out one district loses the comparison
+  // that made the map worth looking at. Drawn as its own layer above the mosaic
+  // rather than by restyling the unit's path, so it cannot be overdrawn by a
+  // neighbour's edge or by the inset forecast ring, and a white casing under the
+  // dark line keeps it legible over both the dark end of the ramp and the pale end.
+  let pinHalo = null, pinHaloFor = null;
+  function renderPinHalo() {
+    if (pinnedPcode === pinHaloFor) {
+      // Unchanged, but a source swap rebuilds the mosaic and re-fronts the
+      // country borders over everything added before it — including this.
+      if (pinHalo) pinHalo.eachLayer((l) => l.bringToFront());
+      return;
+    }
+    pinHaloFor = pinnedPcode;
+    if (pinHalo) { map.removeLayer(pinHalo); pinHalo = null; }
+    if (!pinnedPcode) return;
+    // Polygonal features only, the same filter the mosaic uses. Four DR Congo
+    // health zones ship with null geometry, and L.geoJSON turns a degenerate
+    // feature into a Leaflet MARKER — a pin dropped in the Gulf of Guinea.
+    const f = geo.features.find((x) => x.properties?.pcode === pinnedPcode);
+    if (!f || !/Polygon/.test(f.geometry?.type ?? "")) return;
+    const line = (color, weight) => L.geoJSON(f, {
+      interactive: false, style: { color, weight, opacity: 1, fill: false },
+    });
+    pinHalo = L.layerGroup([line("#fff", 5), line("#1d2021", 2.4)]).addTo(map);
+    // Above the country borders, which are themselves brought to the front over
+    // the admin mosaic — otherwise a shared edge draws over half the halo.
+    pinHalo.eachLayer((l) => l.bringToFront());
+  }
   function setPinnedUnit(pcode) {
     if (pinnedPcode === pcode) return;
     pinnedPcode = pcode;
-    renderMap();   // the pin dims every other unit of the country
+    renderPinHalo();
     renderSide();
   }
   function setHoverUnit(pcode) {
@@ -1159,6 +1189,11 @@
   const isFilteredOut = (cat, cls) => noMatch(cat, cls, (dim) => pinned[dim]);
   function renderMap() {
     renderOutline();
+    // A pin cannot survive a change of geometry: the admin-level and source
+    // swaps rebuild the payload on different units, and a pcode that is not in
+    // the new one would leave the sidebar describing something off the map.
+    if (pinnedPcode && !byPcode.has(pinnedPcode)) pinnedPcode = null;
+    renderPinHalo();
     renderTriLabels();
     const sel = countrySel.value;
     layer.eachLayer((l) => {
@@ -1209,19 +1244,9 @@
       // the neighbours keep their real severity colours so the selected country
       // is read in context, and they stay clickable, which is what makes one
       // country reachable from another in a single click.
-      // A third reason, once a unit is pinned to the sidebar: its siblings step
-      // back so the pinned one reads as the subject. Lighter than the legend dim,
-      // which means "filtered out" — these are still very much in view.
-      const unpinned = pinnedPcode && !offCountry && r.pcode !== pinnedPcode;
       const dim = isDimmed(cat, cls);
-      el.setAttribute("fill-opacity",
-        dim ? "0.12" : offCountry ? "0.3" : unpinned ? "0.45" : "1");
-      el.setAttribute("stroke-opacity",
-        dim ? "0.2" : offCountry ? "0.25" : unpinned ? "0.5" : "1");
-      if (r.pcode === pinnedPcode) {
-        el.setAttribute("stroke", "#1d2021");
-        el.setAttribute("stroke-width", "2");
-      }
+      el.setAttribute("fill-opacity", dim ? "0.12" : offCountry ? "0.3" : "1");
+      el.setAttribute("stroke-opacity", dim ? "0.2" : offCountry ? "0.25" : "1");
       // low_skill's STYLE colour is white — as a ring that reads as a hole;
       // no category ring at all is the honest encoding for "no usable skill".
       ringInfo.set(l.feature.properties.pcode,
