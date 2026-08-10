@@ -1488,13 +1488,29 @@ def main() -> None:
     issued_label = f"{calendar.month_name[issued_month]} {global_max_iy}"
     print(f"Latest issuance: {issued_label}")
 
-    # Rainy-season mask (same ERA5 climatology as other exports). At level 3 the
-    # climatology, like the skill, is the parent adm2's — queried on parents and
-    # mapped onto children.
-    pcodes = (sorted({parent2[p] for p in skill["pcode"].dropna() if p in parent2})
-              if LEVEL == 3 else sorted(set(skill["pcode"].dropna())))
+    # Rainy-season mask (same ERA5 climatology as other exports).
+    #
+    # Any unit that inherited its SKILL from a parent has to inherit its
+    # CLIMATOLOGY from the same parent — it has no zonal stats of its own, so
+    # public.era5 has no rows for it and it would come back with no rainy season
+    # at all. That is not a mild degradation: with no rainy trimester every
+    # season classifies as off_season, which paints the whole country grey and
+    # silently suppresses its alerts. Tanzania showed exactly that — 170 units,
+    # none rainy in any of the seven trimesters, including the OND short rains.
+    #
+    # This used to be gated on LEVEL == 3, which covered the adm3 countries and
+    # missed the adm2-from-shapefile ones (ADM2_SHP_ISO3S), whose units inherit
+    # by the same mechanism. Key off parent2 itself, which is populated in both
+    # cases, rather than off the level.
+    inherit = dict(parent2)
+    unit_pcodes = set(skill["pcode"].dropna())
+    own = {p for p in unit_pcodes if p not in inherit}
+    parents = {inherit[p] for p in unit_pcodes if p in inherit}
+    pcodes = sorted(own | parents)
     ph = ",".join(["%s"] * len(pcodes))
-    print(f"Querying ERA5 climatology for {len(pcodes)} pcodes...")
+    n_child = len(unit_pcodes & set(inherit))
+    via = f" ({len(parents)} as parents of {n_child} inheriting units)" if parents else ""
+    print(f"Querying ERA5 climatology for {len(pcodes)} pcodes{via}...")
     with engine.connect() as conn:
         era5 = pd.read_sql(
             f"SELECT pcode, valid_date, mean FROM public.era5 WHERE pcode IN ({ph})",
@@ -1506,11 +1522,13 @@ def main() -> None:
         .reset_index().rename(columns={"mean": "mean_mm_day"})
     )
     rainy_set = compute_rainy_set(monthly_clim)
-    if LEVEL == 3:
+    if inherit:
         by_par: dict[str, list] = {}
         for (p, t) in rainy_set:
             by_par.setdefault(p, []).append(t)
-        rainy_set = {(c, t) for c, p in parent2.items() for t in by_par.get(p, [])}
+        rainy_set |= {(c, t) for c, p in inherit.items() for t in by_par.get(p, [])}
+        n_inh = len({c for c, p in inherit.items() if by_par.get(p)})
+        print(f"  rainy season inherited from parents for {n_inh} unit(s)")
 
     # Per unit: the worst qualifying drought slot at the latest issuance.
     sub = skill[skill["issued_month"] == issued_month].copy()
