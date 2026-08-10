@@ -1394,8 +1394,10 @@
       ...(pinMode() ? [["targetedPct", "Targeted %"]] : []),
     ];
     // Five columns need to be narrower than four, or the bar they share the row
-    // with is squeezed to nothing on a laptop width.
-    const NUMW = NUM_COLS.length > 4 ? 62 : 72;
+    // with is squeezed to nothing on a laptop width — but not so narrow that a
+    // header's swatch crosses into the column to its left: the widest label with
+    // its sort arrow ("Targeted ↓") runs ~56px, plus 9 for the swatch.
+    const NUMW = NUM_COLS.length > 4 ? 68 : 72;
     const NGAP = 4, NUMS = NUM_COLS.length;
     const NUMBLOCK = NUMS * NUMW + (NUMS - 1) * NGAP;
     const numRight = (i) => W - M.r - NUMBLOCK + i * (NUMW + NGAP) + NUMW;
@@ -1457,7 +1459,7 @@
     // column beneath it and sorts by it (by the headcount, not the share — the
     // bars are shares, but "which area has the largest caseload" is the question
     // a click on a caseload header is asking).
-    function header(x, key, label, anchor = "start") {
+    function header(x, key, label, anchor = "start", swatch = null) {
       const t = g("text", { x, y: M.t - 10, "font-size": 11, "text-anchor": anchor,
                             fill: barSort === key ? "#1d2021" : "#555",
                             "font-weight": barSort === key ? 600 : 400 });
@@ -1471,17 +1473,54 @@
         else { barSort = key; barSortFlip = false; }
         renderBars();
       });
+      // A swatch, not coloured label text: reached is a pale pink that is fine
+      // as a 5px bar and illegible as 11px type, and darkening it for the label
+      // would stop it matching the bar it names — which is the whole point.
+      // Placed by MEASURED text width, so it tracks the sort arrow appearing.
+      if (swatch) {
+        // getComputedTextLength returns 0 while the tab is display:none, so keep
+        // an estimate to fall back on — a swatch a few pixels off beats none.
+        const w = t.getComputedTextLength?.() || t.textContent.length * 5.6;
+        g("rect", { x: anchor === "end" ? x - w - 9 : x, y: M.t - 16,
+                    width: 6, height: 6, rx: 1.5, fill: swatch });
+      }
       return t;
     }
+    // Which numeric columns name a bar, and in which colour.
+    const HEADER_SWATCH = { value: MON.pin, targeted: MON.tgt, reached: MON.rea };
     header(COL.cat, "forecast", "Forecast category");
     header(COL.sev, "severity", sevClassTitle());
     header(COL.name, "name", "Admin name");
     // The bar itself is not a sort target — the four numeric columns are, one
     // per quantity it draws (headcount and share, caseload and targeted).
-    g("text", { x: M.l, y: M.t - 10, "font-size": 11, fill: "#555" }).textContent =
-      pinMode() ? `PiN · targeted${showReached ? " · reached" : ""} (bars)`
-        : "IPC phases (bar)";
-    NUM_COLS.forEach(([key, label], i) => header(numRight(i), key, label, "end"));
+    const capt = g("text", { x: M.l, y: M.t - 10, "font-size": 11, fill: "#555" });
+    if (pinMode()) {
+      // Each word in its bar's colour, so the caption is its own key. The pale
+      // reached pink needs a darker cousin to be readable as type — it names the
+      // bar rather than reproducing it, which the swatches above already do.
+      const parts = [["PiN", MON.pin], ["targeted", MON.tgt],
+                     ...(showReached ? [["reached", "#c96b6b"]] : [])];
+      parts.forEach(([word, col], i) => {
+        if (i) {
+          const sep = document.createElementNS(NS, "tspan");
+          sep.setAttribute("fill", "#9db1b3");
+          sep.textContent = " · ";
+          capt.appendChild(sep);
+        }
+        const ts = document.createElementNS(NS, "tspan");
+        ts.setAttribute("fill", col);
+        ts.setAttribute("font-weight", "600");
+        ts.textContent = word;
+        capt.appendChild(ts);
+      });
+      const tail = document.createElementNS(NS, "tspan");
+      tail.textContent = " (bars)";
+      capt.appendChild(tail);
+    } else {
+      capt.textContent = "IPC phases (bar)";
+    }
+    NUM_COLS.forEach(([key, label], i) =>
+      header(numRight(i), key, label, "end", pinMode() ? HEADER_SWATCH[key] : null));
     g("line", { x1: 0, x2: W - M.r, y1: M.t - 4, y2: M.t - 4, stroke: "#e2e8e8" });
 
     barRows.length = 0;
