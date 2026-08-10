@@ -10,12 +10,21 @@
   // picker: switching would reload the page with that level's payload).
   const ADM_FILES = {
     low: ["data/hnrp_drought_low.json", "data/hnrp_low.geojson"],
+    // IPC's own units. The plan view and the IPC view disagree about what a unit
+    // IS — DR Congo's plan speaks in 519 zones de santé, its IPC analysis in 26
+    // provinces — so each source is drawn on its own geometry rather than one
+    // being prorated onto the other. Selected by the Severity source, not ?adm.
+    ipc: ["data/hnrp_drought_ipc.json", "data/hnrp_ipc.geojson"],
     1: ["data/hnrp_drought.json", "data/hnrp_adm1.geojson"],
     2: ["data/hnrp_drought_adm2.json", "data/hnrp_adm2.geojson"],
     3: ["data/hnrp_drought_adm3.json", "data/hnrp_adm3.geojson"],
   };
-  let ADM = new URLSearchParams(location.search).get("adm") ?? "low";
-  if (!(ADM in ADM_FILES)) ADM = "low";
+  const QS = new URLSearchParams(location.search);
+  let ADM = QS.get("adm") ?? "low";
+  if (!(ADM in ADM_FILES) || ADM === "ipc") ADM = "low";
+  // Which payload this page load needs. A fixed ?adm= level pins the geometry and
+  // keeps both sources on it; the default view follows the source.
+  let PAYLOAD = (ADM === "low" && QS.get("sev") === "ipc") ? "ipc" : ADM;
   const ADM_LABEL = { low: "lowest available level", 1: "admin 1", 2: "admin 2", 3: "admin 3" };
   let data, geo, world;
   try {
@@ -25,7 +34,7 @@
       .then((r) => (r.ok ? r.json() : Promise.reject(r)));
     world = await fj("data/countries.geojson");
     try {
-      [data, geo] = await Promise.all(ADM_FILES[ADM].map(fj));
+      [data, geo] = await Promise.all(ADM_FILES[PAYLOAD].map(fj));
     } catch {
       if (ADM !== "1") { // payload not built yet — fall back rather than a blank tab
         ADM = "1";
@@ -89,7 +98,8 @@
   // app.js already registered the pattern defs, duplicate ids resolve to the first.
   const fillFor = buildPatterns();
   const fillOf = (cat) => fillFor[cat];
-  const byPcode = new Map(data.rows.map((r) => [r.pcode, r]));
+  let byPcode = new Map(data.rows.map((r) => [r.pcode, r]));
+  const mapEl = document.getElementById("hnrp-map");
 
   // Plan cycle varies by country (e.g. Guatemala's latest is the 2025 HNRP) — surface
   // the year everywhere caseload figures appear.
@@ -106,34 +116,53 @@
   // a plan year that greys the whole map is worse than one that isn't offered.
   // (2024 is dropped on that rule: it costs 109 units their only cycle and 626
   // their only targeting, Venezuela's included.)
-  const sevYears = new Set(data.rows.flatMap((r) => Object.keys(r.sevc ?? {})));
-  const cycYears = [...new Set(data.rows.flatMap((r) => Object.keys(r.cyc ?? {})))]
-    .filter((y) => sevYears.has(y))
-    .map(Number).sort((a, b) => b - a);
-  for (const y of cycYears) {
-    const o = document.createElement("option");
-    o.value = String(y);
-    o.textContent = String(y);
-    planYrSel.appendChild(o);
+  let cycYears = [];
+  // Rebuilt on a source swap — the two payloads need not carry the same cycles.
+  function buildPlanYears() {
+    const keep = planYrSel.value;
+    const sevYears = new Set(data.rows.flatMap((r) => Object.keys(r.sevc ?? {})));
+    cycYears = [...new Set(data.rows.flatMap((r) => Object.keys(r.cyc ?? {})))]
+      .filter((y) => sevYears.has(y))
+      .map(Number).sort((a, b) => b - a);
+    planYrSel.innerHTML = "";
+    for (const y of cycYears) {
+      const o = document.createElement("option");
+      o.value = String(y);
+      o.textContent = String(y);
+      planYrSel.appendChild(o);
+    }
+    if ([...planYrSel.options].some((x) => x.value === keep)) planYrSel.value = keep;
   }
+  buildPlanYears();
   const planYr = () => planYrSel.value || String(cycYears[0] ?? "");
   const cycOf = (r) => (r.cyc ?? {})[planYr()] ?? null;
   // Cycles that publish a PiN but no targets anywhere — the 2026 HNRPs, whose
   // subnational figures come from the JIAF needs analysis (PiN by severity, no
   // targeting). Worth saying out loud rather than leaving a column of dashes.
-  const yearsWithTgt = new Set();
-  for (const r of data.rows) {
-    for (const [y, v] of Object.entries(r.cyc ?? {})) if (v[1] != null) yearsWithTgt.add(y);
+  let yearsWithTgt = new Set();
+  function buildYearsWithTgt() {
+    yearsWithTgt = new Set();
+    for (const r of data.rows) {
+      for (const [y, v] of Object.entries(r.cyc ?? {})) if (v[1] != null) yearsWithTgt.add(y);
+    }
   }
+  buildYearsWithTgt();
   issuedEl.textContent = `Forecast issued ${data.issued_label}.`;
 
-  const countries = [...new Set(data.rows.map((r) => r.country).filter(Boolean))].sort();
-  for (const c of countries) {
-    const o = document.createElement("option");
-    o.value = c;
-    o.textContent = c;
-    countrySel.appendChild(o);
+  // Rebuilt on a source swap: the two views do not cover the same countries.
+  function fillCountries() {
+    const keep = countrySel.value;
+    for (const o of [...countrySel.querySelectorAll("option")]) if (o.value) o.remove();
+    for (const c of [...new Set(data.rows.map((r) => r.country).filter(Boolean))].sort()) {
+      const o = document.createElement("option");
+      o.value = c;
+      o.textContent = c;
+      countrySel.appendChild(o);
+    }
+    // A country the other source does not carry falls back to the world view.
+    countrySel.value = [...countrySel.options].some((o) => o.value === keep) ? keep : "";
   }
+  fillCountries();
 
   const fmtN = (v) => (v == null ? "–" : Math.round(v).toLocaleString("en-US"));
   const fmt = (v, d) => (v == null ? "–" : Number(v).toFixed(d));
@@ -247,7 +276,7 @@
     return new Date(Date.UTC(y, m - 1)).toLocaleString("en", { month: "short", timeZone: "UTC" }) + " " + y;
   };
   const comboDesc = (c) => `${c.t}, exercise ${fmtYM(c.a)}, valid ${c.label}` +
-    (c.d ? ` — downscaled from admin-${c.d} by population share` : "");
+    (c.d ? ` — downscaled from admin-${c.d} by population share` : "");  // legacy flag: no longer produced
 
   const IPC_OPT_BASE = { now: "Now", fwd: "Forecast window" };
   // Every period the country publishes, newest exercise first, with how many of its
@@ -505,7 +534,7 @@
     interactive: false,
     style: { color: "#d9dedf", weight: 0.5, fillColor: "#f7f9f9", fillOpacity: 1 },
   }).addTo(map);
-  const layer = L.geoJSON(geo, {
+  const makeLayer = () => L.geoJSON(geo, {
     filter: (f) => /Polygon/.test(f.geometry.type),
     // Neutral initial style so nothing flashes Leaflet-blue before renderMap runs.
     style: () => ({ weight: 0.6, fillOpacity: 1, color: "#e2e8e8", fillColor: "#f5f7f7" }),
@@ -527,8 +556,11 @@
         // as backdrop, so the map handler returns to the global view.
       });
     },
-  }).addTo(map);
+  });
+  let layer = makeLayer().addTo(map);
   map.on("click", () => {
+    // Same click the country hit layer just handled — it selected, we must not undo.
+    if (Date.now() - hitClickAt < 100) return;
     if (!countrySel.value) return;
     countrySel.value = "";
     countrySel.dispatchEvent(new Event("change"));
@@ -544,6 +576,54 @@
     { interactive: false,
       style: { color: "#1d2021", weight: 1, opacity: 0.65, fill: false } },
   ).addTo(map);
+  // ── Whole-country hit layer (world view only) ────────────────────────────────
+  // With nothing selected the question the map answers is "which country?", so the
+  // hover target is the country, not the admin unit. Hovering the admin mosaic for
+  // that meant the tooltip closed and reopened on every boundary crossed — one
+  // Leaflet layer per unit, hundreds per country — which reads as flicker. This
+  // single transparent polygon per country sits above the mosaic and absorbs the
+  // pointer while the world view is up; selecting a country removes it, so the
+  // per-admin tooltips underneath work exactly as before.
+  let hitClickAt = 0;  // when the country hit layer last handled a click
+  const isoCountry = new Map(data.rows.map((r) => [r.iso3, r.country]).filter((x) => x[1]));
+  const countryHit = L.geoJSON(
+    { type: "FeatureCollection",
+      features: world.features.filter((f) => dataIsos.has(f.properties.iso3)) },
+    {
+      style: { stroke: false, fill: true, fillOpacity: 0, fillColor: "#000" },
+      onEachFeature: (f, l) => {
+        const c = isoCountry.get(f.properties.iso3);
+        if (!c) return;
+        l.bindTooltip(() => countryTip(c), { sticky: true });
+        l.on("click", (e) => {
+          // stopPropagation alone is not enough here. The map's own click handler
+          // clears the selection, and by the time it runs the selection we just
+          // made is already set — so it reads as "user clicked away" and undoes it,
+          // selecting and deselecting in one click. (This worked only while the
+          // layer was being REMOVED from the map mid-click, which killed
+          // propagation as a side effect.) Stamp the click and let the map handler
+          // skip it.
+          L.DomEvent.stopPropagation(e);
+          hitClickAt = Date.now();
+          countrySel.value = c;
+          countrySel.dispatchEvent(new Event("change"));
+        });
+      },
+    },
+  ).addTo(map);
+  // Active only in the world view — but toggled with pointer-events, NEVER by
+  // adding and removing the layer. Adding or removing a layer next to an in-flight
+  // fitBounds wedges Leaflet's zoom animation and every later fit silently no-ops,
+  // which used to wedge fitCountry()'s animated zoom. Deselecting
+  // by clicking the map fires the fit and this toggle in the same tick, so a
+  // layer-level toggle would sit exactly on that fault line. CSS does not.
+  function syncCountryHit() {
+    const on = !countrySel.value;
+    countryHit.eachLayer((l) => {
+      if (l._path) l._path.style.pointerEvents = on ? "" : "none";
+    });
+  }
+
   map.fitBounds(layer.getBounds(), { animate: false });
 
   // ── Inset forecast-category rings (lowest view) ──────────────────────────────
@@ -553,12 +633,13 @@
   // drawn on top, standing the category ring off the shared boundary.
   const RING_W = 2.8; // visible ring width, px (flush: neighbours touch)
   const SVGNS = "http://www.w3.org/2000/svg";
-  const ringCat = L.geoJSON(geo, {
+  const makeRing = () => L.geoJSON(geo, {
     filter: (f) => /Polygon/.test(f.geometry.type),
     interactive: false,
     style: () => ({ weight: 0, fill: false, opacity: 1 }),
-  }).addTo(map);
-  const clipPaths = {};
+  });
+  let ringCat = makeRing().addTo(map);
+  let clipPaths = {};
   function setClipped(l, pcode, stroke, w, dash) {
     const el = l._path;
     const svg = el && el.ownerSVGElement;
@@ -620,6 +701,24 @@
   }
   // Per-admin trimester codes, shown as permanent centered labels when a single
   // country is selected (readable at that zoom; the world view relies on hover).
+  // A layer whose geometry is missing or degenerate yields empty bounds, and
+  // Leaflet reports their centre as (0,0) — Null Island, in the Gulf of Guinea
+  // south of Ghana. Anything built from those bounds lands there: a trimester
+  // label stranded in the Atlantic, and — worse — a fitBounds stretched from the
+  // country to the origin, which looks exactly like "the map didn't zoom".
+  // Four DR Congo health zones ship with null geometry today, so this is live,
+  // not hypothetical. Both consumers of getBounds() screen for it.
+  const usableBounds = (l) => {
+    if (typeof l.getBounds !== "function") return null;
+    let b;
+    try { b = l.getBounds(); } catch { return null; }
+    if (!b || !b.isValid()) return null;
+    const c = b.getCenter();
+    if (!Number.isFinite(c.lat) || !Number.isFinite(c.lng)) return null;
+    // An exact (0,0) centre from a zero-area shape is the signature, not a place.
+    if (c.lat === 0 && c.lng === 0 && b.getNorth() === b.getSouth()) return null;
+    return b;
+  };
   const triLabels = L.layerGroup().addTo(map);
   function renderTriLabels() {
     triLabels.clearLayers();
@@ -641,8 +740,10 @@
       // Markers, not standalone tooltips: DivOverlay tooltips mis-anchor after
       // interrupted/fractional zoom animations (labels drifting west, wedged
       // zooms); markers track the view exactly.
+      const lb = usableBounds(l);
+      if (!lb) return;
       const dimmed = isDimmed(catOf(r), ADM === "low" ? sevClassOf(r) : null);
-      triLabels.addLayer(L.marker(l.getBounds().getCenter(), {
+      triLabels.addLayer(L.marker(lb.getCenter(), {
         interactive: false, keyboard: false, opacity: dimmed ? 0.15 : 1,
         icon: L.divIcon({
           className: "tri-map-label-wrap", iconSize: null,
@@ -1407,38 +1508,57 @@
     }
   }
 
+  let fitToken = 0;  // a newer fit always supersedes an older one's backstop
   function fitCountry(animate = true) {
     const c = countrySel.value;
     let bounds = null;
     layer.eachLayer((l) => {
       const r = byPcode.get(l.feature.properties.pcode);
       if (c && (!r || r.country !== c)) return;
-      bounds = bounds ? bounds.extend(l.getBounds()) : L.latLngBounds(l.getBounds());
+      const lb = usableBounds(l);
+      if (!lb) return;  // never let a degenerate shape drag the fit to (0,0)
+      // COPY, never alias. L.latLngBounds(x) returns x itself when x is already a
+      // LatLngBounds, and Polygon.getBounds() hands back the layer's CACHED _bounds
+      // — so seeding the accumulator with it made every extend() permanently
+      // enlarge that layer's own bounds. One fit over the world view was enough to
+      // stretch the first layer it touched to the whole map, for good.
+      // That layer is Afghanistan's first unit, because AFG sorts first in the
+      // payload, which is why only Afghanistan failed and only after another
+      // country had been shown: the world fit in between did the damage. The same
+      // corrupted bounds put its trimester label at the world centre — in the
+      // Atlantic just south of Ghana.
+      bounds = bounds ? bounds.extend(lb)
+        : L.latLngBounds(lb.getSouthWest(), lb.getNorthEast());
     });
-    // map.stop() first: an animated fit interrupted mid-flight wedges Leaflet's
-    // zoom animation and every later fit silently no-ops (observed: Afghanistan
-    // "not zooming"). Stopping any in-flight animation before starting the next
-    // keeps the smooth zoom safe — and because the wedge keeps finding new ways
-    // to happen, self-heal: if the view hasn't arrived once the animation should
-    // have finished, force the fit without animation.
     if (!bounds) return;
+    const PAD = { padding: [10, 10] };
     map.stop();
-    map.fitBounds(bounds, { padding: [10, 10], animate });
-    if (animate) {
-      // The world view CONTAINS every country's centre, so a containment check
-      // can't detect a wedged animation (observed: Benin never zooming while
-      // the check passed). Compare against the target zoom instead.
-      const want = bounds;
-      const tz = map.getBoundsZoom(want, false, L.point(10, 10));
-      setTimeout(() => {
-        if (countrySel.value !== c) return; // selection moved on — don't fight it
-        if (Math.abs(map.getZoom() - tz) > 0.5
-            || !map.getBounds().contains(want.getCenter())) {
-          map.stop();
-          map.fitBounds(want, { padding: [10, 10], animate: false });
-        }
-      }, 700);
+    // A hidden tab gets no requestAnimationFrame, and every animated view change
+    // in Leaflet — flyTo and the CSS zoom animation alike — is driven by it. Asking
+    // for a glide there leaves the map exactly where it started until the tab is
+    // looked at again. Fit instantly instead; there is nobody watching the motion.
+    if (!animate || document.visibilityState !== "visible") {
+      // animate:false explicitly — the default still animates, and an animation is
+      // exactly what cannot finish here.
+      map.fitBounds(bounds, { ...PAD, animate: false });
+      return;
     }
+    // flyToBounds rather than fitBounds({animate:true}): with zoomSnap 0.25 the map
+    // runs on fractional zoom, and flyTo drives the view from rAF rather than the
+    // CSS zoom animation, which is the more reliable of the two paths here.
+    map.flyToBounds(bounds, { ...PAD, duration: 0.35, easeLinearity: 0.4 });
+    // Land it anyway if the glide is interrupted — a newer selection always wins.
+    const tz = map.getBoundsZoom(bounds, false, L.point(10, 10));
+    fitToken += 1;
+    const token = fitToken;
+    setTimeout(() => {
+      if (token !== fitToken || countrySel.value !== c) return;
+      if (Math.abs(map.getZoom() - tz) > 0.5
+          || !map.getBounds().contains(bounds.getCenter())) {
+        map.stop();
+        map.fitBounds(bounds, { ...PAD, animate: false });
+      }
+    }, 600);
   }
   // Valid-season selector options: auto + each valid trimester at this issuance.
   for (const t of data.trimesters ?? []) {
@@ -1458,11 +1578,57 @@
     const sevStripTitle = document.getElementById("hnrp-sev-strip-title");
     if (sevStripTitle) sevStripTitle.textContent = sevLegendTitle();
     refreshLegendDim();
+    syncCountryHit();
     renderMap(); renderBars();
   }
-  for (const el of [skillSel, rpSel, srcTypeSel, srcLvlSel, triSel, ipcPeriodSel, planYrSel]) {
+  for (const el of [skillSel, rpSel, srcLvlSel, triSel, ipcPeriodSel, planYrSel]) {
     el.addEventListener("change", renderAll);
   }
+  // Changing the source changes the GEOMETRY, not just the colours: the plan view
+  // and the IPC view are drawn on different units. Reload with the other payload —
+  // the same plain navigation the ?adm= switch uses, rather than tearing down and
+  // rebuilding three Leaflet layers in place. Every control is already in the URL,
+  // so the only thing the user loses is the map's pan/zoom.
+  // Switching source swaps the SUBNATIONAL geometry — the plan and IPC views are
+  // drawn on different units — but everything at country level is the same in both:
+  // the world backdrop, the country borders, the hit layer, and the map's own view.
+  // So swap the two payload-derived layers in place and leave the rest standing,
+  // rather than reloading the page and rebuilding the world from scratch.
+  let swapping = false;
+  srcTypeSel.addEventListener("change", async () => {
+    const want = (ADM === "low" && srcTypeSel.value === "ipc") ? "ipc" : ADM;
+    if (want === PAYLOAD || swapping) { renderAll(); return; }
+    swapping = true;
+    mapEl.classList.add("swapping");
+    try {
+      const [nd, ng] = await Promise.all(ADM_FILES[want].map(
+        (f) => fetch(f, { cache: "no-cache" }).then((r) => (r.ok ? r.json() : Promise.reject(r)))));
+      data = nd; geo = ng; PAYLOAD = want;
+      byPcode = new Map(data.rows.map((r) => [r.pcode, r]));
+      // Rebuild only what the payload draws. Clip defs are keyed by pcode and the
+      // old paths are about to be discarded, so drop them with their owner.
+      map.removeLayer(layer); map.removeLayer(ringCat);
+      document.querySelectorAll("defs.hnrp-clips").forEach((d) => d.remove());
+      clipPaths = {};
+      layer = makeLayer().addTo(map);
+      ringCat = makeRing().addTo(map);
+      bordersLayer.bringToFront();   // borders stay above the new mosaic
+      fillCountries();
+      buildPlanYears();
+      buildYearsWithTgt();
+      renderAll();
+      // The view is already where the user left it; only re-fit if a country is
+      // selected, because its units just changed shape.
+      if (countrySel.value) fitCountry(false);
+      history.replaceState(null, "", stateURL());
+    } catch {
+      location.href = stateURL();  // fetch failed — fall back to a clean reload
+      return;
+    } finally {
+      swapping = false;
+      mapEl.classList.remove("swapping");
+    }
+  });
   // finally: whatever happens during re-render, the zoom step must still run.
   countrySel.addEventListener("change", () => {
     try { renderAll(); } finally { fitCountry(); }
@@ -1472,7 +1638,7 @@
   window.tabShown = window.tabShown || {};
   window.tabShown.hnrp = () => {
     map.invalidateSize();
-    fitCountry(false); // instant on reveal — the panel just appeared, nothing to glide from
+    fitCountry(false); // instant on reveal — nothing to glide from
     renderAll(); // paths may mount after the panel becomes visible — restyle then
   };
   // Escape drops every pinned legend entry — the keyboard route out of a
