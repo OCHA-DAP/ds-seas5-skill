@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <!-- versioned: the HNRP legend's box strip and clear button need this
        stylesheet and hnrp.js to arrive as a pair, never one from cache -->
-  <link rel="stylesheet" href="style.css?v=20260810a" />
+  <link rel="stylesheet" href="style.css?v=20260810b" />
 </head>
 <body>
   <p class="dev-banner" role="note">
@@ -530,8 +530,13 @@
         country?", so hovering targets the <strong>whole country</strong> — one
         tooltip naming its plan years and what it carries, rather than a per-unit
         readout that closed and reopened on every admin boundary crossed. Click to
-        zoom in; from there hovering gives the full per-area readout, and clicking
-        away returns to the world view.
+        zoom in; from there hovering gives the full per-area readout.
+        Neighbouring countries stay on the map while one is selected, <strong>faded
+        rather than blanked</strong> — they keep their real severity colours, so the
+        selected country is read in its regional context instead of against an empty
+        surface, and <strong>clicking one switches straight to it</strong> without a
+        round trip through the world view. Clicking open sea returns to the world
+        view, as does picking <em>All countries</em> in the selector.
         Hovering a legend entry highlights matching units
         and dims the rest; <strong>clicking</strong> one pins it, so several can be
         combined — entries within a strip are OR-ed, strips AND together (e.g.
@@ -550,12 +555,17 @@
         bars: in PiN mode one bar per unit, carrying that unit's severity colour; in
         IPC mode the phase distribution from the selected <strong>Level</strong> up,
         stacked (phases 1–2 dwarf the rest in populous areas and drown the signal, so
-        the bars never start below 3). Where response monitoring covers the cycle, a
-        <strong>Reached</strong> column joins the numbers and a slim bar along the
-        foot of each row draws it — its own bar rather than a second tick, because
-        reach routinely runs past the targeted mark. The dark tick on each bar is the targeted
-        population, on the same scale. Four figure columns follow — the caseload and
-        the targeted population, each as a <strong>headcount</strong> and as a
+        the bars never start below 3). In plan mode each row draws
+        <strong>three bars on one scale</strong> — PiN, targeted and reached, in the
+        same colours as the ring chart on the map — so the three are read against
+        each other directly. They are three measurements of the same area, not a
+        threshold on one another: reach regularly runs past the target, which is why
+        none of them is a tick. A bar is absent where nothing was reported and drawn
+        as a hairline at the origin where a real zero was published. Severity has not
+        left the chart; it is the numbered swatch in the gutter, which states the
+        class rather than asking anyone to read it off a five-step ramp.
+        Figure columns follow — the caseload, the targeted population and (where
+        reported) reach, with the caseload and target each also as a
         <strong>share of the area's population</strong> — and each column header
         sorts by what it shows, so the same chart answers "where are the most people"
         and "where is the largest share of an area affected". The population base is
@@ -804,7 +814,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260810i"></script>
+  <script src="hnrp.js?v=20260810j"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
