@@ -257,13 +257,17 @@ footer p { margin: 4px 0; }
    padding, so a button centred on the bounding box would be half outside the
    viewport. Grey until hovered — it is an exit, not the main action. */
 .hnrp-close-wrap { background: none; border: none; }
-.hnrp-close { display: inline-block; transform: translate(-110%, 10%);
-  width: 20px; height: 20px; line-height: 18px; text-align: center;
-  border-radius: 50%; background: #fff; border: 1px solid #c4d0d1;
-  color: #6b7a7b; font-size: 15px; font-weight: 700; cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); }
-.hnrp-close:hover, .hnrp-close:focus { color: #1d2021; border-color: #6b7a7b;
-  background: #f5f7f7; outline: none; }
+/* Flex-centred, so the drawn cross sits dead centre at any size — line-height
+   centring left it high, since it centres a text line box and not the ink. */
+.hnrp-close { display: inline-flex; align-items: center; justify-content: center;
+  transform: translate(-110%, 10%);
+  width: 26px; height: 26px;
+  border-radius: 50%; background: #fff; border: 1.5px solid #6b7a7b;
+  color: #3d4a4b; cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
+.hnrp-close svg { display: block; }
+.hnrp-close:hover, .hnrp-close:focus { color: #1d2021; border-color: #1d2021;
+  background: #eef1f1; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.32); outline: none; }
 .tri-map-label { display: inline-block; transform: translate(-50%, -50%);
   white-space: nowrap; font-size: 10px; font-weight: 700; color: #1d2021;
   text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }

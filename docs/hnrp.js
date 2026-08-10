@@ -827,8 +827,15 @@
       keyboard: true, title: "Back to the world view",
       icon: L.divIcon({
         className: "hnrp-close-wrap", iconSize: null,
+        // The cross is DRAWN, not typeset. A × glyph sits on the font's math
+        // axis, which is above the optical centre of a circle, so it always
+        // rides high however the box is centred; two SVG strokes are centred by
+        // construction and scale with the button.
         html: `<span class="hnrp-close" role="button" tabindex="0"` +
-              ` aria-label="Back to the world view">×</span>`,
+              ` aria-label="Back to the world view">` +
+              `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">` +
+              `<path d="M6 6 L18 18 M18 6 L6 18" fill="none" stroke="currentColor"` +
+              ` stroke-width="3" stroke-linecap="round"/></svg></span>`,
       }),
     });
     m.on("click", (e) => {
