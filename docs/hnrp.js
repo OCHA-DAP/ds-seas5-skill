@@ -144,6 +144,9 @@
     yearsWithTgt = new Set();
     for (const r of data.rows) {
       for (const [y, v] of Object.entries(r.cyc ?? {})) if (v[1] != null) yearsWithTgt.add(y);
+      // Response monitoring carries targets for the cycle the needs analysis
+      // publishes without them — 2026's subnational targeting exists only there.
+      if (r.mon_yr && r.mon?.[1] != null) yearsWithTgt.add(r.mon_yr);
     }
   }
   buildYearsWithTgt();
@@ -170,7 +173,15 @@
   // PiN/targeted are always the plan's INTERSECTORAL figures, for the selected
   // plan year (per-sector series remain in r.sec should a sector view return).
   const pinOf = (r) => cycOf(r)?.[0] ?? null;
-  const tgtOf = (r) => cycOf(r)?.[1] ?? null;
+  // Targeted: the needs analysis first, then response monitoring for the cycle
+  // it covers. Not a blend of two measures — they are the same one, verified:
+  // the monitoring table's national target sums reproduce hpc.plans exactly
+  // (AFG 17.48M, SDN 20.42M, YEM 12.00M). It matters because HAPI publishes no
+  // subnational 2026 target at all, so without this the current plan year shows
+  // a column of dashes. tgtSrcOf names which side answered, for the tooltip.
+  const tgtOf = (r) => cycOf(r)?.[1] ?? monLive(r)?.[1] ?? null;
+  const tgtSrcOf = (r) => (cycOf(r)?.[1] != null ? "needs analysis"
+    : monLive(r)?.[1] != null ? "response monitoring" : null);
   const secTag = () => "";
 
   // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
@@ -436,6 +447,14 @@
   // Style for HNRP units with nothing to display (no forecast for the selected
   // season): distinct from both the world background and the classified categories.
   const HNRP_MUTED = { fill: "#e9eeee", edge: "#c4d0d1" };
+  // Ignoring the country filter. Only the map uses this, and only for the faded
+  // neighbours: scope decides what we REPORT (tooltips, the chart), but a unit
+  // drawn as context should still wear its own colours, and catOf would hand it
+  // the same grey as "no forecast for this season".
+  function catAnyOf(r) {
+    const s = r && slotOfAny(r);
+    return s ? classify({ pct: s.pct, r: s.r, rainy: s.rainy }, false) : null;
+  }
   function catOf(r) {
     const s = r && slotOf(r);
     return s ? classify({ pct: s.pct, r: s.r, rainy: s.rainy }, false) : null;
@@ -474,6 +493,88 @@
     }
     return countryTipCache.get(key);
   }
+  // ── Response monitoring (targeted / reached) ────────────────────────────────
+  // Colours are the GHO monitoring dashboard's own, so our figures are
+  // recognisable next to it: the first two are lifted from the published report
+  // definition, the third is the tint it draws reach bars in.
+  const MON = {
+    pin: "#009dda",       // People in need
+    tgt: "#d15353",       // People targeted
+    rea: "#f0a3a3",       // People reached
+    track: "#eef1f1",
+  };
+  // [PiN, targeted, prioritized target, reached, prioritized reached] for the
+  // monitored cycle. Any slot can be null — the source reports unevenly, and a
+  // null here means "not reported", never zero.
+  const monOf = (r) => (pinMode() ? (r.mon ?? null) : null);
+  // Monitoring is only published for the cycle the dashboard is tracking, so it
+  // has no business on screen when an earlier plan year is selected.
+  const monLive = (r) => (monOf(r) && r.mon_yr === planYr() ? r.mon : null);
+  const monMonth = (r) => (data.mon_months ?? {})[r.iso3] ?? null;
+  // Concentric arcs, not wedges. The full circle is PiN — that is the "total" —
+  // and targeted and reached are drawn as arcs of it on inner bands. A pie of
+  // three sectors would have to assume reach ⊆ target ⊆ PiN, and it is not:
+  // units report more people reached than they targeted (Kabul: 224,446 against
+  // 665,764 targeted, and elsewhere reach exceeds target outright). An arc that
+  // can run past its neighbour states that honestly; a wedge cannot.
+  const R = 26, TAU = 2 * Math.PI;
+  function arcPath(cx, cy, rad, frac) {
+    // A non-finite share draws nothing rather than a path full of NaN, which
+    // SVG renders as an invisible element and no error.
+    const f = Number.isFinite(frac) ? Math.max(0, Math.min(1, frac)) : 0;
+    if (f >= 0.999) {  // a full circle as one arc collapses to a point
+      return `M ${cx} ${cy - rad} A ${rad} ${rad} 0 1 1 ${cx - 0.01} ${cy - rad}`;
+    }
+    const a = -Math.PI / 2 + f * TAU;
+    return `M ${cx} ${cy - rad} A ${rad} ${rad} 0 ${f > 0.5 ? 1 : 0} 1 ` +
+      `${cx + rad * Math.cos(a)} ${cy + rad * Math.sin(a)}`;
+  }
+  function monPie(r) {
+    const m = monLive(r);
+    if (!m) return "";
+    const [pin, tgt, , rea] = m;
+    if (pin == null && tgt == null && rea == null) return "";
+    // Without a PiN there is no denominator, but there can still be a response:
+    // Venezuela reports 582k reached and no needs figure at all. Print the
+    // counts and drop the rings rather than dropping the unit — the whole point
+    // of this panel is that unreported and zero are different.
+    const base = pin || null;
+    const frac = (v) => (base == null || v == null ? null : v / base);
+    const band = [[frac(pin), MON.pin, R], [frac(tgt), MON.tgt, R - 8],
+                  [frac(rea), MON.rea, R - 16]];
+    const arcs = band.map(([frac, col, rad]) =>
+      `<path d="${arcPath(R + 3, R + 3, rad, 1)}" fill="none" stroke="${MON.track}"` +
+      ` stroke-width="6"/>` +
+      (frac == null ? ""
+        : `<path d="${arcPath(R + 3, R + 3, rad, frac)}" fill="none" stroke="${col}"` +
+          ` stroke-width="6" stroke-linecap="butt"/>` +
+          // Past a full turn the arc has nowhere left to go, and a closed ring
+          // would read as exactly 100%. 45 units report reach above their own
+          // PiN; hatch those so the ring says "over", and let the figure beside
+          // it carry the real share.
+          (frac > 1.001
+            ? `<path d="${arcPath(R + 3, R + 3, rad, 1)}" fill="none" stroke="#1d2021"` +
+              ` stroke-width="6" stroke-dasharray="2 4" opacity="0.45"/>` : "")
+      )).join("");
+    // The PiN line is the denominator — "100% of PiN" beside it says nothing.
+    const line = (label, v, col, showPct = true) => {
+      const f = showPct ? frac(v) : null;
+      return `<div><span style="display:inline-block;width:8px;height:8px;` +
+        `border-radius:50%;background:${col}"></span> ${label}: ` +
+        (v == null ? `<span style="color:#9db1b3">not reported</span>`
+          : `${fmtN(v)}${f == null ? "" : ` · ${Math.round(100 * f)}% of PiN`}`) + `</div>`;
+    };
+    const month = monMonth(r);
+    return `<div style="display:flex;gap:10px;align-items:center;margin-top:4px">` +
+      (base == null ? ""
+        : `<svg width="${2 * R + 6}" height="${2 * R + 6}" style="flex:none">${arcs}</svg>`) +
+      `<div style="font-size:11px;line-height:1.5">` +
+      line("PiN", pin, MON.pin, false) + line("Targeted", tgt, MON.tgt) +
+      line("Reached", rea, MON.rea) +
+      `<div style="color:#9db1b3">HNRP ${r.mon_yr} response` +
+      `${month ? ` · as of ${month}` : ""}</div></div></div>`;
+  }
+
   const tipHtml = (f) => {
     const p = f.properties, r = byPcode.get(p.pcode);
     const sel = countrySel.value;
@@ -486,13 +587,17 @@
     // removes, so binding once per layer and never touching it again is the only
     // way to keep those listeners from piling up.)
     if (r && r.country !== sel) {
-      return countryTip(r.country, "Click to return to the world view");
+      return countryTip(r.country, "Click to switch to this country");
     }
-    // No row at all = a polygon the payload doesn't cover; nothing to say but
-    // its name. (Areas that ARE in the payload but outside the plan's
-    // admin-level analysis still get the full readout — their forecast is real,
-    // and the "Not in an HNRP" line below is what qualifies it.)
-    if (!r) return `<div class="name">${p.name ?? p.pcode}</div>`;
+    // No row at all = a polygon the payload doesn't cover. Name it, and where we
+    // can tell which country it belongs to, say the click will go there — a
+    // tooltip that only names the shape reads as a dead area.
+    if (!r) {
+      const c = isoCountry.get(p.iso3);
+      return `<div class="name">${p.name ?? p.pcode}</div>` +
+        (c && c !== sel ? `<div class="cat" style="color:#9db1b3">${c} — click to` +
+          ` switch to this country</div>` : "");
+    }
     const cat = catOf(r);
     const s = slotOf(r);
     let rows = "";
@@ -504,8 +609,13 @@
       rows += `<div>${sevLabel()}: ${fmtN(sevValOf(r))}${c ? ` (${comboDesc(c)})` : ""}</div>`;
     }
     // Targeted and the plan-year stamp come from the HNRP cycle — not shown in IPC mode.
-    if (pinMode() && tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
+    // Where response monitoring covers the selected cycle the pie below carries
+    // targeted, so printing it twice would just be noise.
+    if (pinMode() && tgtOf(r) != null && !monLive(r)) {
+      rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
+    }
     if (pinMode() && cycOf(r)) rows += `<div>HNRP ${planYr()}</div>`;
+    rows += monPie(r);
     if (pinMode() && r.sevc && !r.sevc[planYr()]) {
       rows += `<div style="color:#9db1b3">not classified in the ${planYr()} cycle</div>`;
     }
@@ -540,20 +650,25 @@
     style: () => ({ weight: 0.6, fillOpacity: 1, color: "#e2e8e8", fillColor: "#f5f7f7" }),
     onEachFeature: (f, l) => {
       l.bindTooltip(() => tipHtml(f), { sticky: true });
-      // Click-to-focus: clicking a unit selects its country; once one is selected,
-      // clicking anywhere outside it (another country, open sea) returns to the
-      // global view — the map click handler below, unless this stops the event.
+      // Click-to-focus. Clicking any unit that has data selects ITS country,
+      // whether or not one is already selected — so neighbours are one click
+      // apart instead of a round trip out to the world view and back in.
+      // Only a click with no country behind it (open sea, a polygon the payload
+      // does not cover) falls through to the map handler and deselects.
       l.on("click", (e) => {
-        const c = byPcode.get(f.properties.pcode)?.country;
-        if (!countrySel.value && c) {
-          L.DomEvent.stopPropagation(e);
-          countrySel.value = c;
-          countrySel.dispatchEvent(new Event("change"));
-        } else if (c && c === countrySel.value) {
-          L.DomEvent.stopPropagation(e); // clicks inside the focus country keep it
-        }
-        // Focused + clicked another (whited-out) country: fall through — it reads
-        // as backdrop, so the map handler returns to the global view.
+        // Resolve through the ROW first, then fall back to the polygon's own
+        // iso3. A unit can have no row — the payload and the geometry are built
+        // to the same country scope now, but a pcode that fails to reconcile
+        // still leaves a shape with nothing behind it, and a click landing on
+        // one of those used to do nothing at all (Tanzania: 138 of 170
+        // polygons, so four fifths of the country was inert).
+        const c = byPcode.get(f.properties.pcode)?.country
+          ?? isoCountry.get(f.properties.iso3);
+        if (!c) return;
+        L.DomEvent.stopPropagation(e);
+        if (c === countrySel.value) return;  // clicks inside the focus country keep it
+        countrySel.value = c;
+        countrySel.dispatchEvent(new Event("change"));
       });
     },
   });
@@ -685,11 +800,13 @@
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
   // so tiny misalignments at the edge are cosmetic only).
   let outlineLayer = null, outlineFor = null;
+  const closeBtn = L.layerGroup().addTo(map);
   function renderOutline() {
     const c = countrySel.value;
     if (c === outlineFor) return; // no layer churn unless the selection changed —
     outlineFor = c;               // add/remove mid-zoom-animation can wedge Leaflet
     if (outlineLayer) { map.removeLayer(outlineLayer); outlineLayer = null; }
+    closeBtn.clearLayers();
     if (!c) return;
     const iso3 = data.rows.find((r) => r.country === c)?.iso3;
     const f = world.features.find((f) => f.properties.iso3 === iso3);
@@ -698,6 +815,43 @@
       interactive: false,
       style: { color: "#1d2021", weight: 2.6, fill: false },
     }).addTo(map);
+    // A dismiss button pinned to the country's top-right corner. Leaving a
+    // country used to mean clicking open sea or reaching for the selector —
+    // neither of which announces itself, and clicking another country now
+    // switches to it rather than zooming out, so there was no visible way back.
+    // Anchored to the outline's bounds, so it sits with the country rather than
+    // floating in a corner of the viewport where it would read as a map control.
+    const b = usableBounds(outlineLayer);
+    if (!b) return;
+    const m = L.marker([b.getNorth(), b.getEast()], {
+      keyboard: true, title: "Back to the world view",
+      icon: L.divIcon({
+        className: "hnrp-close-wrap", iconSize: null,
+        // The cross is DRAWN, not typeset. A × glyph sits on the font's math
+        // axis, which is above the optical centre of a circle, so it always
+        // rides high however the box is centred; two SVG strokes are centred by
+        // construction and scale with the button.
+        html: `<span class="hnrp-close" role="button" tabindex="0"` +
+              ` aria-label="Back to the world view">` +
+              `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">` +
+              `<path d="M6 6 L18 18 M18 6 L6 18" fill="none" stroke="currentColor"` +
+              ` stroke-width="3" stroke-linecap="round"/></svg></span>`,
+      }),
+    });
+    m.on("click", (e) => {
+      L.DomEvent.stopPropagation(e);
+      countrySel.value = "";
+      countrySel.dispatchEvent(new Event("change"));
+    });
+    // Keyboard: Leaflet gives the marker focus but no key handling of its own.
+    m.on("keypress", (e) => {
+      if (e.originalEvent.key === "Enter" || e.originalEvent.key === " ") {
+        L.DomEvent.stop(e.originalEvent);
+        countrySel.value = "";
+        countrySel.dispatchEvent(new Event("change"));
+      }
+    });
+    closeBtn.addLayer(m);
   }
   // Per-admin trimester codes, shown as permanent centered labels when a single
   // country is selected (readable at that zoom; the world view relies on hover).
@@ -855,23 +1009,22 @@
       // "no qualifying drought signal" would be a lie about units that are merely
       // filtered out of view.
       const offCountry = sel && (!r || r.country !== sel);
-      if (offCountry || !r) {
-        // Out of scope: blend into the world backdrop —
-        // and clear any ring left from a previous render, or other countries'
-        // category outlines linger when one country is selected.
+      if (!r) {
+        // No row at all: true backdrop, and clear any ring left from a previous
+        // render or other countries' category outlines linger.
         el.setAttribute("fill", "#f7f9f9");
         el.setAttribute("stroke", "#d9dedf");
         el.setAttribute("stroke-width", 0.5);
         el.removeAttribute("stroke-dasharray");
-        // Backdrop units are never dimmed — but this branch used to leave the
-        // opacity a legend highlight had set, so units that dropped out of scope
-        // while an entry was hovered stayed ghosted long after it was released.
+        // These are never dimmed — but this branch used to leave the opacity a
+        // legend highlight had set, so units that dropped out of scope while an
+        // entry was hovered stayed ghosted long after it was released.
         el.setAttribute("fill-opacity", "1");
         el.setAttribute("stroke-opacity", "1");
         ringInfo.set(l.feature.properties.pcode, null);
         return;
       }
-      const cat = catOf(r);
+      const cat = offCountry ? catAnyOf(r) : catOf(r);
       const cls = ADM === "low" ? sevClassOf(r) : null;
       let fill;
       if (ADM === "low") {
@@ -890,16 +1043,21 @@
         el.setAttribute("stroke-width", 0.6);
         el.setAttribute("stroke-dasharray", "");
       }
-      // Legend hover: dim everything that doesn't match the hovered forecast
-      // category or severity class (same interaction as the main Map tab).
+      // Two reasons to fade a unit, and they compose. Legend hover dims what does
+      // not match the hovered category or class (as on the main Map tab). Country
+      // focus fades everything outside the selected country — faded, not blanked:
+      // the neighbours keep their real severity colours so the selected country
+      // is read in context, and they stay clickable, which is what makes one
+      // country reachable from another in a single click.
       const dim = isDimmed(cat, cls);
-      el.setAttribute("fill-opacity", dim ? "0.12" : "1");
-      el.setAttribute("stroke-opacity", dim ? "0.2" : "1");
+      el.setAttribute("fill-opacity", dim ? "0.12" : offCountry ? "0.3" : "1");
+      el.setAttribute("stroke-opacity", dim ? "0.2" : offCountry ? "0.25" : "1");
       // low_skill's STYLE colour is white — as a ring that reads as a hole;
       // no category ring at all is the honest encoding for "no usable skill".
       ringInfo.set(l.feature.properties.pcode,
-        ADM === "low" && cat && cat !== "low_skill" && !offCountry
-          ? { cat, fill, dim, dash: cat.endsWith("_mod") ? "4 7" : null } : null);
+        ADM === "low" && cat && cat !== "low_skill"
+          ? { cat, fill, dim: dim || offCountry,
+              dash: cat.endsWith("_mod") ? "4 7" : null } : null);
     });
     renderRings();
   }
@@ -1092,8 +1250,12 @@
   const IPC_LABELS = ["1 — minimal", "2 — stressed", "3 — crisis", "4 — emergency", "5 — catastrophe"];
   const sevClassLabels = () => (ipcMode() ? IPC_LABELS : JIAF_LABELS);
   // Class breakdown for the bars — IPC mode only: the selected period's phases.
-  // A PiN bar is one figure for the unit, coloured by the unit's own class.
-  const PIN_COLOR = "#9db1b3"; // classless units (plans publishing no PbS)
+  // People reached, from response monitoring, for the selected cycle only.
+  const reaOf = (r) => monLive(r)?.[3] ?? null;
+  // Does this country report reach at all for the cycle on screen? The column
+  // is only worth its width where something fills it, and an all-dash column
+  // reads as broken rather than as unreported.
+  const anyReached = (rows) => rows.some((r) => reaOf(r) != null);
   const segsOf = (r) => (pinMode() ? null : (ipcComboOf(r)?.p ?? null));
   const barsWrap = document.getElementById("hnrp-bars-wrap");
   const barsHint = document.getElementById("hnrp-bars-hint");
@@ -1147,15 +1309,17 @@
     : f > 1 ? ">100%"
     : `${(100 * f).toFixed(f >= 0.1 ? 0 : 1)}%`);
 
-  function renderBarsLegend() {
-    // PiN mode needs no ramp key: the class number is written in its swatch, and
-    // the bar wears the same colour. IPC mode keeps it — the bar there is a
-    // stack of phases, and only a key says which segment is which.
+  function renderBarsLegend(anyReachedNow = false) {
+    // PiN mode keys the three bars. It needs no severity ramp: the class number
+    // is written in its own swatch in the gutter. IPC mode keys the ramp instead
+    // — the bar there is a stack of phases, and only a key says which is which.
     barsLegend.innerHTML =
-      (pinMode() ? `<span><i style="background:${PIN_COLOR}"></i> no severity published</span>`
+      (pinMode()
+        ? `<span><i style="background:${MON.pin}"></i> PiN</span>` +
+          `<span><i style="background:${MON.tgt}"></i> targeted</span>` +
+          (anyReachedNow ? `<span><i style="background:${MON.rea}"></i> reached</span>` : "")
         : sevColors().map((c, i) => (i < barC0() ? ""
             : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("")) +
-      (pinMode() ? `<span><i class="tick"></i> targeted</span>` : "") +
       `<span>% columns are of the area's population — hover any figure for the` +
       ` count, the share and the population base used</span>`;
   }
@@ -1185,24 +1349,34 @@
     name: [(a, b) => String(a.name ?? a.pcode).localeCompare(String(b.name ?? b.pcode)), true],
     value: [numCmp((r) => sevValOf(r)), false],
     targeted: [numCmp((r) => tgtOf(r)), false],
+    reached: [numCmp((r) => reaOf(r)), false],
     valuePct: [numCmp((r) => shareOfPop(r, sevValOf(r))), false],
     targetedPct: [numCmp((r) => shareOfPop(r, tgtOf(r))), false],
   };
   let barSort = "value", barSortFlip = false;
 
   function renderBars() {
-    renderBarsLegend();
     const country = countrySel.value;
     // Switching to IPC drops the targeted columns; a sort left pointing at one
     // would order the chart by a quantity no longer on screen.
     if (!pinMode() && barSort.startsWith("targeted")) { barSort = "value"; barSortFlip = false; }
-    const [cmp, isText] = BAR_SORTS[barSort] ?? BAR_SORTS.value;
+    let [cmp, isText] = BAR_SORTS[barSort] ?? BAR_SORTS.value;
     const rows = country
       ? data.rows.filter((r) => r.country === country
             && (pinMode() ? sevValOf(r) != null : sevTotOf(r) > 0 && segsOf(r))
             && !isFilteredOut(catOf(r), clsOf(r)))
           .sort(barSortFlip ? (a, b) => cmp(b, a) : cmp)
       : [];
+    // Reached is only a column where the country reports it for this cycle, so
+    // a sort left on it after a country or plan-year change has nothing to
+    // order by — fall back rather than silently keeping the previous order.
+    if (barSort === "reached" && !(pinMode() && anyReached(rows))) {
+      barSort = "value";
+      barSortFlip = false;
+      [cmp, isText] = BAR_SORTS.value;
+      rows.sort(cmp);
+    }
+    renderBarsLegend(pinMode() && anyReached(rows));
     barsWrap.hidden = rows.length === 0;
     barsHint.hidden = rows.length > 0;
     // "Pick a country" is the wrong prompt when a country IS picked and the
@@ -1226,12 +1400,25 @@
         (c ? ` (${comboDesc(c)})` : "");
     }
     // A cycle can publish needs without targets — say so once, above the chart,
-    // rather than leaving a column of dashes to be read as missing data.
+    // rather than leaving a column of dashes to be read as missing data. Where
+    // the targets come from response monitoring rather than the needs analysis,
+    // say THAT instead: the figures are the same measure but a different source
+    // and a different vintage, and a reader comparing to HAPI should know.
+    const monTgtRows = rows.filter((r) => tgtSrcOf(r) === "response monitoring");
     noTgtEl.hidden = ipcMode() || yearsWithTgt.has(planYr());
     noTgtEl.textContent = `No targeted figures published for the HNRP ${planYr()} cycle yet` +
       ` — its subnational figures come from the needs analysis, which carries PiN only.` +
       (cycYears.some((y) => yearsWithTgt.has(String(y)))
         ? ` Pick an earlier plan year to see targeting.` : "");
+    if (noTgtEl.hidden && monTgtRows.length) {
+      const months = [...new Set(rows.map(monMonth).filter(Boolean))];
+      noTgtEl.hidden = false;
+      noTgtEl.textContent =
+        `Targeting and reach for ${planYr()} come from OCHA's response monitoring` +
+        ` (the needs analysis publishes no subnational target for this cycle)` +
+        `${months.length ? `, as last reported in ${months.join(", ")}` : ""}.` +
+        ` Reach is what partners attributed to an area — country totals are higher.`;
+    }
 
     const W = barsSvg.parentElement.clientWidth || 900;
     // Left gutter holds three labelled columns: forecast swatch, severity
@@ -1248,13 +1435,20 @@
     // takes whatever is left. TARGETED IS PLAN DATA: it comes from the HNRP cycle
     // for the selected plan year, so it has no business on an IPC chart, where
     // the plan year is not even a visible control. IPC mode shows two columns.
+    const showReached = pinMode() && anyReached(rows);
     const NUM_COLS = [
       ["value", pinMode() ? "PiN" : sevLabel()],
       ...(pinMode() ? [["targeted", "Targeted"]] : []),
+      ...(showReached ? [["reached", "Reached"]] : []),
       ["valuePct", `${pinMode() ? "PiN" : sevLabel()} %`],
       ...(pinMode() ? [["targetedPct", "Targeted %"]] : []),
     ];
-    const NUMW = 72, NGAP = 4, NUMS = NUM_COLS.length;
+    // Five columns need to be narrower than four, or the bar they share the row
+    // with is squeezed to nothing on a laptop width — but not so narrow that a
+    // header's swatch crosses into the column to its left: the widest label with
+    // its sort arrow ("Targeted ↓") runs ~56px, plus 9 for the swatch.
+    const NUMW = NUM_COLS.length > 4 ? 68 : 72;
+    const NGAP = 4, NUMS = NUM_COLS.length;
     const NUMBLOCK = NUMS * NUMW + (NUMS - 1) * NGAP;
     const numRight = (i) => W - M.r - NUMBLOCK + i * (NUMW + NGAP) + NUMW;
     const barRight = Math.max(M.l + 80, W - M.r - NUMBLOCK - 18);
@@ -1291,8 +1485,11 @@
     // column's job.
     const shownSum = (r) => (pinMode() ? (sevValOf(r) ?? 0)
       : (segsOf(r) ?? []).slice(barC0()).reduce((a, b) => a + (b ?? 0), 0));
+    // Reached counts toward the scale: it is not bounded by PiN or by targeted
+    // (partners report against their own caseloads), and leaving it out let a
+    // reach bar run off the end of the plot area.
     const xmax = Math.max(...rows.map((r) => Math.max(shownSum(r),
-      pinMode() ? (tgtOf(r) ?? 0) : 0)), 1) * 1.04;
+      pinMode() ? (tgtOf(r) ?? 0) : 0, pinMode() ? (reaOf(r) ?? 0) : 0)), 1) * 1.04;
     const X = (v) => M.l + (v / xmax) * (barRight - M.l);
 
     // x grid: 4 round ticks.
@@ -1312,7 +1509,7 @@
     // column beneath it and sorts by it (by the headcount, not the share — the
     // bars are shares, but "which area has the largest caseload" is the question
     // a click on a caseload header is asking).
-    function header(x, key, label, anchor = "start") {
+    function header(x, key, label, anchor = "start", swatch = null) {
       const t = g("text", { x, y: M.t - 10, "font-size": 11, "text-anchor": anchor,
                             fill: barSort === key ? "#1d2021" : "#555",
                             "font-weight": barSort === key ? 600 : 400 });
@@ -1326,16 +1523,54 @@
         else { barSort = key; barSortFlip = false; }
         renderBars();
       });
+      // A swatch, not coloured label text: reached is a pale pink that is fine
+      // as a 5px bar and illegible as 11px type, and darkening it for the label
+      // would stop it matching the bar it names — which is the whole point.
+      // Placed by MEASURED text width, so it tracks the sort arrow appearing.
+      if (swatch) {
+        // getComputedTextLength returns 0 while the tab is display:none, so keep
+        // an estimate to fall back on — a swatch a few pixels off beats none.
+        const w = t.getComputedTextLength?.() || t.textContent.length * 5.6;
+        g("rect", { x: anchor === "end" ? x - w - 9 : x, y: M.t - 16,
+                    width: 6, height: 6, rx: 1.5, fill: swatch });
+      }
       return t;
     }
+    // Which numeric columns name a bar, and in which colour.
+    const HEADER_SWATCH = { value: MON.pin, targeted: MON.tgt, reached: MON.rea };
     header(COL.cat, "forecast", "Forecast category");
     header(COL.sev, "severity", sevClassTitle());
     header(COL.name, "name", "Admin name");
     // The bar itself is not a sort target — the four numeric columns are, one
     // per quantity it draws (headcount and share, caseload and targeted).
-    g("text", { x: M.l, y: M.t - 10, "font-size": 11, fill: "#555" }).textContent =
-      pinMode() ? "PiN (bar) · targeted (tick)" : "IPC phases (bar)";
-    NUM_COLS.forEach(([key, label], i) => header(numRight(i), key, label, "end"));
+    const capt = g("text", { x: M.l, y: M.t - 10, "font-size": 11, fill: "#555" });
+    if (pinMode()) {
+      // Each word in its bar's colour, so the caption is its own key. The pale
+      // reached pink needs a darker cousin to be readable as type — it names the
+      // bar rather than reproducing it, which the swatches above already do.
+      const parts = [["PiN", MON.pin], ["targeted", MON.tgt],
+                     ...(showReached ? [["reached", "#c96b6b"]] : [])];
+      parts.forEach(([word, col], i) => {
+        if (i) {
+          const sep = document.createElementNS(NS, "tspan");
+          sep.setAttribute("fill", "#9db1b3");
+          sep.textContent = " · ";
+          capt.appendChild(sep);
+        }
+        const ts = document.createElementNS(NS, "tspan");
+        ts.setAttribute("fill", col);
+        ts.setAttribute("font-weight", "600");
+        ts.textContent = word;
+        capt.appendChild(ts);
+      });
+      const tail = document.createElementNS(NS, "tspan");
+      tail.textContent = " (bars)";
+      capt.appendChild(tail);
+    } else {
+      capt.textContent = "IPC phases (bar)";
+    }
+    NUM_COLS.forEach(([key, label], i) =>
+      header(numRight(i), key, label, "end", pinMode() ? HEADER_SWATCH[key] : null));
     g("line", { x1: 0, x2: W - M.r, y1: M.t - 4, y2: M.t - 4, stroke: "#e2e8e8" });
 
     barRows.length = 0;
@@ -1430,16 +1665,35 @@
         return f > 1 ? `${exact} — caseload exceeds every population figure we hold`
           : exact;
       };
-      const val = sevValOf(r), tgt = tgtOf(r);
+      const val = sevValOf(r), tgt = tgtOf(r), rea = reaOf(r);
       if (pinMode()) {
-        if (val > 0) {
-          titled(gr("rect", { x: X(0), y: y + 4, width: Math.max(X(val) - X(0), 0.5),
-                              height: ROW - 9,
-                              fill: cls ? sevColors()[cls - 1] : PIN_COLOR,
-                              stroke: "#9db1b3", "stroke-width": 0.6 }),
-            `${r.name ?? r.pcode} — PiN${secTag()}: ${fmtN(val)} · ${pctTxt(val)}` +
-            (cls ? ` · ${sevClassDesc(r)}` : " · no severity published for this area"));
-        }
+        // Three bars, one per quantity, in the monitoring palette — not one bar
+        // plus a tick plus a foot. PiN, targeted and reached are three
+        // measurements of the same area and comparing them is the whole point;
+        // a tick could only mark a threshold on someone else's bar, and it could
+        // not sit past the end of one, which reach regularly does.
+        // Severity has not left the chart — it is the numbered swatch in the
+        // gutter, which states the class rather than asking anyone to read it
+        // off a five-step ramp.
+        const BH = 5, BGAP = 1;           // 3*5 + 2*1 = the old bar's 17px
+        const series = [
+          ["PiN" + secTag(), val, MON.pin,
+           cls ? sevClassDesc(r) : "no severity published for this area"],
+          ["targeted", tgt, MON.tgt, tgtSrcOf(r)],
+          ["reached", rea, MON.rea,
+           `HNRP ${r.mon_yr} response${monMonth(r) ? `, as of ${monMonth(r)}` : ""}` +
+           (tgt ? ` · ${Math.round((100 * (rea ?? 0)) / tgt)}% of targeted` : "")],
+        ];
+        series.forEach(([label, v, col, note], i) => {
+          // A null draws nothing (not reported); a published zero still draws its
+          // hairline at the origin, so the two are never the same mark.
+          if (v == null) return;
+          titled(gr("rect", { x: X(0), y: y + 4 + i * (BH + BGAP),
+                              width: Math.max(X(v) - X(0), 0.5), height: BH,
+                              fill: col }),
+            `${r.name ?? r.pcode} — ${label}: ${fmtN(v)} · ${pctTxt(v)}` +
+            (note ? ` · ${note}` : ""));
+        });
       } else {
         const segs = segsOf(r) ?? [];
         let acc = 0;
@@ -1453,18 +1707,20 @@
           acc += v;
         }
       }
-      if (pinMode() && tgt != null) {
-        titled(gr("line", { x1: X(tgt), x2: X(tgt), y1: y + 1, y2: y + ROW - 3,
-                            stroke: "#1d2021", "stroke-width": 2 }),
-          `${r.name ?? r.pcode} — targeted: ${fmtN(tgt)} · ${pctTxt(tgt)}`);
-      }
       // ── The same quantities as figures, one sortable column each ─────────
       // Keyed off NUM_COLS so the cells stay aligned with the headers when IPC
       // mode drops the two targeted columns — an index-based list silently
       // shifted the shares under the wrong heading.
       const CELL = {
         value: [val, fmtSI(val), pctTxt(val)],
-        targeted: [tgt, tgt == null ? "–" : fmtSI(tgt), pctTxt(tgt)],
+        targeted: [tgt, tgt == null ? "–" : fmtSI(tgt),
+                   tgt == null ? "no target published for this area"
+                     : `${pctTxt(tgt)} · ${tgtSrcOf(r)}`],
+        // A dash here is "this area reported no response", which is not the same
+        // claim as zero people reached — the hover says so in words.
+        reached: [rea, rea == null ? "–" : fmtSI(rea),
+                  rea == null ? "no response reported for this area"
+                    : `${pctTxt(rea)}${tgt ? ` · ${Math.round((100 * rea) / tgt)}% of targeted` : ""}`],
         valuePct: [share(val), fmtPct(share(val)), pctTxt(val)],
         targetedPct: [share(tgt), tgt == null ? "–" : fmtPct(share(tgt)), pctTxt(tgt)],
       };

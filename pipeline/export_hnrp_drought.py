@@ -910,6 +910,93 @@ def load_pbs_adm1() -> pd.DataFrame:
     return out
 
 
+def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
+    """Response monitoring per ADM1 unit: targeted, prioritized target, reached.
+
+    From hpc.monitoring_admin (ds-hnrp-mirror), which mirrors the GHO monitoring
+    dashboard's semantic model — the ONLY public source for subnational reach.
+    HAPI's 2026 rows stop at admin-0 and the HPC API publishes no measurements,
+    which is why the tab could show needs but never delivery.
+
+    Intersectoral rows only (`cluster_name = 'HNRP'`), newest snapshot per plan.
+    Also returns {iso3: month} — countries report on their own cadence
+    (Afghanistan March, DRC May, Chad June), so a reach figure is only readable
+    next to the month it was last reported, and the site prints it.
+    """
+    engine = stratus.get_engine("dev")
+    # Coarser rows can't be split down to our level, the same rule the PiN
+    # loader applies; rows deeper than LEVEL roll up on their admin1_code.
+    q = f"""
+    SELECT m.iso3, m.pcode, m.admin1_code, m.admin_level, m.year,
+           m.in_need, m.targeted, m.prioritized_target,
+           m.reached, m.prioritized_reached
+    FROM hpc.monitoring_admin m
+    JOIN (SELECT plan_id, max(snapshot_date) AS d
+          FROM hpc.monitoring_admin GROUP BY plan_id) l
+      ON l.plan_id = m.plan_id AND l.d = m.snapshot_date
+    WHERE m.cluster_name = 'HNRP' AND m.iso3 IS NOT NULL
+      AND m.admin_level >= {LEVEL}
+    """
+    # strpos, not `NOT LIKE '%;%'`: pandas hands the SQL to the driver as a
+    # format string, so a bare % is read as a parameter placeholder and the
+    # query dies with a TypeError before it reaches Postgres. Regional plans
+    # carry a semicolon-joined iso3 list and have no single country.
+    qp = """
+    SELECT p.iso3, mp.latest_update, mp.year
+    FROM hpc.monitoring_periods mp
+    JOIN hpc.plans p USING (plan_id)
+    WHERE mp.snapshot_date = (SELECT max(snapshot_date) FROM hpc.monitoring_periods)
+      AND mp.latest_update IS NOT NULL AND strpos(p.iso3, ';') = 0
+    """
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql(q, conn)
+            per = pd.read_sql(qp, conn)
+    except Exception as exc:
+        # The tab predates the monitoring mirror, so a missing table must not be
+        # fatal — but print the real error, never just its class. A silent skip
+        # is how "no reach reported" and "the query is broken" become the same
+        # thing on screen.
+        print(f"  monitoring: SKIPPED — {exc.__class__.__name__}: {exc}\n"
+              f"  targeted/reached will be absent (not zero) for every unit")
+        return pd.DataFrame(columns=["pcode", "iso3"]), {}
+    if df.empty:
+        return df, {}
+    # Rows below our level roll up onto their admin-1 parent, as PiN does.
+    deep = df["admin_level"] > LEVEL
+    df.loc[deep, "pcode"] = df.loc[deep, "admin1_code"]
+    df = (df.groupby(["iso3", "pcode", "year"], as_index=False)
+          .agg({c: lambda s: s.sum(min_count=1)
+                for c in ("in_need", "targeted", "prioritized_target",
+                          "reached", "prioritized_reached")}))
+    # One cycle only (the dashboard publishes the current plan year), so the
+    # year travels as a scalar rather than a per-year dict like cyc/sevc.
+    # The source files a literal 0 where a country reported nothing, so absence
+    # and "we targeted nobody" arrive identical. Distinguish them at the only
+    # level where it is decidable: a measure whose country-wide total is zero was
+    # never reported (Syria targets nothing anywhere; Cameroon and Somalia
+    # prioritize nothing anywhere) — null the whole country's column. A zero
+    # inside a country that reports elsewhere is a real published zero and stays.
+    for col in ("targeted", "prioritized_target", "reached", "prioritized_reached",
+                "in_need"):
+        tot = df.groupby("iso3")[col].transform(lambda s: s.fillna(0).sum())
+        unreported = tot == 0
+        if unreported.any():
+            isos = sorted(df.loc[unreported, "iso3"].unique())
+            print(f"  monitoring: {col} not reported by {', '.join(isos)} "
+                  f"(country-wide zero) — kept absent, not 0")
+            df.loc[unreported, col] = float("nan")
+    df = df.rename(columns={"in_need": "monPin", "targeted": "monTgt",
+                            "prioritized_target": "monPrio", "reached": "monRea",
+                            "prioritized_reached": "monPrioRea",
+                            "year": "mon_year"})
+    months = dict(zip(per["iso3"], per["latest_update"]))
+    n_rea = int((df["monRea"].fillna(0) > 0).sum())
+    print(f"Monitoring: {df['iso3'].nunique()} countries, {len(df)} units, "
+          f"{n_rea} with reach reported ({df['mon_year'].max()} cycle)")
+    return df, months
+
+
 def load_population_adm1() -> pd.DataFrame:
     """Total population per ADM1 unit from pop.population_admin
     (ds-population-mirror: HDX HAPI baseline population, UNFPA COD-PS derived).
@@ -1118,6 +1205,23 @@ def combine_ipc_view() -> None:
     # Ties go to the finer level (more resolution for the same coverage).
     level_of = {iso: max(counts, key=lambda lv: (counts[lv], lv))
                 for iso, counts in per_level.items()}
+    # A country with NO IPC analysis at all still belongs on this map. Seven of
+    # them — Burkina Faso, Colombia, El Salvador, Myanmar, Syria, Ukraine,
+    # Venezuela — vanished from IPC mode entirely, taking their forecast with
+    # them, because level_of only knew about countries carrying IPC rows. Fall
+    # back to the level the plan view uses for them (deepest with any rows), so
+    # the forecast is on screen in both modes and only the severity fill changes.
+    plan_level: dict[str, int] = {}
+    for lvl in (1, 2, 3):
+        for r in data[lvl]["rows"]:
+            plan_level[r["iso3"]] = max(plan_level.get(r["iso3"], 1), lvl)
+    no_ipc = sorted(set(plan_level) - set(level_of))
+    for iso in no_ipc:
+        level_of[iso] = plan_level[iso]
+    if no_ipc:
+        print(f"IPC view: {len(no_ipc)} country/ies carry no IPC analysis and are "
+              f"drawn on their plan units for the forecast alone "
+              f"({', '.join(no_ipc)})")
     rows = [dict(r, lvl=lvl) for lvl in (1, 2, 3) for r in data[lvl]["rows"]
             if level_of.get(r["iso3"]) == lvl]
     feats = [f for lvl in (1, 2, 3) for f in geo[lvl]["features"]
@@ -1281,6 +1385,17 @@ def main() -> None:
     df_hno = normalize_pcodes(load_hno_pop_adm1(sub_parent), poly, "hno-pop")
     df_hno = (df_hno.groupby("pcode", as_index=False)
               .agg({"hno_pop": "sum", "hno_year": "max"}))
+    df_mon_raw, mon_months = load_monitoring_adm1()
+    if len(df_mon_raw):
+        df_mon = normalize_pcodes(df_mon_raw, poly, "monitoring")
+        _mon_cols = ["monPin", "monTgt", "monPrio", "monRea", "monPrioRea"]
+        # min_count=1 throughout: a country that reports no reach must stay None,
+        # never 0 — "nobody reached" and "nobody reported" are different claims.
+        _mon_sum = lambda s: s.sum(min_count=1)  # noqa: E731
+        df_mon = (df_mon.groupby("pcode", as_index=False)
+                  .agg({**{c: _mon_sum for c in _mon_cols}, "mon_year": "max"}))
+    else:
+        df_mon = pd.DataFrame(columns=["pcode"])
     ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
     ipc_lists = _ipc_lists(df_ipc)
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
@@ -1316,6 +1431,22 @@ def main() -> None:
         )
         print(f"Scope: +{len(extra)} IPC-covered ADM1 units outside HNRP plans "
               f"({len(set(ipc_iso3[p] for p in extra))} countries)")
+    # Then EVERY unit of every country already in scope, whether or not it carries
+    # humanitarian figures. The forecast is the point of the tab and it exists for
+    # all of them; the geometry ships all of them too (export_geometry works per
+    # country, not per unit). Without this the two disagree — Tanzania drew 170
+    # polygons over 32 rows, so 81% of the country was a shape with nothing behind
+    # it: no forecast, no tooltip, and no click, since the map resolves a click
+    # through the row. These rows carry a forecast and nothing else, which the
+    # site already has a state for ("Not in an HNRP", no severity published).
+    scope_isos = set(df_hum["iso3"].dropna())
+    fill = poly[poly["iso3"].isin(scope_isos) & ~poly["pcode"].isin(set(df_hum["pcode"]))]
+    if len(fill):
+        df_hum = pd.concat(
+            [df_hum, fill[["pcode", "iso3"]].copy()], ignore_index=True)
+        print(f"Scope: +{len(fill)} forecast-only unit(s) completing "
+              f"{fill['iso3'].nunique()} in-scope countries "
+              f"({', '.join(fill['iso3'].value_counts().head(6).index)}…)")
     if LEVEL == 2 and parent2:
         # Same inheritance as adm3-from-adm2: these adm2 units have no zonal stats
         # of their own, so each carries its parent ADM1's skill rows verbatim. The
@@ -1357,13 +1488,29 @@ def main() -> None:
     issued_label = f"{calendar.month_name[issued_month]} {global_max_iy}"
     print(f"Latest issuance: {issued_label}")
 
-    # Rainy-season mask (same ERA5 climatology as other exports). At level 3 the
-    # climatology, like the skill, is the parent adm2's — queried on parents and
-    # mapped onto children.
-    pcodes = (sorted({parent2[p] for p in skill["pcode"].dropna() if p in parent2})
-              if LEVEL == 3 else sorted(set(skill["pcode"].dropna())))
+    # Rainy-season mask (same ERA5 climatology as other exports).
+    #
+    # Any unit that inherited its SKILL from a parent has to inherit its
+    # CLIMATOLOGY from the same parent — it has no zonal stats of its own, so
+    # public.era5 has no rows for it and it would come back with no rainy season
+    # at all. That is not a mild degradation: with no rainy trimester every
+    # season classifies as off_season, which paints the whole country grey and
+    # silently suppresses its alerts. Tanzania showed exactly that — 170 units,
+    # none rainy in any of the seven trimesters, including the OND short rains.
+    #
+    # This used to be gated on LEVEL == 3, which covered the adm3 countries and
+    # missed the adm2-from-shapefile ones (ADM2_SHP_ISO3S), whose units inherit
+    # by the same mechanism. Key off parent2 itself, which is populated in both
+    # cases, rather than off the level.
+    inherit = dict(parent2)
+    unit_pcodes = set(skill["pcode"].dropna())
+    own = {p for p in unit_pcodes if p not in inherit}
+    parents = {inherit[p] for p in unit_pcodes if p in inherit}
+    pcodes = sorted(own | parents)
     ph = ",".join(["%s"] * len(pcodes))
-    print(f"Querying ERA5 climatology for {len(pcodes)} pcodes...")
+    n_child = len(unit_pcodes & set(inherit))
+    via = f" ({len(parents)} as parents of {n_child} inheriting units)" if parents else ""
+    print(f"Querying ERA5 climatology for {len(pcodes)} pcodes{via}...")
     with engine.connect() as conn:
         era5 = pd.read_sql(
             f"SELECT pcode, valid_date, mean FROM public.era5 WHERE pcode IN ({ph})",
@@ -1375,11 +1522,13 @@ def main() -> None:
         .reset_index().rename(columns={"mean": "mean_mm_day"})
     )
     rainy_set = compute_rainy_set(monthly_clim)
-    if LEVEL == 3:
+    if inherit:
         by_par: dict[str, list] = {}
         for (p, t) in rainy_set:
             by_par.setdefault(p, []).append(t)
-        rainy_set = {(c, t) for c, p in parent2.items() for t in by_par.get(p, [])}
+        rainy_set |= {(c, t) for c, p in inherit.items() for t in by_par.get(p, [])}
+        n_inh = len({c for c, p in inherit.items() if by_par.get(p)})
+        print(f"  rainy season inherited from parents for {n_inh} unit(s)")
 
     # Per unit: the worst qualifying drought slot at the latest issuance.
     sub = skill[skill["issued_month"] == issued_month].copy()
@@ -1451,6 +1600,7 @@ def main() -> None:
     df_fc = pd.DataFrame(records)
     merged = df_hum.merge(df_fc, on="pcode", how="left")
     merged = merged.merge(df_pop, on="pcode", how="left")
+    merged = merged.merge(df_mon, on="pcode", how="left")
     # Distrust the baseline where it can't be right. An analysed base slightly
     # above the total is expected (analyses use current population estimates,
     # the COD-PS baseline can be an old census — PAK 2017, MDG 2018), so allow
@@ -1511,7 +1661,11 @@ def main() -> None:
               f"({len(gone)} countries: {', '.join(gone[:14])}{'…' if len(gone) > 14 else ''})")
         merged = merged[in_poly]
     n_signal = merged["rp"].notna().sum()
-    print(f"{len(merged)} HNRP ADM1 units; {n_signal} with a qualifying drought signal")
+    _sev = merged.get("sev_total", pd.Series(0.0, index=merged.index)).fillna(0)
+    _pin = merged.get("pin", pd.Series(float("nan"), index=merged.index))
+    n_hum = int(((_sev > 0) | _pin.notna()).sum())
+    print(f"{len(merged)} ADM{LEVEL} units in scope ({n_hum} with humanitarian "
+          f"figures); {n_signal} with a qualifying drought signal")
 
     # NO DOWNSCALING. Units finer than the level IPC publishes at simply have no
     # IPC — the tab now shows each source at ITS OWN unit of analysis, and the map
@@ -1605,12 +1759,28 @@ def main() -> None:
                 out[k] = int(out[k])
         if sec:
             out["sec"] = sec
+        # Response monitoring: [PiN, targeted, prioritized target, reached,
+        # prioritized reached] for the monitored cycle. Each slot stays None when
+        # the country reported nothing for it — Syria files PiN and no target,
+        # Cameroon and Somalia target without prioritizing — and the site draws
+        # those as unreported rather than as zero.
+        mon = [out.pop(c, None) for c in
+               ("monPin", "monTgt", "monPrio", "monRea", "monPrioRea")]
+        mon_yr = out.pop("mon_year", None)
+        if any(v is not None for v in mon):
+            out["mon"] = [None if v is None else int(v) for v in mon]
+            if mon_yr is not None:
+                out["mon_yr"] = str(int(mon_yr))
         if rec["pcode"] in ipc_lists:
             out["ipc"] = ipc_lists[rec["pcode"]]
         return out
 
     payload = {
         "adm_level": LEVEL,
+        # Which month each country last reported response monitoring. Countries
+        # are on their own cadence, so there is no single "as of" — the site
+        # prints the country's own month beside its reached figure.
+        "mon_months": {k: v for k, v in sorted(mon_months.items())},
         "issued_label": issued_label,
         "issued_month": int(issued_month),
         "issued_year": int(global_max_iy),
@@ -1626,15 +1796,24 @@ def main() -> None:
             "HNRP severity analysis (ds-hnrp-mirror, latest analysis year per country), with "
             "per-sector PiN / targeted alongside. Admin-2/3 figures are summed to admin-1."
         ),
-        # Prune rows with no usable humanitarian data at all (e.g. Syria 2025:
-        # severity classes published with NO population figures, needs pre-2025).
+        # Keep a row if it carries humanitarian figures OR a forecast. The
+        # forecast half is the point of the tab, and every unit of an in-scope
+        # country now gets one: previously a unit with no PiN/severity/IPC was
+        # dropped even though its SEAS5 series existed, which left the map
+        # drawing polygons with nothing behind them — no fill, no tooltip, and no
+        # click, because a click resolves through the row. Tanzania was the worst
+        # case at 138 of 170 units, but Honduras (138), Guatemala (97) and
+        # Kenya (23) were all partly inert too.
+        # What this does NOT re-admit is a row with neither: the original prune
+        # (Syria 2025 publishing severity classes with no population figures)
+        # still applies wherever the forecast is absent as well.
         "rows": [
             row for row in (
                 _row(rec)
                 for rec in merged.drop(columns=["pin_admin_level"]).to_dict("records"))
             if row.get("pin") is not None or row.get("targeted") is not None
             or row.get("sec") or row.get("ipc") or (row.get("sev_total") or 0) > 0
-            or row.get("sevc")
+            or row.get("sevc") or row.get("tris")
         ],
     }
     OUT.write_text(json.dumps(payload, separators=(",", ":")))

@@ -252,6 +252,22 @@ footer p { margin: 4px 0; }
 /* Per-admin trimester codes on the map (selected-country view): bare text with a
    white halo, centred on the anchor point (the divIcon anchors top-left). */
 .tri-map-label-wrap { background: none; border: none; }
+/* Dismiss button at the selected country's top-right corner. Pulled INSIDE that
+   corner rather than centred on it: the map fits the country with 10px of
+   padding, so a button centred on the bounding box would be half outside the
+   viewport. Grey until hovered — it is an exit, not the main action. */
+.hnrp-close-wrap { background: none; border: none; }
+/* Flex-centred, so the drawn cross sits dead centre at any size — line-height
+   centring left it high, since it centres a text line box and not the ink. */
+.hnrp-close { display: inline-flex; align-items: center; justify-content: center;
+  transform: translate(-110%, 10%);
+  width: 26px; height: 26px;
+  border-radius: 50%; background: #fff; border: 1.5px solid #6b7a7b;
+  color: #3d4a4b; cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
+.hnrp-close svg { display: block; }
+.hnrp-close:hover, .hnrp-close:focus { color: #1d2021; border-color: #1d2021;
+  background: #eef1f1; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.32); outline: none; }
 .tri-map-label { display: inline-block; transform: translate(-50%, -50%);
   white-space: nowrap; font-size: 10px; font-weight: 700; color: #1d2021;
   text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
@@ -328,7 +344,6 @@ footer p { margin: 4px 0; }
 }
 #hnrp-bars-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
 #hnrp-bars-legend i { display: inline-block; width: 12px; height: 12px; border: 1px solid rgba(0,0,0,0.12); vertical-align: -2px; margin-right: 4px; }
-#hnrp-bars-legend i.tick { width: 2px; height: 14px; background: #1d2021; border: none; vertical-align: -3px; }
 #hnrp-bars-head { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
 #hnrp-bars-head h3 { margin-right: auto; }
 
