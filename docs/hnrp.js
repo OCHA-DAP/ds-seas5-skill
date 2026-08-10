@@ -646,16 +646,24 @@
     if (pinMode() && !agg && r.sevc && !r.sevc[planYr()]) {
       rows += `<div class="muted">not classified in the ${planYr()} cycle</div>`;
     }
-    if (ADM === "low") {
-      if (agg) {
-        rows += agg.clsBreakdown;
-      } else {
+    if (agg) {
+      rows += agg.clsBreakdown;
+    } else {
+      // The area's own split across the classes — its IPC population by phase, or
+      // the PiN-by-severity distribution behind its plan class. Shown at every
+      // admin level, not just the lowest: the breakdown is a property of the
+      // unit's analysis, and it was the whole reason to open an area.
+      const mix = ipcMode() ? (ipcComboOf(r)?.p ?? null)
+        : ((r.sevc ?? {})[planYr()]?.pb ?? null);
+      rows += mixHtml(mix);
+      if (ADM === "low") {
         const cls = sevClassOf(r);
         if (cls) {
-          rows += `<div class="sec"><div class="sec-t">${sevClassTitle()}</div>` +
-            `<div><span style="display:inline-block;width:10px;height:10px;` +
+          // Which class the AREA is, and where that came from — a different fact
+          // from the split above, which is how its people are distributed.
+          rows += `<div><span style="display:inline-block;width:10px;height:10px;` +
             `background:${sevColors()[cls - 1]};border:1px solid #9db1b3;` +
-            `vertical-align:baseline"></span> ${sevClassDesc(r)}</div></div>`;
+            `vertical-align:baseline"></span> ${sevClassDesc(r)}</div>`;
         } else if (pinMode() && pinOf(r) != null) {
           rows += `<div class="muted">No severity published for this area</div>`;
         }
@@ -689,6 +697,20 @@
   // Every sum is absent-preserving: if no area reports a measure the total is null
   // ("not reported"), never 0. Summing nulls to zero is how a country with no
   // reported reach would come to claim it reached nobody.
+  // Population split across the five classes, as counts and shares. Used at both
+  // levels: an area's own IPC phase / PbS distribution, and the country's mix
+  // summed over its areas. Same renderer, so the two are directly comparable.
+  function mixHtml(mix) {
+    const total = (mix ?? []).reduce((a, b) => a + (b || 0), 0);
+    if (!(total > 0)) return "";
+    return `<div class="sec"><div class="sec-t">${sevClassTitle()}</div>` +
+      mix.map((v, i) => (!(v > 0) ? "" :
+        `<div><span style="display:inline-block;width:10px;height:10px;` +
+        `background:${sevColors()[i]};border:1px solid #9db1b3;` +
+        `vertical-align:baseline"></span> ${sevClassLabels()[i]} — ${fmtN(v)}` +
+        ` <span class="muted">(${Math.round((100 * v) / total)}%)</span></div>`)).join("") +
+      `</div>`;
+  }
   const aggCache = new Map();
   function countryAgg(country) {
     const key = `${country}|${srcTypeSel.value}|${planYr()}|${ipcPeriodSel.value}|${lvl()}`;
@@ -702,8 +724,31 @@
     };
     // The country's own forecast series, run through the same classifier the units
     // use so the category and the wording match exactly.
+    //
+    // It has to be a STRUCTURALLY COMPLETE row, not just {tris}. forecast.json
+    // carries pct/r/rp/rainy per trimester and nothing else, but rawSlotOf reads
+    // two things the file does not have: t.lead, to skip in-season trimesters in
+    // auto mode, and the fb_* fallback slot it drops to whenever no trimester
+    // qualifies as a drought. Without them every country with no drought signal
+    // came out null — "No forecast for the selected season" on a country whose
+    // forecast we were holding all along. Both are properties of the ISSUANCE, so
+    // any unit of the country supplies them; only the values are the country's own.
     const tris = countryFc[iso] ?? null;
-    const fcRow = tris ? { tris, iso3: iso, country } : null;
+    const sample = rows.find((r) => r.tris && r.fb_tri) ?? null;
+    let fcRow = null;
+    if (tris && sample) {
+      const merged = {};
+      for (const [k, v] of Object.entries(tris)) {
+        merged[k] = { ...v, lead: sample.tris?.[k]?.lead };
+      }
+      const fb = merged[sample.fb_tri] ?? null;
+      fcRow = {
+        tris: merged, iso3: iso, country,
+        fb_tri: sample.fb_tri, fb_label: sample.fb_label,
+        fb_pct: fb?.pct ?? null, fb_r: fb?.r ?? null,
+        fb_rp: fb?.rp ?? null, fb_rainy: !!fb?.rainy,
+      };
+    }
     const slot = fcRow ? slotOfAny(fcRow) : null;
     const cat = slot ? classify({ pct: slot.pct, r: slot.r, rainy: slot.rainy }, false) : null;
     // Severity mix across the country's units, as a share of the caseload rather
@@ -725,15 +770,7 @@
         if (cls) { mix[cls - 1] += v; mixAny = true; }
       }
     }
-    const total = mix.reduce((a, b) => a + b, 0);
-    const clsBreakdown = !mixAny ? "" :
-      `<div class="sec"><div class="sec-t">${sevClassTitle()}</div>` +
-      mix.map((v, i) => (v <= 0 ? "" :
-        `<div><span style="display:inline-block;width:10px;height:10px;` +
-        `background:${sevColors()[i]};border:1px solid #9db1b3;` +
-        `vertical-align:baseline"></span> ${sevClassLabels()[i]} — ${fmtN(v)}` +
-        ` <span class="muted">(${Math.round((100 * v) / total)}%)</span></div>`)).join("") +
-      `</div>`;
+    const clsBreakdown = mixAny ? mixHtml(mix) : "";
     // Monitoring: only the units whose snapshot is the selected cycle contribute,
     // the same rule a unit readout follows.
     const mon = [0, 1, 2, 3, 4].map((i) => sum((r) => monLive(r)?.[i] ?? null));
