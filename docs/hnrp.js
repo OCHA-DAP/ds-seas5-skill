@@ -1455,6 +1455,7 @@
     }
   }
 
+  let fitToken = 0;  // guards the settle handler against a superseded fit
   function fitCountry(animate = true) {
     const c = countrySel.value;
     let bounds = null;
@@ -1472,21 +1473,31 @@
     if (!bounds) return;
     map.stop();
     map.fitBounds(bounds, { padding: [10, 10], animate });
-    if (animate) {
-      // The world view CONTAINS every country's centre, so a containment check
-      // can't detect a wedged animation (observed: Benin never zooming while
-      // the check passed). Compare against the target zoom instead.
-      const want = bounds;
-      const tz = map.getBoundsZoom(want, false, L.point(10, 10));
-      setTimeout(() => {
-        if (countrySel.value !== c) return; // selection moved on — don't fight it
-        if (Math.abs(map.getZoom() - tz) > 0.5
-            || !map.getBounds().contains(want.getCenter())) {
-          map.stop();
-          map.fitBounds(want, { padding: [10, 10], animate: false });
-        }
-      }, 700);
-    }
+    if (!animate) return;
+    // Verify on the map's OWN settle event, not on a timer. The old check fired at
+    // a fixed 700ms, which is a race: a country drawn in many units (Afghanistan is
+    // the largest at 401) can still be animating then, so the check ran mid-flight,
+    // forced a second fit, and could wedge the very animation it was policing —
+    // most likely on a slower machine, which is why it reproduced for some people
+    // and not others. moveend fires when the view has actually stopped, whatever
+    // the machine, so the retry happens exactly once and only if it is needed.
+    const want = bounds;
+    const tz = map.getBoundsZoom(want, false, L.point(10, 10));
+    fitToken += 1;
+    const token = fitToken;
+    const settle = () => {
+      map.off("moveend", settle);
+      if (token !== fitToken) return;          // a newer fit superseded this one
+      if (countrySel.value !== c) return;      // selection moved on — don't fight it
+      if (Math.abs(map.getZoom() - tz) > 0.5
+          || !map.getBounds().contains(want.getCenter())) {
+        map.stop();
+        map.fitBounds(want, { padding: [10, 10], animate: false });
+      }
+    };
+    map.on("moveend", settle);
+    // Belt and braces: if the animation never starts at all, moveend never fires.
+    setTimeout(() => { if (token === fitToken) settle(); }, 1200);
   }
   // Valid-season selector options: auto + each valid trimester at this issuance.
   for (const t of data.trimesters ?? []) {
