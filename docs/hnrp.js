@@ -1486,7 +1486,8 @@
     }
   }
 
-  function fitCountry() {
+  let fitToken = 0;  // a newer fit always supersedes an older one's backstop
+  function fitCountry(animate = true) {
     const c = countrySel.value;
     let bounds = null;
     layer.eachLayer((l) => {
@@ -1508,18 +1509,34 @@
         : L.latLngBounds(lb.getSouthWest(), lb.getNorthEast());
     });
     if (!bounds) return;
-    // NO ANIMATION, deliberately. With zoomSnap: 0.25 the map runs on fractional
-    // zoom, and Leaflet's animated zoom silently declines to move at all in that
-    // mode — instrumenting every fit showed the animated fitBounds leaving the zoom
-    // exactly where it started, EVERY time, with a self-heal quietly redoing each
-    // one without animation a beat later. So the smooth zoom never actually
-    // existed; what shipped was the self-heal, plus a race for when it mistimed.
-    // That race is what made a country fail to zoom on the third selection while
-    // its chart and labels rendered normally.
-    // Fitting straight away is what the user has been seeing all along, minus the
-    // failure mode. It also removes the moveend/token bookkeeping entirely.
+    const PAD = { padding: [10, 10] };
     map.stop();
-    map.fitBounds(bounds, { padding: [10, 10], animate: false });
+    // A hidden tab gets no requestAnimationFrame, and every animated view change
+    // in Leaflet — flyTo and the CSS zoom animation alike — is driven by it. Asking
+    // for a glide there leaves the map exactly where it started until the tab is
+    // looked at again. Fit instantly instead; there is nobody watching the motion.
+    if (!animate || document.visibilityState !== "visible") {
+      // animate:false explicitly — the default still animates, and an animation is
+      // exactly what cannot finish here.
+      map.fitBounds(bounds, { ...PAD, animate: false });
+      return;
+    }
+    // flyToBounds rather than fitBounds({animate:true}): with zoomSnap 0.25 the map
+    // runs on fractional zoom, and flyTo drives the view from rAF rather than the
+    // CSS zoom animation, which is the more reliable of the two paths here.
+    map.flyToBounds(bounds, { ...PAD, duration: 0.6 });
+    // Land it anyway if the glide is interrupted — a newer selection always wins.
+    const tz = map.getBoundsZoom(bounds, false, L.point(10, 10));
+    fitToken += 1;
+    const token = fitToken;
+    setTimeout(() => {
+      if (token !== fitToken || countrySel.value !== c) return;
+      if (Math.abs(map.getZoom() - tz) > 0.5
+          || !map.getBounds().contains(bounds.getCenter())) {
+        map.stop();
+        map.fitBounds(bounds, { ...PAD, animate: false });
+      }
+    }, 900);
   }
   // Valid-season selector options: auto + each valid trimester at this issuance.
   for (const t of data.trimesters ?? []) {
@@ -1564,7 +1581,7 @@
   window.tabShown = window.tabShown || {};
   window.tabShown.hnrp = () => {
     map.invalidateSize();
-    fitCountry(); // every fit is instant now
+    fitCountry(false); // instant on reveal — nothing to glide from
     renderAll(); // paths may mount after the panel becomes visible — restyle then
   };
   // Escape drops every pinned legend entry — the keyboard route out of a
@@ -1575,6 +1592,6 @@
   buildHnrpLegend(); // safe here: every const it reads is initialised by now
   restoreControls(); // after options are populated, before the first render
   renderAll();
-  if (countrySel.value) fitCountry(); // restored country: land on it directly
+  if (countrySel.value) fitCountry(false); // restored country: land on it directly
   requestAnimationFrame(renderMap); // catch paths that mounted after the first pass
 })();
