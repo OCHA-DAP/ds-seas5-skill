@@ -331,3 +331,9 @@ footer p { margin: 4px 0; }
 #hnrp-bars-legend i.tick { width: 2px; height: 14px; background: #1d2021; border: none; vertical-align: -3px; }
 #hnrp-bars-head { display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
 #hnrp-bars-head h3 { margin-right: auto; }
+
+/* Source swap: the subnational mosaic is torn down and rebuilt while the country
+   backdrop stays put. Fading the map over that hides the blank frame in between
+   without hiding the country outlines the user is still oriented by. */
+#hnrp-map { transition: opacity 0.15s ease; }
+#hnrp-map.swapping { opacity: 0.55; }

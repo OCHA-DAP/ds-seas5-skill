@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <!-- versioned: the HNRP legend's box strip and clear button need this
        stylesheet and hnrp.js to arrive as a pair, never one from cache -->
-  <link rel="stylesheet" href="style.css?v=20260807a" />
+  <link rel="stylesheet" href="style.css?v=20260810a" />
 </head>
 <body>
   <p class="dev-banner" role="note">
@@ -386,9 +386,11 @@
         Congo's plan is written in 519 zones de santé, its IPC analysis in 168
         territories; Haiti's plan covers 140 communes, its IPC 10 departments. Each
         source is drawn on the units it is actually published for, and the chart
-        title always names the level in force. Switching source reloads the tab with
-        the other geometry — every control is carried in the URL, so only the map's
-        pan and zoom are lost. Per country the IPC view takes whichever published
+        title always names the level in force. Switching source swaps only the
+        subnational layer: the country outlines, the backdrop and the map's own
+        view are the same in both, so they stay put while the mosaic underneath is
+        rebuilt. The selected country survives the switch where the other source
+        also covers it, and falls back to the world view where it does not. Per country the IPC view takes whichever published
         level classifies the most of it: Afghanistan is drawn at admin-1, where 34
         areas carry an analysis, rather than admin-2, where 9 do.
         <strong>Nothing is prorated onto the other source's units any more.</strong>
@@ -764,7 +766,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260810g"></script>
+  <script src="hnrp.js?v=20260810h"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
