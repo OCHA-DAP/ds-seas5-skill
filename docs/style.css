@@ -252,22 +252,6 @@ footer p { margin: 4px 0; }
 /* Per-admin trimester codes on the map (selected-country view): bare text with a
    white halo, centred on the anchor point (the divIcon anchors top-left). */
 .tri-map-label-wrap { background: none; border: none; }
-/* Dismiss button at the selected country's top-right corner. Pulled INSIDE that
-   corner rather than centred on it: the map fits the country with 10px of
-   padding, so a button centred on the bounding box would be half outside the
-   viewport. Grey until hovered — it is an exit, not the main action. */
-.hnrp-close-wrap { background: none; border: none; }
-/* Flex-centred, so the drawn cross sits dead centre at any size — line-height
-   centring left it high, since it centres a text line box and not the ink. */
-.hnrp-close { display: inline-flex; align-items: center; justify-content: center;
-  transform: translate(-110%, 10%);
-  width: 26px; height: 26px;
-  border-radius: 50%; background: #fff; border: 1.5px solid #6b7a7b;
-  color: #3d4a4b; cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
-.hnrp-close svg { display: block; }
-.hnrp-close:hover, .hnrp-close:focus { color: #1d2021; border-color: #1d2021;
-  background: #eef1f1; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.32); outline: none; }
 .tri-map-label { display: inline-block; transform: translate(-50%, -50%);
   white-space: nowrap; font-size: 10px; font-weight: 700; color: #1d2021;
   text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; }
@@ -317,6 +301,45 @@ footer p { margin: 4px 0; }
 #alerts-table .bar-val { min-width: 58px; text-align: right;
   font-variant-numeric: tabular-nums; white-space: nowrap; }
 #hnrp-map { height: 430px; border: 1px solid var(--line); border-radius: var(--hdx-radius-md); margin-bottom: 18px; background: #fff; }
+/* Detail sidebar. Overlays the map's right edge rather than sitting beside it:
+   a flex sibling would resize the map on every selection, and Leaflet has to be
+   told about that mid-animation, which is the class of thing that has wedged
+   this map's zoom before. fitCountry pads its fit by the panel width instead,
+   so the selected country still lands in the visible part. */
+#hnrp-map-wrap { position: relative; }
+#hnrp-side { position: absolute; top: 0; right: 0; bottom: 18px; width: 290px;
+  z-index: 1100; background: #fff; border: 1px solid var(--line);
+  border-radius: 0 var(--hdx-radius-md) var(--hdx-radius-md) 0;
+  overflow-y: auto; overflow-x: hidden;
+  font-size: 0.78rem; line-height: 1.5; box-shadow: -3px 0 10px rgba(0, 0, 0, 0.06); }
+#hnrp-side[hidden] { display: none; }
+.side-head { position: sticky; top: 0; background: #fff; padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--line); z-index: 1; }
+.side-crumb { display: flex; align-items: flex-start; gap: 6px; }
+.side-crumb + .side-crumb { margin-top: 3px; padding-top: 3px;
+  border-top: 1px dotted var(--line); }
+.side-crumb .lbl { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.side-crumb .lvl { display: block; font-size: 0.68rem; text-transform: uppercase;
+  letter-spacing: 0.03em; color: var(--hdx-neutral-8); }
+.side-crumb .nm { font-weight: 700; color: var(--ink); }
+.side-x { flex: none; width: 20px; height: 20px; padding: 0; line-height: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--hdx-neutral-3); border-radius: var(--hdx-radius-sm);
+  background: #fff; color: var(--hdx-neutral-7); cursor: pointer; }
+.side-x:hover, .side-x:focus { background: var(--hdx-neutral-1); color: var(--ink);
+  border-color: var(--hdx-neutral-7); outline: none; }
+.side-body { padding: 8px 10px 12px; }
+.side-body .cat { font-weight: 600; margin-bottom: 3px; }
+.side-body .sec { margin-top: 9px; padding-top: 7px; border-top: 1px solid var(--line); }
+.side-body .sec-t { font-size: 0.68rem; text-transform: uppercase;
+  letter-spacing: 0.03em; color: var(--hdx-neutral-8); margin-bottom: 2px; }
+.side-body .muted, .side-hint { color: var(--hdx-neutral-5); }
+.side-hint { padding: 0 10px 10px; }
+@media (max-width: 760px) {
+  /* Too narrow to overlay: drop it under the map instead of covering it. */
+  #hnrp-side { position: static; width: auto; height: auto; max-height: 300px;
+    border-radius: var(--hdx-radius-md); margin: -8px 0 18px; box-shadow: none; }
+}
 #hnrp-scatter-wrap { position: relative; margin-bottom: 6px; }
 #hnrp-scatter { width: 100%; height: 460px; display: block; }
 #hnrp-tip { position: absolute; pointer-events: none; background: #fff; border: 1px solid var(--line);

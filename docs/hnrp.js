@@ -26,13 +26,18 @@
   // keeps both sources on it; the default view follows the source.
   let PAYLOAD = (ADM === "low" && QS.get("sev") === "ipc") ? "ipc" : ADM;
   const ADM_LABEL = { low: "lowest available level", 1: "admin 1", 2: "admin 2", 3: "admin 3" };
-  let data, geo, world;
+  let data, geo, world, countryFc = {};
   try {
     // no-cache = revalidate: the admin-level switch is a plain navigation, which
     // otherwise serves stale payloads straight from HTTP cache mid-session.
     const fj = (f) => fetch(f, { cache: "no-cache" })
       .then((r) => (r.ok ? r.json() : Promise.reject(r)));
     world = await fj("data/countries.geojson");
+    // Country-level forecast, for the sidebar's country readout. Same per-trimester
+    // shape as a row's "tris", so it drops straight into the classifier rather than
+    // being averaged up from admin units — an area mean is not a country forecast.
+    // Optional: a missing file costs the country its forecast line, nothing else.
+    countryFc = await fj("data/forecast.json").then((f) => f.data).catch(() => ({}));
     try {
       [data, geo] = await Promise.all(ADM_FILES[PAYLOAD].map(fj));
     } catch {
@@ -529,8 +534,8 @@
     return `M ${cx} ${cy - rad} A ${rad} ${rad} 0 ${f > 0.5 ? 1 : 0} 1 ` +
       `${cx + rad * Math.cos(a)} ${cy + rad * Math.sin(a)}`;
   }
-  function monPie(r) {
-    const m = monLive(r);
+  function monPie(r, agg = null) {
+    const m = agg ? agg.mon : monLive(r);
     if (!m) return "";
     const [pin, tgt, , rea] = m;
     if (pin == null && tgt == null && rea == null) return "";
@@ -564,14 +569,15 @@
         (v == null ? `<span style="color:#9db1b3">not reported</span>`
           : `${fmtN(v)}${f == null ? "" : ` · ${Math.round(100 * f)}% of PiN`}`) + `</div>`;
     };
-    const month = monMonth(r);
+    const month = agg ? agg.monMonth : monMonth(r);
+    const monYr = agg ? agg.monYr : r.mon_yr;
     return `<div style="display:flex;gap:10px;align-items:center;margin-top:4px">` +
       (base == null ? ""
         : `<svg width="${2 * R + 6}" height="${2 * R + 6}" style="flex:none">${arcs}</svg>`) +
       `<div style="font-size:11px;line-height:1.5">` +
       line("PiN", pin, MON.pin, false) + line("Targeted", tgt, MON.tgt) +
       line("Reached", rea, MON.rea) +
-      `<div style="color:#9db1b3">HNRP ${r.mon_yr} response` +
+      `<div class="muted">HNRP ${monYr} response` +
       `${month ? ` · as of ${month}` : ""}</div></div></div>`;
   }
 
@@ -598,47 +604,286 @@
         (c && c !== sel ? `<div class="cat" style="color:#9db1b3">${c} — click to` +
           ` switch to this country</div>` : "");
     }
-    const cat = catOf(r);
-    const s = slotOf(r);
+    // Inside the selected country the readout lives in the sidebar, which has the
+    // room to lay it out; the tooltip would only cover the map with a duplicate.
+    return `<div class="name">${dispName(r)}</div>`;
+  };
+  // ── Detail body, shared by the sidebar's unit and country readouts ───────────
+  // One renderer for both, because the country view is the same measurements
+  // aggregated — anything that reads differently between the two is a place the
+  // aggregate has quietly changed meaning.
+  function detailBody(r, agg = null) {
+    const cat = agg ? agg.cat : catOf(r);
+    const s = agg ? agg.slot : slotOf(r);
     let rows = "";
-    if (s && s.rp != null) {
-      rows = `<div><strong>${s.key}</strong>${s.lead < 0 ? " · in season" : ""} — RP ${fmt(s.rp, 1)} yr, r ${fmt(s.r, 2)}</div>`;
-    }
-    if (sevValOf(r) != null) {
-      const c = ipcMode() ? ipcComboOf(r) : null;
-      rows += `<div>${sevLabel()}: ${fmtN(sevValOf(r))}${c ? ` (${comboDesc(c)})` : ""}</div>`;
-    }
-    // Targeted and the plan-year stamp come from the HNRP cycle — not shown in IPC mode.
-    // Where response monitoring covers the selected cycle the pie below carries
-    // targeted, so printing it twice would just be noise.
-    if (pinMode() && tgtOf(r) != null && !monLive(r)) {
-      rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
-    }
-    if (pinMode() && cycOf(r)) rows += `<div>HNRP ${planYr()}</div>`;
-    rows += monPie(r);
-    if (pinMode() && r.sevc && !r.sevc[planYr()]) {
-      rows += `<div style="color:#9db1b3">not classified in the ${planYr()} cycle</div>`;
-    }
-    if (ADM === "low") {
-      const cls = sevClassOf(r);
-      if (cls) {
-        rows += `<div><span style="display:inline-block;width:10px;` +
-          `height:10px;background:${sevColors()[cls - 1]};border:1px solid #9db1b3;` +
-          `vertical-align:baseline"></span> ${sevClassDesc(r)}</div>`;
-      } else if (pinMode() && pinOf(r) != null) {
-        rows += `<div style="color:#9db1b3">No severity published for this area</div>`;
-      }
-    }
-    // Membership must be per-unit, never assumed from scope: in IPC mode most of a
-    // country's states can be in view yet outside its HNRP (Nigeria covers only
-    // Borno/Adamawa/Yobe).
-    const member = inHnrp(r);
-    if (!member) rows += `<div style="color:#9db1b3">Not in an HNRP</div>`;
     const catLine = cat
       ? `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>`
-      : `<div class="cat" style="color:#9db1b3">No forecast for the selected season</div>`;
-    return `<div class="name">${dispName(r)}</div>` + catLine + rows;
-  };
+      : `<div class="cat muted">No forecast for the selected season</div>`;
+    rows += catLine;
+    if (s && s.rp != null) {
+      rows += `<div><strong>${s.key}</strong>${s.lead < 0 ? " · in season" : ""}` +
+        ` — RP ${fmt(s.rp, 1)} yr, r ${fmt(s.r, 2)}</div>`;
+    }
+    if (agg) {
+      rows += `<div class="muted">Country-level forecast, not an average of its` +
+        ` areas</div>`;
+    }
+    const sev = agg ? agg.sevVal : sevValOf(r);
+    if (sev != null) {
+      const c = ipcMode() ? (agg ? agg.combo : ipcComboOf(r)) : null;
+      rows += `<div class="sec"><div class="sec-t">${sevLabel()}</div>` +
+        `<div>${fmtN(sev)}${c ? `<div class="muted">${comboDesc(c)}</div>` : ""}</div></div>`;
+    }
+    const tgt = agg ? agg.tgt : tgtOf(r);
+    const live = agg ? agg.mon : monLive(r);
+    if (pinMode() && tgt != null && !live) {
+      rows += `<div>Targeted${secTag()}: ${fmtN(tgt)}</div>`;
+    }
+    if (pinMode() && (agg ? agg.hasCycle : cycOf(r))) {
+      rows += `<div class="muted">HNRP ${planYr()}</div>`;
+    }
+    rows += monPie(r, agg);
+    if (pinMode() && !agg && r.sevc && !r.sevc[planYr()]) {
+      rows += `<div class="muted">not classified in the ${planYr()} cycle</div>`;
+    }
+    if (agg) {
+      rows += agg.clsBreakdown;
+    } else {
+      // The area's own split across the classes — its IPC population by phase, or
+      // the PiN-by-severity distribution behind its plan class. Shown at every
+      // admin level, not just the lowest: the breakdown is a property of the
+      // unit's analysis, and it was the whole reason to open an area.
+      const mix = ipcMode() ? (ipcComboOf(r)?.p ?? null)
+        : ((r.sevc ?? {})[planYr()]?.pb ?? null);
+      rows += mixHtml(mix);
+      if (ADM === "low") {
+        const cls = sevClassOf(r);
+        if (cls) {
+          // Which class the AREA is, and where that came from — a different fact
+          // from the split above, which is how its people are distributed.
+          rows += `<div><span style="display:inline-block;width:10px;height:10px;` +
+            `background:${sevColors()[cls - 1]};border:1px solid #9db1b3;` +
+            `vertical-align:baseline"></span> ${sevClassDesc(r)}</div>`;
+        } else if (pinMode() && pinOf(r) != null) {
+          rows += `<div class="muted">No severity published for this area</div>`;
+        }
+      }
+    }
+    if (agg) {
+      rows += `<div class="sec"><div class="sec-t">Coverage</div>` +
+        `<div>${agg.nUnits} area${agg.nUnits === 1 ? "" : "s"} on the map` +
+        `${agg.nWithSev ? `, ${agg.nWithSev} with ${pinMode() ? "a caseload"
+          : "an IPC classification"}` : ""}</div>` +
+        (agg.pop != null ? `<div class="muted">population ${fmtN(agg.pop)}</div>` : "") +
+        `</div>`;
+    } else {
+      // Membership must be per-unit, never assumed from scope: in IPC mode most of
+      // a country's states can be in view yet outside its HNRP (Nigeria covers only
+      // Borno/Adamawa/Yobe).
+      if (!inHnrp(r)) rows += `<div class="muted">Not in an HNRP</div>`;
+      const pop = popOf(r);
+      if (pop != null) {
+        rows += `<div class="muted">population ${fmtN(pop)} (${popSrcOf(r)})</div>`;
+      }
+    }
+    return rows;
+  }
+  // ── Country aggregate for the sidebar ───────────────────────────────────────
+  // Caseloads sum; the forecast does NOT. A country's forecast comes from its own
+  // adm0 series (data/forecast.json — the same one the Map tab draws), because the
+  // mean of a country's admin percentiles is not the percentile of the country's
+  // rainfall, and averaging skill across areas is meaningless.
+  //
+  // Every sum is absent-preserving: if no area reports a measure the total is null
+  // ("not reported"), never 0. Summing nulls to zero is how a country with no
+  // reported reach would come to claim it reached nobody.
+  // Population split across the five classes, as counts and shares. Used at both
+  // levels: an area's own IPC phase / PbS distribution, and the country's mix
+  // summed over its areas. Same renderer, so the two are directly comparable.
+  function mixHtml(mix) {
+    const total = (mix ?? []).reduce((a, b) => a + (b || 0), 0);
+    if (!(total > 0)) return "";
+    return `<div class="sec"><div class="sec-t">${sevClassTitle()}</div>` +
+      mix.map((v, i) => (!(v > 0) ? "" :
+        `<div><span style="display:inline-block;width:10px;height:10px;` +
+        `background:${sevColors()[i]};border:1px solid #9db1b3;` +
+        `vertical-align:baseline"></span> ${sevClassLabels()[i]} — ${fmtN(v)}` +
+        ` <span class="muted">(${Math.round((100 * v) / total)}%)</span></div>`)).join("") +
+      `</div>`;
+  }
+  const aggCache = new Map();
+  function countryAgg(country) {
+    const key = `${country}|${srcTypeSel.value}|${planYr()}|${ipcPeriodSel.value}|${lvl()}`;
+    if (aggCache.has(key)) return aggCache.get(key);
+    const rows = data.rows.filter((r) => r.country === country);
+    const iso = rows[0]?.iso3;
+    const sum = (f) => {
+      let any = false, t = 0;
+      for (const r of rows) { const v = f(r); if (v != null) { any = true; t += v; } }
+      return any ? t : null;
+    };
+    // The country's own forecast series, run through the same classifier the units
+    // use so the category and the wording match exactly.
+    //
+    // It has to be a STRUCTURALLY COMPLETE row, not just {tris}. forecast.json
+    // carries pct/r/rp/rainy per trimester and nothing else, but rawSlotOf reads
+    // two things the file does not have: t.lead, to skip in-season trimesters in
+    // auto mode, and the fb_* fallback slot it drops to whenever no trimester
+    // qualifies as a drought. Without them every country with no drought signal
+    // came out null — "No forecast for the selected season" on a country whose
+    // forecast we were holding all along. Both are properties of the ISSUANCE, so
+    // any unit of the country supplies them; only the values are the country's own.
+    const tris = countryFc[iso] ?? null;
+    const sample = rows.find((r) => r.tris && r.fb_tri) ?? null;
+    let fcRow = null;
+    if (tris && sample) {
+      const merged = {};
+      for (const [k, v] of Object.entries(tris)) {
+        merged[k] = { ...v, lead: sample.tris?.[k]?.lead };
+      }
+      const fb = merged[sample.fb_tri] ?? null;
+      fcRow = {
+        tris: merged, iso3: iso, country,
+        fb_tri: sample.fb_tri, fb_label: sample.fb_label,
+        fb_pct: fb?.pct ?? null, fb_r: fb?.r ?? null,
+        fb_rp: fb?.rp ?? null, fb_rainy: !!fb?.rainy,
+      };
+    }
+    const slot = fcRow ? slotOfAny(fcRow) : null;
+    const cat = slot ? classify({ pct: slot.pct, r: slot.r, rainy: slot.rainy }, false) : null;
+    // Severity mix across the country's units, as a share of the caseload rather
+    // than a count of areas — one huge class-3 state should not read the same as
+    // one tiny one. Built from whichever encoding is on screen.
+    const mix = [0, 0, 0, 0, 0];
+    let mixAny = false, nWithSev = 0;
+    for (const r of rows) {
+      if (ipcMode()) {
+        const c = ipcComboOf(r);
+        if (!c) continue;
+        nWithSev++;
+        c.p.forEach((v, i) => { if (v) { mix[i] += v; mixAny = true; } });
+      } else {
+        const v = pinOf(r);
+        if (v == null) continue;
+        nWithSev++;
+        const cls = sevClassOf(r);
+        if (cls) { mix[cls - 1] += v; mixAny = true; }
+      }
+    }
+    const clsBreakdown = mixAny ? mixHtml(mix) : "";
+    // Monitoring: only the units whose snapshot is the selected cycle contribute,
+    // the same rule a unit readout follows.
+    const mon = [0, 1, 2, 3, 4].map((i) => sum((r) => monLive(r)?.[i] ?? null));
+    const out = {
+      country, iso, nUnits: rows.length, nWithSev,
+      slot, cat,
+      sevVal: sum((r) => sevValOf(r)),
+      combo: ipcMode() && iso ? ipcPeriodOf(iso, ipcPeriodSel.value) : null,
+      tgt: sum((r) => tgtOf(r)),
+      pop: sum((r) => popOf(r)),
+      hasCycle: rows.some((r) => cycOf(r)),
+      mon: mon.some((v) => v != null) ? mon : null,
+      monYr: rows.find((r) => monLive(r))?.mon_yr ?? planYr(),
+      monMonth: (data.mon_months ?? {})[iso] ?? null,
+      clsBreakdown,
+    };
+    aggCache.set(key, out);
+    return out;
+  }
+
+  // ── Detail sidebar ──────────────────────────────────────────────────────────
+  // Replaces the per-unit hover tooltip, which had grown to a pie chart plus eight
+  // lines and was covering the map it described. Hover fills it, a click pins it.
+  const sideEl = document.getElementById("hnrp-side");
+  let pinnedPcode = null;   // unit the sidebar is locked to
+  let hoverPcode = null;    // unit under the pointer, transient
+  function crumb(level, name, onClear, clearLabel) {
+    return `<div class="side-crumb"><span class="lbl"><span class="lvl">${level}</span>` +
+      `<span class="nm">${name}</span></span>` +
+      (onClear ? `<button type="button" class="side-x" data-clear="${onClear}"` +
+        ` title="${clearLabel}" aria-label="${clearLabel}">` +
+        `<svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true">` +
+        `<path d="M6 6 L18 18 M18 6 L6 18" fill="none" stroke="currentColor"` +
+        ` stroke-width="3" stroke-linecap="round"/></svg></button>` : "") + `</div>`;
+  }
+  function renderSide() {
+    const sel = countrySel.value;
+    sideEl.hidden = !sel;
+    if (!sel) { sideEl.innerHTML = ""; return; }
+    // Hover wins over the pin while the pointer is on a unit, so the sidebar can
+    // be browsed without losing the pinned one — releasing returns to it.
+    const shownPcode = hoverPcode ?? pinnedPcode;
+    const r = shownPcode ? byPcode.get(shownPcode) : null;
+    const agg = countryAgg(sel);
+    let head = crumb("Country", sel, "country", "Back to the world view");
+    if (r) {
+      // The × clears the PIN, so it only belongs on the pinned unit. Hovering a
+      // second area while one is pinned shows the hovered figures, and offering
+      // an × there would clear something other than the name it sits beside.
+      const isPinned = shownPcode === pinnedPcode;
+      head += crumb(r.lvl ? `Admin ${r.lvl}` : "Area", dispName(r),
+        isPinned ? "unit" : null, "Back to the country view");
+    }
+    const body = r ? detailBody(r) : detailBody(null, agg);
+    const hint = !r ? "Hover an area for its figures, click to keep them here."
+      : shownPcode === pinnedPcode ? "" : "Click to keep this area here.";
+    sideEl.innerHTML = `<div class="side-head">${head}</div>` +
+      `<div class="side-body">${body}</div>` +
+      (hint ? `<div class="side-hint">${hint}</div>` : "");
+  }
+  sideEl.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-clear]");
+    if (!btn) return;
+    if (btn.dataset.clear === "unit") {
+      setPinnedUnit(null);
+    } else {
+      setPinnedUnit(null);
+      countrySel.value = "";
+      countrySel.dispatchEvent(new Event("change"));
+    }
+  });
+  // The pinned area is marked by tracing its OWN boundary, not by fading its
+  // neighbours: a country dimmed to pick out one district loses the comparison
+  // that made the map worth looking at. Drawn as its own layer above the mosaic
+  // rather than by restyling the unit's path, so it cannot be overdrawn by a
+  // neighbour's edge or by the inset forecast ring, and a white casing under the
+  // dark line keeps it legible over both the dark end of the ramp and the pale end.
+  let pinHalo = null, pinHaloFor = null;
+  function renderPinHalo() {
+    if (pinnedPcode === pinHaloFor) {
+      // Unchanged, but a source swap rebuilds the mosaic and re-fronts the
+      // country borders over everything added before it — including this.
+      if (pinHalo) pinHalo.eachLayer((l) => l.bringToFront());
+      return;
+    }
+    pinHaloFor = pinnedPcode;
+    if (pinHalo) { map.removeLayer(pinHalo); pinHalo = null; }
+    if (!pinnedPcode) return;
+    // Polygonal features only, the same filter the mosaic uses. Four DR Congo
+    // health zones ship with null geometry, and L.geoJSON turns a degenerate
+    // feature into a Leaflet MARKER — a pin dropped in the Gulf of Guinea.
+    const f = geo.features.find((x) => x.properties?.pcode === pinnedPcode);
+    if (!f || !/Polygon/.test(f.geometry?.type ?? "")) return;
+    const line = (color, weight) => L.geoJSON(f, {
+      interactive: false, style: { color, weight, opacity: 1, fill: false },
+    });
+    pinHalo = L.layerGroup([line("#fff", 5), line("#1d2021", 2.4)]).addTo(map);
+    // Above the country borders, which are themselves brought to the front over
+    // the admin mosaic — otherwise a shared edge draws over half the halo.
+    pinHalo.eachLayer((l) => l.bringToFront());
+  }
+  function setPinnedUnit(pcode) {
+    if (pinnedPcode === pcode) return;
+    pinnedPcode = pcode;
+    renderPinHalo();
+    renderSide();
+  }
+  function setHoverUnit(pcode) {
+    if (hoverPcode === pcode) return;
+    hoverPcode = pcode;
+    renderSide();
+  }
+
   // World countries beneath as context (non-interactive, like the Map tab's backdrop).
   L.geoJSON(world, {
     interactive: false,
@@ -662,13 +907,30 @@
         // still leaves a shape with nothing behind it, and a click landing on
         // one of those used to do nothing at all (Tanzania: 138 of 170
         // polygons, so four fifths of the country was inert).
-        const c = byPcode.get(f.properties.pcode)?.country
-          ?? isoCountry.get(f.properties.iso3);
+        const row = byPcode.get(f.properties.pcode);
+        const c = row?.country ?? isoCountry.get(f.properties.iso3);
         if (!c) return;
         L.DomEvent.stopPropagation(e);
-        if (c === countrySel.value) return;  // clicks inside the focus country keep it
+        if (c === countrySel.value) {
+          // Inside the focus country a click pins the unit to the sidebar, and
+          // clicking the pinned one again releases it.
+          if (row) setPinnedUnit(pinnedPcode === row.pcode ? null : row.pcode);
+          return;
+        }
+        setPinnedUnit(null);  // a pin belongs to the country it was made in
         countrySel.value = c;
         countrySel.dispatchEvent(new Event("change"));
+      });
+      // Hover feeds the sidebar. Only inside the selected country: elsewhere the
+      // tooltip still answers "which country is this?", which is the question.
+      l.on("mouseover", () => {
+        const row = byPcode.get(f.properties.pcode);
+        if (row && countrySel.value && row.country === countrySel.value) {
+          setHoverUnit(row.pcode);
+        }
+      });
+      l.on("mouseout", () => {
+        if (hoverPcode === f.properties.pcode) setHoverUnit(null);
       });
     },
   });
@@ -800,13 +1062,11 @@
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
   // so tiny misalignments at the edge are cosmetic only).
   let outlineLayer = null, outlineFor = null;
-  const closeBtn = L.layerGroup().addTo(map);
   function renderOutline() {
     const c = countrySel.value;
     if (c === outlineFor) return; // no layer churn unless the selection changed —
     outlineFor = c;               // add/remove mid-zoom-animation can wedge Leaflet
     if (outlineLayer) { map.removeLayer(outlineLayer); outlineLayer = null; }
-    closeBtn.clearLayers();
     if (!c) return;
     const iso3 = data.rows.find((r) => r.country === c)?.iso3;
     const f = world.features.find((f) => f.properties.iso3 === iso3);
@@ -815,43 +1075,10 @@
       interactive: false,
       style: { color: "#1d2021", weight: 2.6, fill: false },
     }).addTo(map);
-    // A dismiss button pinned to the country's top-right corner. Leaving a
-    // country used to mean clicking open sea or reaching for the selector —
-    // neither of which announces itself, and clicking another country now
-    // switches to it rather than zooming out, so there was no visible way back.
-    // Anchored to the outline's bounds, so it sits with the country rather than
-    // floating in a corner of the viewport where it would read as a map control.
-    const b = usableBounds(outlineLayer);
-    if (!b) return;
-    const m = L.marker([b.getNorth(), b.getEast()], {
-      keyboard: true, title: "Back to the world view",
-      icon: L.divIcon({
-        className: "hnrp-close-wrap", iconSize: null,
-        // The cross is DRAWN, not typeset. A × glyph sits on the font's math
-        // axis, which is above the optical centre of a circle, so it always
-        // rides high however the box is centred; two SVG strokes are centred by
-        // construction and scale with the button.
-        html: `<span class="hnrp-close" role="button" tabindex="0"` +
-              ` aria-label="Back to the world view">` +
-              `<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">` +
-              `<path d="M6 6 L18 18 M18 6 L6 18" fill="none" stroke="currentColor"` +
-              ` stroke-width="3" stroke-linecap="round"/></svg></span>`,
-      }),
-    });
-    m.on("click", (e) => {
-      L.DomEvent.stopPropagation(e);
-      countrySel.value = "";
-      countrySel.dispatchEvent(new Event("change"));
-    });
-    // Keyboard: Leaflet gives the marker focus but no key handling of its own.
-    m.on("keypress", (e) => {
-      if (e.originalEvent.key === "Enter" || e.originalEvent.key === " ") {
-        L.DomEvent.stop(e.originalEvent);
-        countrySel.value = "";
-        countrySel.dispatchEvent(new Event("change"));
-      }
-    });
-    closeBtn.addLayer(m);
+    // The dismiss button lives in the sidebar now, one per level (country and
+    // pinned area). On the map it was a 26px target over a choropleth, easy to
+    // miss and easy to mistake for data; in the sidebar it sits beside the name
+    // it clears, which says what it does without a tooltip.
   }
   // Per-admin trimester codes, shown as permanent centered labels when a single
   // country is selected (readable at that zoom; the world view relies on hover).
@@ -999,6 +1226,11 @@
   const isFilteredOut = (cat, cls) => noMatch(cat, cls, (dim) => pinned[dim]);
   function renderMap() {
     renderOutline();
+    // A pin cannot survive a change of geometry: the admin-level and source
+    // swaps rebuild the payload on different units, and a pcode that is not in
+    // the new one would leave the sidebar describing something off the map.
+    if (pinnedPcode && !byPcode.has(pinnedPcode)) pinnedPcode = null;
+    renderPinHalo();
     renderTriLabels();
     const sel = countrySel.value;
     layer.eachLayer((l) => {
@@ -1787,7 +2019,12 @@
         : L.latLngBounds(lb.getSouthWest(), lb.getNorthEast());
     });
     if (!bounds) return;
-    const PAD = { padding: [10, 10] };
+    // Keep the country clear of the sidebar, which overlays the map's right edge
+    // — otherwise selecting one fits it neatly underneath the panel describing it.
+    // Measured, not assumed: the panel drops below the map on narrow viewports.
+    const sideW = sideEl.hidden || sideEl.offsetParent === null ? 0
+      : sideEl.getBoundingClientRect().width;
+    const PAD = { paddingTopLeft: [10, 10], paddingBottomRight: [10 + sideW, 10] };
     map.stop();
     // A hidden tab gets no requestAnimationFrame, and every animated view change
     // in Leaflet — flyTo and the CSS zoom animation alike — is driven by it. Asking
@@ -1835,7 +2072,8 @@
     if (sevStripTitle) sevStripTitle.textContent = sevLegendTitle();
     refreshLegendDim();
     syncCountryHit();
-    renderMap(); renderBars();
+    aggCache.clear(); // its key covers the controls, but the payload can swap too
+    renderMap(); renderBars(); renderSide();
   }
   for (const el of [skillSel, rpSel, srcLvlSel, triSel, ipcPeriodSel, planYrSel]) {
     el.addEventListener("change", renderAll);
@@ -1887,6 +2125,11 @@
   });
   // finally: whatever happens during re-render, the zoom step must still run.
   countrySel.addEventListener("change", () => {
+    // A pin belongs to the country it was made in; changing country drops it.
+    // Cleared BEFORE the render so the sidebar and the map agree on the first
+    // frame rather than briefly describing a unit that is no longer on screen.
+    pinnedPcode = null;
+    hoverPcode = null;
     try { renderAll(); } finally { fitCountry(); }
   });
 

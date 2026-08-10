@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <!-- versioned: the HNRP legend's box strip and clear button need this
        stylesheet and hnrp.js to arrive as a pair, never one from cache -->
-  <link rel="stylesheet" href="style.css?v=20260810d" />
+  <link rel="stylesheet" href="style.css?v=20260810e" />
 </head>
 <body>
   <p class="dev-banner" role="note">
@@ -194,7 +194,10 @@
       </div>
     </div>
 
-    <div id="hnrp-map"></div>
+    <div id="hnrp-map-wrap">
+      <div id="hnrp-map"></div>
+      <aside id="hnrp-side" hidden aria-label="Selection details"></aside>
+    </div>
     <div id="hnrp-legend" class="legend-group"></div>
 
     <div id="hnrp-bars-wrap" hidden>
@@ -538,16 +541,34 @@
         = high). In the world view the map answers "which
         country?", so hovering targets the <strong>whole country</strong> — one
         tooltip naming its plan years and what it carries, rather than a per-unit
-        readout that closed and reopened on every admin boundary crossed. Click to
-        zoom in; from there hovering gives the full per-area readout.
+        readout that closed and reopened on every admin boundary crossed.
+        Click to zoom in, and a <strong>sidebar</strong> opens on the right of the
+        map with the whole country's figures: its caseload, targeting and reach
+        summed across its areas, and its severity mix as a share of that caseload.
+        The country's <em>forecast</em> there is its own national series, not an
+        average of its areas — the mean of a country's admin percentiles is not the
+        percentile of the country's rainfall, and averaging skill across areas means
+        nothing. Every total is absent-preserving: a country where no area reports a
+        measure shows <em>not reported</em>, never 0.
+        From there, <strong>hovering an area</strong> puts its full readout in the
+        sidebar — including its own <strong>breakdown across the classes</strong>,
+        the area's population by IPC phase or the PiN-by-severity split behind its
+        plan class, drawn the same way as the country's mix above it so the two
+        compare directly — and leaves only its name on the map — the readout had grown to a
+        chart plus eight lines and was covering the very map it described.
+        <strong>Clicking</strong> an area keeps it there and traces its boundary in
+        black; clicking it again releases it. The outline follows the unit's real
+        geometry rather than fading its neighbours — dimming a country to pick out
+        one district costs you the comparison that made the map worth looking at.
+        The <strong>×</strong> beside each name in the sidebar clears that level —
+        the area, then the country.
         Neighbouring countries stay on the map while one is selected, <strong>faded
         rather than blanked</strong> — they keep their real severity colours, so the
         selected country is read in its regional context instead of against an empty
         surface, and <strong>clicking one switches straight to it</strong> without a
         round trip through the world view. To go back out, use the <strong>×</strong>
-        at the selected country's top-right corner — clicking open sea and picking
-        <em>All countries</em> in the selector both work too, but neither announces
-        itself.
+        beside the country's name in the sidebar — clicking open sea and picking
+        <em>All countries</em> in the selector both work too.
         Hovering a legend entry highlights matching units
         and dims the rest; <strong>clicking</strong> one pins it, so several can be
         combined — entries within a strip are OR-ed, strips AND together (e.g.
@@ -825,7 +846,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260810n"></script>
+  <script src="hnrp.js?v=20260810r"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
