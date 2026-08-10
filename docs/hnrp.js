@@ -668,6 +668,24 @@
   }
   // Per-admin trimester codes, shown as permanent centered labels when a single
   // country is selected (readable at that zoom; the world view relies on hover).
+  // A layer whose geometry is missing or degenerate yields empty bounds, and
+  // Leaflet reports their centre as (0,0) — Null Island, in the Gulf of Guinea
+  // south of Ghana. Anything built from those bounds lands there: a trimester
+  // label stranded in the Atlantic, and — worse — a fitBounds stretched from the
+  // country to the origin, which looks exactly like "the map didn't zoom".
+  // Four DR Congo health zones ship with null geometry today, so this is live,
+  // not hypothetical. Both consumers of getBounds() screen for it.
+  const usableBounds = (l) => {
+    if (typeof l.getBounds !== "function") return null;
+    let b;
+    try { b = l.getBounds(); } catch { return null; }
+    if (!b || !b.isValid()) return null;
+    const c = b.getCenter();
+    if (!Number.isFinite(c.lat) || !Number.isFinite(c.lng)) return null;
+    // An exact (0,0) centre from a zero-area shape is the signature, not a place.
+    if (c.lat === 0 && c.lng === 0 && b.getNorth() === b.getSouth()) return null;
+    return b;
+  };
   const triLabels = L.layerGroup().addTo(map);
   function renderTriLabels() {
     triLabels.clearLayers();
@@ -689,8 +707,10 @@
       // Markers, not standalone tooltips: DivOverlay tooltips mis-anchor after
       // interrupted/fractional zoom animations (labels drifting west, wedged
       // zooms); markers track the view exactly.
+      const lb = usableBounds(l);
+      if (!lb) return;
       const dimmed = isDimmed(catOf(r), ADM === "low" ? sevClassOf(r) : null);
-      triLabels.addLayer(L.marker(l.getBounds().getCenter(), {
+      triLabels.addLayer(L.marker(lb.getCenter(), {
         interactive: false, keyboard: false, opacity: dimmed ? 0.15 : 1,
         icon: L.divIcon({
           className: "tri-map-label-wrap", iconSize: null,
@@ -1462,7 +1482,9 @@
     layer.eachLayer((l) => {
       const r = byPcode.get(l.feature.properties.pcode);
       if (c && (!r || r.country !== c)) return;
-      bounds = bounds ? bounds.extend(l.getBounds()) : L.latLngBounds(l.getBounds());
+      const lb = usableBounds(l);
+      if (!lb) return;  // never let a degenerate shape drag the fit to (0,0)
+      bounds = bounds ? bounds.extend(lb) : L.latLngBounds(lb);
     });
     // map.stop() first: an animated fit interrupted mid-flight wedges Leaflet's
     // zoom animation and every later fit silently no-ops (observed: Afghanistan
