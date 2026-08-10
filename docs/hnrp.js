@@ -800,11 +800,13 @@
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
   // so tiny misalignments at the edge are cosmetic only).
   let outlineLayer = null, outlineFor = null;
+  const closeBtn = L.layerGroup().addTo(map);
   function renderOutline() {
     const c = countrySel.value;
     if (c === outlineFor) return; // no layer churn unless the selection changed —
     outlineFor = c;               // add/remove mid-zoom-animation can wedge Leaflet
     if (outlineLayer) { map.removeLayer(outlineLayer); outlineLayer = null; }
+    closeBtn.clearLayers();
     if (!c) return;
     const iso3 = data.rows.find((r) => r.country === c)?.iso3;
     const f = world.features.find((f) => f.properties.iso3 === iso3);
@@ -813,6 +815,36 @@
       interactive: false,
       style: { color: "#1d2021", weight: 2.6, fill: false },
     }).addTo(map);
+    // A dismiss button pinned to the country's top-right corner. Leaving a
+    // country used to mean clicking open sea or reaching for the selector —
+    // neither of which announces itself, and clicking another country now
+    // switches to it rather than zooming out, so there was no visible way back.
+    // Anchored to the outline's bounds, so it sits with the country rather than
+    // floating in a corner of the viewport where it would read as a map control.
+    const b = usableBounds(outlineLayer);
+    if (!b) return;
+    const m = L.marker([b.getNorth(), b.getEast()], {
+      keyboard: true, title: "Back to the world view",
+      icon: L.divIcon({
+        className: "hnrp-close-wrap", iconSize: null,
+        html: `<span class="hnrp-close" role="button" tabindex="0"` +
+              ` aria-label="Back to the world view">×</span>`,
+      }),
+    });
+    m.on("click", (e) => {
+      L.DomEvent.stopPropagation(e);
+      countrySel.value = "";
+      countrySel.dispatchEvent(new Event("change"));
+    });
+    // Keyboard: Leaflet gives the marker focus but no key handling of its own.
+    m.on("keypress", (e) => {
+      if (e.originalEvent.key === "Enter" || e.originalEvent.key === " ") {
+        L.DomEvent.stop(e.originalEvent);
+        countrySel.value = "";
+        countrySel.dispatchEvent(new Event("change"));
+      }
+    });
+    closeBtn.addLayer(m);
   }
   // Per-admin trimester codes, shown as permanent centered labels when a single
   // country is selected (readable at that zoom; the world view relies on hover).

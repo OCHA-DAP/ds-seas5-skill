@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <!-- versioned: the HNRP legend's box strip and clear button need this
        stylesheet and hnrp.js to arrive as a pair, never one from cache -->
-  <link rel="stylesheet" href="style.css?v=20260810b" />
+  <link rel="stylesheet" href="style.css?v=20260810c" />
 </head>
 <body>
   <p class="dev-banner" role="note">
@@ -544,8 +544,10 @@
         rather than blanked</strong> — they keep their real severity colours, so the
         selected country is read in its regional context instead of against an empty
         surface, and <strong>clicking one switches straight to it</strong> without a
-        round trip through the world view. Clicking open sea returns to the world
-        view, as does picking <em>All countries</em> in the selector.
+        round trip through the world view. To go back out, use the <strong>×</strong>
+        at the selected country's top-right corner — clicking open sea and picking
+        <em>All countries</em> in the selector both work too, but neither announces
+        itself.
         Hovering a legend entry highlights matching units
         and dims the rest; <strong>clicking</strong> one pins it, so several can be
         combined — entries within a strip are OR-ed, strips AND together (e.g.
@@ -823,7 +825,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260810l"></script>
+  <script src="hnrp.js?v=20260810m"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
