@@ -1205,6 +1205,23 @@ def combine_ipc_view() -> None:
     # Ties go to the finer level (more resolution for the same coverage).
     level_of = {iso: max(counts, key=lambda lv: (counts[lv], lv))
                 for iso, counts in per_level.items()}
+    # A country with NO IPC analysis at all still belongs on this map. Seven of
+    # them — Burkina Faso, Colombia, El Salvador, Myanmar, Syria, Ukraine,
+    # Venezuela — vanished from IPC mode entirely, taking their forecast with
+    # them, because level_of only knew about countries carrying IPC rows. Fall
+    # back to the level the plan view uses for them (deepest with any rows), so
+    # the forecast is on screen in both modes and only the severity fill changes.
+    plan_level: dict[str, int] = {}
+    for lvl in (1, 2, 3):
+        for r in data[lvl]["rows"]:
+            plan_level[r["iso3"]] = max(plan_level.get(r["iso3"], 1), lvl)
+    no_ipc = sorted(set(plan_level) - set(level_of))
+    for iso in no_ipc:
+        level_of[iso] = plan_level[iso]
+    if no_ipc:
+        print(f"IPC view: {len(no_ipc)} country/ies carry no IPC analysis and are "
+              f"drawn on their plan units for the forecast alone "
+              f"({', '.join(no_ipc)})")
     rows = [dict(r, lvl=lvl) for lvl in (1, 2, 3) for r in data[lvl]["rows"]
             if level_of.get(r["iso3"]) == lvl]
     feats = [f for lvl in (1, 2, 3) for f in geo[lvl]["features"]
@@ -1414,6 +1431,22 @@ def main() -> None:
         )
         print(f"Scope: +{len(extra)} IPC-covered ADM1 units outside HNRP plans "
               f"({len(set(ipc_iso3[p] for p in extra))} countries)")
+    # Then EVERY unit of every country already in scope, whether or not it carries
+    # humanitarian figures. The forecast is the point of the tab and it exists for
+    # all of them; the geometry ships all of them too (export_geometry works per
+    # country, not per unit). Without this the two disagree — Tanzania drew 170
+    # polygons over 32 rows, so 81% of the country was a shape with nothing behind
+    # it: no forecast, no tooltip, and no click, since the map resolves a click
+    # through the row. These rows carry a forecast and nothing else, which the
+    # site already has a state for ("Not in an HNRP", no severity published).
+    scope_isos = set(df_hum["iso3"].dropna())
+    fill = poly[poly["iso3"].isin(scope_isos) & ~poly["pcode"].isin(set(df_hum["pcode"]))]
+    if len(fill):
+        df_hum = pd.concat(
+            [df_hum, fill[["pcode", "iso3"]].copy()], ignore_index=True)
+        print(f"Scope: +{len(fill)} forecast-only unit(s) completing "
+              f"{fill['iso3'].nunique()} in-scope countries "
+              f"({', '.join(fill['iso3'].value_counts().head(6).index)}…)")
     if LEVEL == 2 and parent2:
         # Same inheritance as adm3-from-adm2: these adm2 units have no zonal stats
         # of their own, so each carries its parent ADM1's skill rows verbatim. The
@@ -1610,7 +1643,11 @@ def main() -> None:
               f"({len(gone)} countries: {', '.join(gone[:14])}{'…' if len(gone) > 14 else ''})")
         merged = merged[in_poly]
     n_signal = merged["rp"].notna().sum()
-    print(f"{len(merged)} HNRP ADM1 units; {n_signal} with a qualifying drought signal")
+    _sev = merged.get("sev_total", pd.Series(0.0, index=merged.index)).fillna(0)
+    _pin = merged.get("pin", pd.Series(float("nan"), index=merged.index))
+    n_hum = int(((_sev > 0) | _pin.notna()).sum())
+    print(f"{len(merged)} ADM{LEVEL} units in scope ({n_hum} with humanitarian "
+          f"figures); {n_signal} with a qualifying drought signal")
 
     # NO DOWNSCALING. Units finer than the level IPC publishes at simply have no
     # IPC — the tab now shows each source at ITS OWN unit of analysis, and the map
@@ -1741,15 +1778,24 @@ def main() -> None:
             "HNRP severity analysis (ds-hnrp-mirror, latest analysis year per country), with "
             "per-sector PiN / targeted alongside. Admin-2/3 figures are summed to admin-1."
         ),
-        # Prune rows with no usable humanitarian data at all (e.g. Syria 2025:
-        # severity classes published with NO population figures, needs pre-2025).
+        # Keep a row if it carries humanitarian figures OR a forecast. The
+        # forecast half is the point of the tab, and every unit of an in-scope
+        # country now gets one: previously a unit with no PiN/severity/IPC was
+        # dropped even though its SEAS5 series existed, which left the map
+        # drawing polygons with nothing behind them — no fill, no tooltip, and no
+        # click, because a click resolves through the row. Tanzania was the worst
+        # case at 138 of 170 units, but Honduras (138), Guatemala (97) and
+        # Kenya (23) were all partly inert too.
+        # What this does NOT re-admit is a row with neither: the original prune
+        # (Syria 2025 publishing severity classes with no population figures)
+        # still applies wherever the forecast is absent as well.
         "rows": [
             row for row in (
                 _row(rec)
                 for rec in merged.drop(columns=["pin_admin_level"]).to_dict("records"))
             if row.get("pin") is not None or row.get("targeted") is not None
             or row.get("sec") or row.get("ipc") or (row.get("sev_total") or 0) > 0
-            or row.get("sevc")
+            or row.get("sevc") or row.get("tris")
         ],
     }
     OUT.write_text(json.dumps(payload, separators=(",", ":")))

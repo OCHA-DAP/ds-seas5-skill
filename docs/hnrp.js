@@ -589,11 +589,15 @@
     if (r && r.country !== sel) {
       return countryTip(r.country, "Click to switch to this country");
     }
-    // No row at all = a polygon the payload doesn't cover; nothing to say but
-    // its name. (Areas that ARE in the payload but outside the plan's
-    // admin-level analysis still get the full readout — their forecast is real,
-    // and the "Not in an HNRP" line below is what qualifies it.)
-    if (!r) return `<div class="name">${p.name ?? p.pcode}</div>`;
+    // No row at all = a polygon the payload doesn't cover. Name it, and where we
+    // can tell which country it belongs to, say the click will go there — a
+    // tooltip that only names the shape reads as a dead area.
+    if (!r) {
+      const c = isoCountry.get(p.iso3);
+      return `<div class="name">${p.name ?? p.pcode}</div>` +
+        (c && c !== sel ? `<div class="cat" style="color:#9db1b3">${c} — click to` +
+          ` switch to this country</div>` : "");
+    }
     const cat = catOf(r);
     const s = slotOf(r);
     let rows = "";
@@ -652,7 +656,14 @@
       // Only a click with no country behind it (open sea, a polygon the payload
       // does not cover) falls through to the map handler and deselects.
       l.on("click", (e) => {
-        const c = byPcode.get(f.properties.pcode)?.country;
+        // Resolve through the ROW first, then fall back to the polygon's own
+        // iso3. A unit can have no row — the payload and the geometry are built
+        // to the same country scope now, but a pcode that fails to reconcile
+        // still leaves a shape with nothing behind it, and a click landing on
+        // one of those used to do nothing at all (Tanzania: 138 of 170
+        // polygons, so four fifths of the country was inert).
+        const c = byPcode.get(f.properties.pcode)?.country
+          ?? isoCountry.get(f.properties.iso3);
         if (!c) return;
         L.DomEvent.stopPropagation(e);
         if (c === countrySel.value) return;  // clicks inside the focus country keep it
