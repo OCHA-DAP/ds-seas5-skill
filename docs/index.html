@@ -271,13 +271,47 @@
         The two cycles are not the same countries or the same units — 2026 covers
         3,471 units across 16 countries, 2025 covers 4,702 across 23 — and coverage
         moves within a country too.
-        The <strong>2026</strong> cycle is a special case. Its subnational figures
-        come from the JIAF needs analysis (the "PiN par gravité" workbooks), which
-        publishes PiN by severity and <em>no targets</em>: HPC's 2026 targeting
-        exists only as a national total. So 2026 shows a PiN column and an empty
-        Targeted column, with a note above the chart saying so — pick 2025 to see
-        targeting. The 2026 PiN is the real cycle, not a projection: where it and
-        the needs table both cover a unit-year they agree.
+        The <strong>2026</strong> cycle is a special case. Its subnational PiN
+        comes from the JIAF needs analysis (the "PiN par gravité" workbooks),
+        which publishes PiN by severity and <em>no targets</em>. The 2026 PiN is
+        the real cycle, not a projection: where it and the needs table both cover
+        a unit-year they agree.
+      </p>
+
+      <h4>Response monitoring (targeted / reached)</h4>
+      <p>
+        <strong>Targeted and reached</strong> for the current cycle come from OCHA's
+        <a href="https://humanitarianaction.info/document/global-humanitarian-overview-2026/article/monitoring-humanitarian-action-interactive-dashboard"
+        target="_blank" rel="noopener">GHO monitoring dashboard</a>, mirrored daily
+        by <a href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>.
+        This is the <em>only</em> public source for subnational reach: the HPC API
+        publishes no measurements for 2026 plans and HAPI's 2026 rows stop at the
+        national total, which is why this tab previously showed an empty Targeted
+        column for the current year. It now covers <strong>2,864 units with a
+        target and 3,199 with reported reach</strong> across 19 countries.
+        The target is the same measure the needs analysis carries in other years —
+        summed nationally it reproduces HPC's own plan figures exactly (Afghanistan
+        17.48M, Sudan 20.42M, Yemen 12.00M) — so the Targeted column is continuous
+        across plan years; hover it to see which source answered.
+        Hovering an area gives a <strong>ring chart</strong>: the full circle is
+        the area's PiN, with targeted and reached drawn as arcs of it.
+        <strong>Three caveats travel with these figures.</strong>
+        They carry a <em>per-country vintage</em>, not a common as-of date —
+        Afghanistan last reported in March, DR Congo in May, Chad in June — so the
+        month is printed beside every figure.
+        Reach is only what partners <em>attributed to an area</em>, and a great deal
+        of delivery is reported without a location, so subnational sums run well
+        below the national headline (Sudan 2.6M against 8.0M nationally). Read a
+        per-area figure as a floor.
+        And reach is not bounded by the target: some areas report more people
+        reached than targeted, which is why the rings are concentric rather than
+        slices of one pie — a ring that runs past a full turn is hatched, with the
+        real share in the figure beside it.
+        Coverage is uneven because reporting is: Syria files PiN with no target or
+        reach, Venezuela reports reach with no needs figure, Cameroon and Somalia
+        target without prioritizing. Every one of those shows as
+        <strong>"not reported"</strong>, never as zero — a published zero (Colombia
+        files many) is a different claim and is shown as 0.
         <strong>Subnational sums do not always reach the plan's headline.</strong>
         Checked against HPC's own national figures, ten countries reconcile to
         within a rounding error — Sudan, Afghanistan, Cameroon, DR Congo, Colombia,
@@ -516,7 +550,10 @@
         bars: in PiN mode one bar per unit, carrying that unit's severity colour; in
         IPC mode the phase distribution from the selected <strong>Level</strong> up,
         stacked (phases 1–2 dwarf the rest in populous areas and drown the signal, so
-        the bars never start below 3). The dark tick on each bar is the targeted
+        the bars never start below 3). Where response monitoring covers the cycle, a
+        <strong>Reached</strong> column joins the numbers and a slim bar along the
+        foot of each row draws it — its own bar rather than a second tick, because
+        reach routinely runs past the targeted mark. The dark tick on each bar is the targeted
         population, on the same scale. Four figure columns follow — the caseload and
         the targeted population, each as a <strong>headcount</strong> and as a
         <strong>share of the area's population</strong> — and each column header
@@ -753,8 +790,9 @@
   </section>
 
   <footer>
-    <p>Data: ECMWF SEAS5 (forecast) &amp; ERA5 (climatology) · OCHA HPC HNRP caseloads &amp;
-      JIAF severity (<a href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>) ·
+    <p>Data: ECMWF SEAS5 (forecast) &amp; ERA5 (climatology) · OCHA HPC HNRP caseloads,
+      JIAF severity &amp; GHO response monitoring
+      (<a href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>) ·
       IPC/CH acute food insecurity (<a
       href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>; IPC,
       CC&nbsp;BY-NC-SA&nbsp;3.0&nbsp;IGO) · COD administrative boundaries &amp;
@@ -766,7 +804,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260810h"></script>
+  <script src="hnrp.js?v=20260810i"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

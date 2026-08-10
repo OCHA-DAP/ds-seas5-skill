@@ -910,6 +910,93 @@ def load_pbs_adm1() -> pd.DataFrame:
     return out
 
 
+def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
+    """Response monitoring per ADM1 unit: targeted, prioritized target, reached.
+
+    From hpc.monitoring_admin (ds-hnrp-mirror), which mirrors the GHO monitoring
+    dashboard's semantic model — the ONLY public source for subnational reach.
+    HAPI's 2026 rows stop at admin-0 and the HPC API publishes no measurements,
+    which is why the tab could show needs but never delivery.
+
+    Intersectoral rows only (`cluster_name = 'HNRP'`), newest snapshot per plan.
+    Also returns {iso3: month} — countries report on their own cadence
+    (Afghanistan March, DRC May, Chad June), so a reach figure is only readable
+    next to the month it was last reported, and the site prints it.
+    """
+    engine = stratus.get_engine("dev")
+    # Coarser rows can't be split down to our level, the same rule the PiN
+    # loader applies; rows deeper than LEVEL roll up on their admin1_code.
+    q = f"""
+    SELECT m.iso3, m.pcode, m.admin1_code, m.admin_level, m.year,
+           m.in_need, m.targeted, m.prioritized_target,
+           m.reached, m.prioritized_reached
+    FROM hpc.monitoring_admin m
+    JOIN (SELECT plan_id, max(snapshot_date) AS d
+          FROM hpc.monitoring_admin GROUP BY plan_id) l
+      ON l.plan_id = m.plan_id AND l.d = m.snapshot_date
+    WHERE m.cluster_name = 'HNRP' AND m.iso3 IS NOT NULL
+      AND m.admin_level >= {LEVEL}
+    """
+    # strpos, not `NOT LIKE '%;%'`: pandas hands the SQL to the driver as a
+    # format string, so a bare % is read as a parameter placeholder and the
+    # query dies with a TypeError before it reaches Postgres. Regional plans
+    # carry a semicolon-joined iso3 list and have no single country.
+    qp = """
+    SELECT p.iso3, mp.latest_update, mp.year
+    FROM hpc.monitoring_periods mp
+    JOIN hpc.plans p USING (plan_id)
+    WHERE mp.snapshot_date = (SELECT max(snapshot_date) FROM hpc.monitoring_periods)
+      AND mp.latest_update IS NOT NULL AND strpos(p.iso3, ';') = 0
+    """
+    try:
+        with engine.connect() as conn:
+            df = pd.read_sql(q, conn)
+            per = pd.read_sql(qp, conn)
+    except Exception as exc:
+        # The tab predates the monitoring mirror, so a missing table must not be
+        # fatal — but print the real error, never just its class. A silent skip
+        # is how "no reach reported" and "the query is broken" become the same
+        # thing on screen.
+        print(f"  monitoring: SKIPPED — {exc.__class__.__name__}: {exc}\n"
+              f"  targeted/reached will be absent (not zero) for every unit")
+        return pd.DataFrame(columns=["pcode", "iso3"]), {}
+    if df.empty:
+        return df, {}
+    # Rows below our level roll up onto their admin-1 parent, as PiN does.
+    deep = df["admin_level"] > LEVEL
+    df.loc[deep, "pcode"] = df.loc[deep, "admin1_code"]
+    df = (df.groupby(["iso3", "pcode", "year"], as_index=False)
+          .agg({c: lambda s: s.sum(min_count=1)
+                for c in ("in_need", "targeted", "prioritized_target",
+                          "reached", "prioritized_reached")}))
+    # One cycle only (the dashboard publishes the current plan year), so the
+    # year travels as a scalar rather than a per-year dict like cyc/sevc.
+    # The source files a literal 0 where a country reported nothing, so absence
+    # and "we targeted nobody" arrive identical. Distinguish them at the only
+    # level where it is decidable: a measure whose country-wide total is zero was
+    # never reported (Syria targets nothing anywhere; Cameroon and Somalia
+    # prioritize nothing anywhere) — null the whole country's column. A zero
+    # inside a country that reports elsewhere is a real published zero and stays.
+    for col in ("targeted", "prioritized_target", "reached", "prioritized_reached",
+                "in_need"):
+        tot = df.groupby("iso3")[col].transform(lambda s: s.fillna(0).sum())
+        unreported = tot == 0
+        if unreported.any():
+            isos = sorted(df.loc[unreported, "iso3"].unique())
+            print(f"  monitoring: {col} not reported by {', '.join(isos)} "
+                  f"(country-wide zero) — kept absent, not 0")
+            df.loc[unreported, col] = float("nan")
+    df = df.rename(columns={"in_need": "monPin", "targeted": "monTgt",
+                            "prioritized_target": "monPrio", "reached": "monRea",
+                            "prioritized_reached": "monPrioRea",
+                            "year": "mon_year"})
+    months = dict(zip(per["iso3"], per["latest_update"]))
+    n_rea = int((df["monRea"].fillna(0) > 0).sum())
+    print(f"Monitoring: {df['iso3'].nunique()} countries, {len(df)} units, "
+          f"{n_rea} with reach reported ({df['mon_year'].max()} cycle)")
+    return df, months
+
+
 def load_population_adm1() -> pd.DataFrame:
     """Total population per ADM1 unit from pop.population_admin
     (ds-population-mirror: HDX HAPI baseline population, UNFPA COD-PS derived).
@@ -1281,6 +1368,17 @@ def main() -> None:
     df_hno = normalize_pcodes(load_hno_pop_adm1(sub_parent), poly, "hno-pop")
     df_hno = (df_hno.groupby("pcode", as_index=False)
               .agg({"hno_pop": "sum", "hno_year": "max"}))
+    df_mon_raw, mon_months = load_monitoring_adm1()
+    if len(df_mon_raw):
+        df_mon = normalize_pcodes(df_mon_raw, poly, "monitoring")
+        _mon_cols = ["monPin", "monTgt", "monPrio", "monRea", "monPrioRea"]
+        # min_count=1 throughout: a country that reports no reach must stay None,
+        # never 0 — "nobody reached" and "nobody reported" are different claims.
+        _mon_sum = lambda s: s.sum(min_count=1)  # noqa: E731
+        df_mon = (df_mon.groupby("pcode", as_index=False)
+                  .agg({**{c: _mon_sum for c in _mon_cols}, "mon_year": "max"}))
+    else:
+        df_mon = pd.DataFrame(columns=["pcode"])
     ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
     ipc_lists = _ipc_lists(df_ipc)
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
@@ -1451,6 +1549,7 @@ def main() -> None:
     df_fc = pd.DataFrame(records)
     merged = df_hum.merge(df_fc, on="pcode", how="left")
     merged = merged.merge(df_pop, on="pcode", how="left")
+    merged = merged.merge(df_mon, on="pcode", how="left")
     # Distrust the baseline where it can't be right. An analysed base slightly
     # above the total is expected (analyses use current population estimates,
     # the COD-PS baseline can be an old census — PAK 2017, MDG 2018), so allow
@@ -1605,12 +1704,28 @@ def main() -> None:
                 out[k] = int(out[k])
         if sec:
             out["sec"] = sec
+        # Response monitoring: [PiN, targeted, prioritized target, reached,
+        # prioritized reached] for the monitored cycle. Each slot stays None when
+        # the country reported nothing for it — Syria files PiN and no target,
+        # Cameroon and Somalia target without prioritizing — and the site draws
+        # those as unreported rather than as zero.
+        mon = [out.pop(c, None) for c in
+               ("monPin", "monTgt", "monPrio", "monRea", "monPrioRea")]
+        mon_yr = out.pop("mon_year", None)
+        if any(v is not None for v in mon):
+            out["mon"] = [None if v is None else int(v) for v in mon]
+            if mon_yr is not None:
+                out["mon_yr"] = str(int(mon_yr))
         if rec["pcode"] in ipc_lists:
             out["ipc"] = ipc_lists[rec["pcode"]]
         return out
 
     payload = {
         "adm_level": LEVEL,
+        # Which month each country last reported response monitoring. Countries
+        # are on their own cadence, so there is no single "as of" — the site
+        # prints the country's own month beside its reached figure.
+        "mon_months": {k: v for k, v in sorted(mon_months.items())},
         "issued_label": issued_label,
         "issued_month": int(issued_month),
         "issued_year": int(global_max_iy),

@@ -144,6 +144,9 @@
     yearsWithTgt = new Set();
     for (const r of data.rows) {
       for (const [y, v] of Object.entries(r.cyc ?? {})) if (v[1] != null) yearsWithTgt.add(y);
+      // Response monitoring carries targets for the cycle the needs analysis
+      // publishes without them — 2026's subnational targeting exists only there.
+      if (r.mon_yr && r.mon?.[1] != null) yearsWithTgt.add(r.mon_yr);
     }
   }
   buildYearsWithTgt();
@@ -170,7 +173,15 @@
   // PiN/targeted are always the plan's INTERSECTORAL figures, for the selected
   // plan year (per-sector series remain in r.sec should a sector view return).
   const pinOf = (r) => cycOf(r)?.[0] ?? null;
-  const tgtOf = (r) => cycOf(r)?.[1] ?? null;
+  // Targeted: the needs analysis first, then response monitoring for the cycle
+  // it covers. Not a blend of two measures — they are the same one, verified:
+  // the monitoring table's national target sums reproduce hpc.plans exactly
+  // (AFG 17.48M, SDN 20.42M, YEM 12.00M). It matters because HAPI publishes no
+  // subnational 2026 target at all, so without this the current plan year shows
+  // a column of dashes. tgtSrcOf names which side answered, for the tooltip.
+  const tgtOf = (r) => cycOf(r)?.[1] ?? monLive(r)?.[1] ?? null;
+  const tgtSrcOf = (r) => (cycOf(r)?.[1] != null ? "needs analysis"
+    : monLive(r)?.[1] != null ? "response monitoring" : null);
   const secTag = () => "";
 
   // Units with no PiN/severity/targeted are IPC-only (outside any HNRP's analysis) —
@@ -474,6 +485,88 @@
     }
     return countryTipCache.get(key);
   }
+  // ── Response monitoring (targeted / reached) ────────────────────────────────
+  // Colours are the GHO monitoring dashboard's own, so our figures are
+  // recognisable next to it: the first two are lifted from the published report
+  // definition, the third is the tint it draws reach bars in.
+  const MON = {
+    pin: "#009dda",       // People in need
+    tgt: "#d15353",       // People targeted
+    rea: "#f0a3a3",       // People reached
+    track: "#eef1f1",
+  };
+  // [PiN, targeted, prioritized target, reached, prioritized reached] for the
+  // monitored cycle. Any slot can be null — the source reports unevenly, and a
+  // null here means "not reported", never zero.
+  const monOf = (r) => (pinMode() ? (r.mon ?? null) : null);
+  // Monitoring is only published for the cycle the dashboard is tracking, so it
+  // has no business on screen when an earlier plan year is selected.
+  const monLive = (r) => (monOf(r) && r.mon_yr === planYr() ? r.mon : null);
+  const monMonth = (r) => (data.mon_months ?? {})[r.iso3] ?? null;
+  // Concentric arcs, not wedges. The full circle is PiN — that is the "total" —
+  // and targeted and reached are drawn as arcs of it on inner bands. A pie of
+  // three sectors would have to assume reach ⊆ target ⊆ PiN, and it is not:
+  // units report more people reached than they targeted (Kabul: 224,446 against
+  // 665,764 targeted, and elsewhere reach exceeds target outright). An arc that
+  // can run past its neighbour states that honestly; a wedge cannot.
+  const R = 26, TAU = 2 * Math.PI;
+  function arcPath(cx, cy, rad, frac) {
+    // A non-finite share draws nothing rather than a path full of NaN, which
+    // SVG renders as an invisible element and no error.
+    const f = Number.isFinite(frac) ? Math.max(0, Math.min(1, frac)) : 0;
+    if (f >= 0.999) {  // a full circle as one arc collapses to a point
+      return `M ${cx} ${cy - rad} A ${rad} ${rad} 0 1 1 ${cx - 0.01} ${cy - rad}`;
+    }
+    const a = -Math.PI / 2 + f * TAU;
+    return `M ${cx} ${cy - rad} A ${rad} ${rad} 0 ${f > 0.5 ? 1 : 0} 1 ` +
+      `${cx + rad * Math.cos(a)} ${cy + rad * Math.sin(a)}`;
+  }
+  function monPie(r) {
+    const m = monLive(r);
+    if (!m) return "";
+    const [pin, tgt, , rea] = m;
+    if (pin == null && tgt == null && rea == null) return "";
+    // Without a PiN there is no denominator, but there can still be a response:
+    // Venezuela reports 582k reached and no needs figure at all. Print the
+    // counts and drop the rings rather than dropping the unit — the whole point
+    // of this panel is that unreported and zero are different.
+    const base = pin || null;
+    const frac = (v) => (base == null || v == null ? null : v / base);
+    const band = [[frac(pin), MON.pin, R], [frac(tgt), MON.tgt, R - 8],
+                  [frac(rea), MON.rea, R - 16]];
+    const arcs = band.map(([frac, col, rad]) =>
+      `<path d="${arcPath(R + 3, R + 3, rad, 1)}" fill="none" stroke="${MON.track}"` +
+      ` stroke-width="6"/>` +
+      (frac == null ? ""
+        : `<path d="${arcPath(R + 3, R + 3, rad, frac)}" fill="none" stroke="${col}"` +
+          ` stroke-width="6" stroke-linecap="butt"/>` +
+          // Past a full turn the arc has nowhere left to go, and a closed ring
+          // would read as exactly 100%. 45 units report reach above their own
+          // PiN; hatch those so the ring says "over", and let the figure beside
+          // it carry the real share.
+          (frac > 1.001
+            ? `<path d="${arcPath(R + 3, R + 3, rad, 1)}" fill="none" stroke="#1d2021"` +
+              ` stroke-width="6" stroke-dasharray="2 4" opacity="0.45"/>` : "")
+      )).join("");
+    // The PiN line is the denominator — "100% of PiN" beside it says nothing.
+    const line = (label, v, col, showPct = true) => {
+      const f = showPct ? frac(v) : null;
+      return `<div><span style="display:inline-block;width:8px;height:8px;` +
+        `border-radius:50%;background:${col}"></span> ${label}: ` +
+        (v == null ? `<span style="color:#9db1b3">not reported</span>`
+          : `${fmtN(v)}${f == null ? "" : ` · ${Math.round(100 * f)}% of PiN`}`) + `</div>`;
+    };
+    const month = monMonth(r);
+    return `<div style="display:flex;gap:10px;align-items:center;margin-top:4px">` +
+      (base == null ? ""
+        : `<svg width="${2 * R + 6}" height="${2 * R + 6}" style="flex:none">${arcs}</svg>`) +
+      `<div style="font-size:11px;line-height:1.5">` +
+      line("PiN", pin, MON.pin, false) + line("Targeted", tgt, MON.tgt) +
+      line("Reached", rea, MON.rea) +
+      `<div style="color:#9db1b3">HNRP ${r.mon_yr} response` +
+      `${month ? ` · as of ${month}` : ""}</div></div></div>`;
+  }
+
   const tipHtml = (f) => {
     const p = f.properties, r = byPcode.get(p.pcode);
     const sel = countrySel.value;
@@ -504,8 +597,13 @@
       rows += `<div>${sevLabel()}: ${fmtN(sevValOf(r))}${c ? ` (${comboDesc(c)})` : ""}</div>`;
     }
     // Targeted and the plan-year stamp come from the HNRP cycle — not shown in IPC mode.
-    if (pinMode() && tgtOf(r) != null) rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
+    // Where response monitoring covers the selected cycle the pie below carries
+    // targeted, so printing it twice would just be noise.
+    if (pinMode() && tgtOf(r) != null && !monLive(r)) {
+      rows += `<div>Targeted${secTag()}: ${fmtN(tgtOf(r))}</div>`;
+    }
     if (pinMode() && cycOf(r)) rows += `<div>HNRP ${planYr()}</div>`;
+    rows += monPie(r);
     if (pinMode() && r.sevc && !r.sevc[planYr()]) {
       rows += `<div style="color:#9db1b3">not classified in the ${planYr()} cycle</div>`;
     }
@@ -1094,6 +1192,12 @@
   // Class breakdown for the bars — IPC mode only: the selected period's phases.
   // A PiN bar is one figure for the unit, coloured by the unit's own class.
   const PIN_COLOR = "#9db1b3"; // classless units (plans publishing no PbS)
+  // People reached, from response monitoring, for the selected cycle only.
+  const reaOf = (r) => monLive(r)?.[3] ?? null;
+  // Does this country report reach at all for the cycle on screen? The column
+  // is only worth its width where something fills it, and an all-dash column
+  // reads as broken rather than as unreported.
+  const anyReached = (rows) => rows.some((r) => reaOf(r) != null);
   const segsOf = (r) => (pinMode() ? null : (ipcComboOf(r)?.p ?? null));
   const barsWrap = document.getElementById("hnrp-bars-wrap");
   const barsHint = document.getElementById("hnrp-bars-hint");
@@ -1147,7 +1251,7 @@
     : f > 1 ? ">100%"
     : `${(100 * f).toFixed(f >= 0.1 ? 0 : 1)}%`);
 
-  function renderBarsLegend() {
+  function renderBarsLegend(anyReachedNow = false) {
     // PiN mode needs no ramp key: the class number is written in its swatch, and
     // the bar wears the same colour. IPC mode keeps it — the bar there is a
     // stack of phases, and only a key says which segment is which.
@@ -1156,6 +1260,9 @@
         : sevColors().map((c, i) => (i < barC0() ? ""
             : `<span><i style="background:${c}"></i> ${sevClassLabels()[i]}</span>`)).join("")) +
       (pinMode() ? `<span><i class="tick"></i> targeted</span>` : "") +
+      (pinMode() && anyReachedNow
+        ? `<span><i style="background:${MON.rea};border:0.5px solid ${MON.tgt}"></i>` +
+          ` reached</span>` : "") +
       `<span>% columns are of the area's population — hover any figure for the` +
       ` count, the share and the population base used</span>`;
   }
@@ -1185,24 +1292,34 @@
     name: [(a, b) => String(a.name ?? a.pcode).localeCompare(String(b.name ?? b.pcode)), true],
     value: [numCmp((r) => sevValOf(r)), false],
     targeted: [numCmp((r) => tgtOf(r)), false],
+    reached: [numCmp((r) => reaOf(r)), false],
     valuePct: [numCmp((r) => shareOfPop(r, sevValOf(r))), false],
     targetedPct: [numCmp((r) => shareOfPop(r, tgtOf(r))), false],
   };
   let barSort = "value", barSortFlip = false;
 
   function renderBars() {
-    renderBarsLegend();
     const country = countrySel.value;
     // Switching to IPC drops the targeted columns; a sort left pointing at one
     // would order the chart by a quantity no longer on screen.
     if (!pinMode() && barSort.startsWith("targeted")) { barSort = "value"; barSortFlip = false; }
-    const [cmp, isText] = BAR_SORTS[barSort] ?? BAR_SORTS.value;
+    let [cmp, isText] = BAR_SORTS[barSort] ?? BAR_SORTS.value;
     const rows = country
       ? data.rows.filter((r) => r.country === country
             && (pinMode() ? sevValOf(r) != null : sevTotOf(r) > 0 && segsOf(r))
             && !isFilteredOut(catOf(r), clsOf(r)))
           .sort(barSortFlip ? (a, b) => cmp(b, a) : cmp)
       : [];
+    // Reached is only a column where the country reports it for this cycle, so
+    // a sort left on it after a country or plan-year change has nothing to
+    // order by — fall back rather than silently keeping the previous order.
+    if (barSort === "reached" && !(pinMode() && anyReached(rows))) {
+      barSort = "value";
+      barSortFlip = false;
+      [cmp, isText] = BAR_SORTS.value;
+      rows.sort(cmp);
+    }
+    renderBarsLegend(pinMode() && anyReached(rows));
     barsWrap.hidden = rows.length === 0;
     barsHint.hidden = rows.length > 0;
     // "Pick a country" is the wrong prompt when a country IS picked and the
@@ -1226,12 +1343,25 @@
         (c ? ` (${comboDesc(c)})` : "");
     }
     // A cycle can publish needs without targets — say so once, above the chart,
-    // rather than leaving a column of dashes to be read as missing data.
+    // rather than leaving a column of dashes to be read as missing data. Where
+    // the targets come from response monitoring rather than the needs analysis,
+    // say THAT instead: the figures are the same measure but a different source
+    // and a different vintage, and a reader comparing to HAPI should know.
+    const monTgtRows = rows.filter((r) => tgtSrcOf(r) === "response monitoring");
     noTgtEl.hidden = ipcMode() || yearsWithTgt.has(planYr());
     noTgtEl.textContent = `No targeted figures published for the HNRP ${planYr()} cycle yet` +
       ` — its subnational figures come from the needs analysis, which carries PiN only.` +
       (cycYears.some((y) => yearsWithTgt.has(String(y)))
         ? ` Pick an earlier plan year to see targeting.` : "");
+    if (noTgtEl.hidden && monTgtRows.length) {
+      const months = [...new Set(rows.map(monMonth).filter(Boolean))];
+      noTgtEl.hidden = false;
+      noTgtEl.textContent =
+        `Targeting and reach for ${planYr()} come from OCHA's response monitoring` +
+        ` (the needs analysis publishes no subnational target for this cycle)` +
+        `${months.length ? `, as last reported in ${months.join(", ")}` : ""}.` +
+        ` Reach is what partners attributed to an area — country totals are higher.`;
+    }
 
     const W = barsSvg.parentElement.clientWidth || 900;
     // Left gutter holds three labelled columns: forecast swatch, severity
@@ -1248,13 +1378,18 @@
     // takes whatever is left. TARGETED IS PLAN DATA: it comes from the HNRP cycle
     // for the selected plan year, so it has no business on an IPC chart, where
     // the plan year is not even a visible control. IPC mode shows two columns.
+    const showReached = pinMode() && anyReached(rows);
     const NUM_COLS = [
       ["value", pinMode() ? "PiN" : sevLabel()],
       ...(pinMode() ? [["targeted", "Targeted"]] : []),
+      ...(showReached ? [["reached", "Reached"]] : []),
       ["valuePct", `${pinMode() ? "PiN" : sevLabel()} %`],
       ...(pinMode() ? [["targetedPct", "Targeted %"]] : []),
     ];
-    const NUMW = 72, NGAP = 4, NUMS = NUM_COLS.length;
+    // Five columns need to be narrower than four, or the bar they share the row
+    // with is squeezed to nothing on a laptop width.
+    const NUMW = NUM_COLS.length > 4 ? 62 : 72;
+    const NGAP = 4, NUMS = NUM_COLS.length;
     const NUMBLOCK = NUMS * NUMW + (NUMS - 1) * NGAP;
     const numRight = (i) => W - M.r - NUMBLOCK + i * (NUMW + NGAP) + NUMW;
     const barRight = Math.max(M.l + 80, W - M.r - NUMBLOCK - 18);
@@ -1291,8 +1426,11 @@
     // column's job.
     const shownSum = (r) => (pinMode() ? (sevValOf(r) ?? 0)
       : (segsOf(r) ?? []).slice(barC0()).reduce((a, b) => a + (b ?? 0), 0));
+    // Reached counts toward the scale: it is not bounded by PiN or by targeted
+    // (partners report against their own caseloads), and leaving it out let a
+    // reach bar run off the end of the plot area.
     const xmax = Math.max(...rows.map((r) => Math.max(shownSum(r),
-      pinMode() ? (tgtOf(r) ?? 0) : 0)), 1) * 1.04;
+      pinMode() ? (tgtOf(r) ?? 0) : 0, pinMode() ? (reaOf(r) ?? 0) : 0)), 1) * 1.04;
     const X = (v) => M.l + (v / xmax) * (barRight - M.l);
 
     // x grid: 4 round ticks.
@@ -1334,7 +1472,8 @@
     // The bar itself is not a sort target — the four numeric columns are, one
     // per quantity it draws (headcount and share, caseload and targeted).
     g("text", { x: M.l, y: M.t - 10, "font-size": 11, fill: "#555" }).textContent =
-      pinMode() ? "PiN (bar) · targeted (tick)" : "IPC phases (bar)";
+      pinMode() ? `PiN (bar) · targeted (tick)${showReached ? " · reached (foot)" : ""}`
+        : "IPC phases (bar)";
     NUM_COLS.forEach(([key, label], i) => header(numRight(i), key, label, "end"));
     g("line", { x1: 0, x2: W - M.r, y1: M.t - 4, y2: M.t - 4, stroke: "#e2e8e8" });
 
@@ -1458,13 +1597,34 @@
                             stroke: "#1d2021", "stroke-width": 2 }),
           `${r.name ?? r.pcode} — targeted: ${fmtN(tgt)} · ${pctTxt(tgt)}`);
       }
+      // People reached, as a slim overlay along the foot of the PiN bar. Its own
+      // bar rather than a second tick: reach is a quantity to compare across
+      // rows, and it routinely runs past the targeted tick, which a marker
+      // pinned to the tick could not show.
+      const rea = reaOf(r);
+      if (rea != null && rea > 0) {
+        const ofTgt = tgt ? ` · ${Math.round((100 * rea) / tgt)}% of targeted` : "";
+        titled(gr("rect", { x: X(0), y: y + ROW - 9, width: Math.max(X(rea) - X(0), 0.5),
+                            height: 4, fill: MON.rea, stroke: MON.tgt,
+                            "stroke-width": 0.5 }),
+          `${r.name ?? r.pcode} — reached: ${fmtN(rea)}${ofTgt} · ` +
+          `${pctTxt(rea)} · HNRP ${r.mon_yr} response` +
+          `${monMonth(r) ? `, as of ${monMonth(r)}` : ""}`);
+      }
       // ── The same quantities as figures, one sortable column each ─────────
       // Keyed off NUM_COLS so the cells stay aligned with the headers when IPC
       // mode drops the two targeted columns — an index-based list silently
       // shifted the shares under the wrong heading.
       const CELL = {
         value: [val, fmtSI(val), pctTxt(val)],
-        targeted: [tgt, tgt == null ? "–" : fmtSI(tgt), pctTxt(tgt)],
+        targeted: [tgt, tgt == null ? "–" : fmtSI(tgt),
+                   tgt == null ? "no target published for this area"
+                     : `${pctTxt(tgt)} · ${tgtSrcOf(r)}`],
+        // A dash here is "this area reported no response", which is not the same
+        // claim as zero people reached — the hover says so in words.
+        reached: [rea, rea == null ? "–" : fmtSI(rea),
+                  rea == null ? "no response reported for this area"
+                    : `${pctTxt(rea)}${tgt ? ` · ${Math.round((100 * rea) / tgt)}% of targeted` : ""}`],
         valuePct: [share(val), fmtPct(share(val)), pctTxt(val)],
         targetedPct: [share(tgt), tgt == null ? "–" : fmtPct(share(tgt)), pctTxt(tgt)],
       };
