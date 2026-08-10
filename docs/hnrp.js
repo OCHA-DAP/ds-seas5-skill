@@ -538,6 +538,8 @@
     },
   }).addTo(map);
   map.on("click", () => {
+    // Same click the country hit layer just handled — it selected, we must not undo.
+    if (Date.now() - hitClickAt < 100) return;
     if (!countrySel.value) return;
     countrySel.value = "";
     countrySel.dispatchEvent(new Event("change"));
@@ -561,6 +563,7 @@
   // single transparent polygon per country sits above the mosaic and absorbs the
   // pointer while the world view is up; selecting a country removes it, so the
   // per-admin tooltips underneath work exactly as before.
+  let hitClickAt = 0;  // when the country hit layer last handled a click
   const isoCountry = new Map(data.rows.map((r) => [r.iso3, r.country]).filter((x) => x[1]));
   const countryHit = L.geoJSON(
     { type: "FeatureCollection",
@@ -572,7 +575,15 @@
         if (!c) return;
         l.bindTooltip(() => countryTip(c), { sticky: true });
         l.on("click", (e) => {
-          L.DomEvent.stopPropagation(e);  // else the map handler clears it again
+          // stopPropagation alone is not enough here. The map's own click handler
+          // clears the selection, and by the time it runs the selection we just
+          // made is already set — so it reads as "user clicked away" and undoes it,
+          // selecting and deselecting in one click. (This worked only while the
+          // layer was being REMOVED from the map mid-click, which killed
+          // propagation as a side effect.) Stamp the click and let the map handler
+          // skip it.
+          L.DomEvent.stopPropagation(e);
+          hitClickAt = Date.now();
           countrySel.value = c;
           countrySel.dispatchEvent(new Event("change"));
         });
@@ -582,7 +593,7 @@
   // Active only in the world view — but toggled with pointer-events, NEVER by
   // adding and removing the layer. Adding or removing a layer next to an in-flight
   // fitBounds wedges Leaflet's zoom animation and every later fit silently no-ops,
-  // which is the failure fitCountry() already carries a self-heal for. Deselecting
+  // which used to wedge fitCountry()'s animated zoom. Deselecting
   // by clicking the map fires the fit and this toggle in the same tick, so a
   // layer-level toggle would sit exactly on that fault line. CSS does not.
   function syncCountryHit() {
@@ -1475,8 +1486,7 @@
     }
   }
 
-  let fitToken = 0;  // guards the settle handler against a superseded fit
-  function fitCountry(animate = true) {
+  function fitCountry() {
     const c = countrySel.value;
     let bounds = null;
     layer.eachLayer((l) => {
@@ -1484,42 +1494,32 @@
       if (c && (!r || r.country !== c)) return;
       const lb = usableBounds(l);
       if (!lb) return;  // never let a degenerate shape drag the fit to (0,0)
-      bounds = bounds ? bounds.extend(lb) : L.latLngBounds(lb);
+      // COPY, never alias. L.latLngBounds(x) returns x itself when x is already a
+      // LatLngBounds, and Polygon.getBounds() hands back the layer's CACHED _bounds
+      // — so seeding the accumulator with it made every extend() permanently
+      // enlarge that layer's own bounds. One fit over the world view was enough to
+      // stretch the first layer it touched to the whole map, for good.
+      // That layer is Afghanistan's first unit, because AFG sorts first in the
+      // payload, which is why only Afghanistan failed and only after another
+      // country had been shown: the world fit in between did the damage. The same
+      // corrupted bounds put its trimester label at the world centre — in the
+      // Atlantic just south of Ghana.
+      bounds = bounds ? bounds.extend(lb)
+        : L.latLngBounds(lb.getSouthWest(), lb.getNorthEast());
     });
-    // map.stop() first: an animated fit interrupted mid-flight wedges Leaflet's
-    // zoom animation and every later fit silently no-ops (observed: Afghanistan
-    // "not zooming"). Stopping any in-flight animation before starting the next
-    // keeps the smooth zoom safe — and because the wedge keeps finding new ways
-    // to happen, self-heal: if the view hasn't arrived once the animation should
-    // have finished, force the fit without animation.
     if (!bounds) return;
+    // NO ANIMATION, deliberately. With zoomSnap: 0.25 the map runs on fractional
+    // zoom, and Leaflet's animated zoom silently declines to move at all in that
+    // mode — instrumenting every fit showed the animated fitBounds leaving the zoom
+    // exactly where it started, EVERY time, with a self-heal quietly redoing each
+    // one without animation a beat later. So the smooth zoom never actually
+    // existed; what shipped was the self-heal, plus a race for when it mistimed.
+    // That race is what made a country fail to zoom on the third selection while
+    // its chart and labels rendered normally.
+    // Fitting straight away is what the user has been seeing all along, minus the
+    // failure mode. It also removes the moveend/token bookkeeping entirely.
     map.stop();
-    map.fitBounds(bounds, { padding: [10, 10], animate });
-    if (!animate) return;
-    // Verify on the map's OWN settle event, not on a timer. The old check fired at
-    // a fixed 700ms, which is a race: a country drawn in many units (Afghanistan is
-    // the largest at 401) can still be animating then, so the check ran mid-flight,
-    // forced a second fit, and could wedge the very animation it was policing —
-    // most likely on a slower machine, which is why it reproduced for some people
-    // and not others. moveend fires when the view has actually stopped, whatever
-    // the machine, so the retry happens exactly once and only if it is needed.
-    const want = bounds;
-    const tz = map.getBoundsZoom(want, false, L.point(10, 10));
-    fitToken += 1;
-    const token = fitToken;
-    const settle = () => {
-      map.off("moveend", settle);
-      if (token !== fitToken) return;          // a newer fit superseded this one
-      if (countrySel.value !== c) return;      // selection moved on — don't fight it
-      if (Math.abs(map.getZoom() - tz) > 0.5
-          || !map.getBounds().contains(want.getCenter())) {
-        map.stop();
-        map.fitBounds(want, { padding: [10, 10], animate: false });
-      }
-    };
-    map.on("moveend", settle);
-    // Belt and braces: if the animation never starts at all, moveend never fires.
-    setTimeout(() => { if (token === fitToken) settle(); }, 1200);
+    map.fitBounds(bounds, { padding: [10, 10], animate: false });
   }
   // Valid-season selector options: auto + each valid trimester at this issuance.
   for (const t of data.trimesters ?? []) {
@@ -1564,7 +1564,7 @@
   window.tabShown = window.tabShown || {};
   window.tabShown.hnrp = () => {
     map.invalidateSize();
-    fitCountry(false); // instant on reveal — the panel just appeared, nothing to glide from
+    fitCountry(); // every fit is instant now
     renderAll(); // paths may mount after the panel becomes visible — restyle then
   };
   // Escape drops every pinned legend entry — the keyboard route out of a
@@ -1575,6 +1575,6 @@
   buildHnrpLegend(); // safe here: every const it reads is initialised by now
   restoreControls(); // after options are populated, before the first render
   renderAll();
-  if (countrySel.value) fitCountry(false); // restored country: land on it directly
+  if (countrySel.value) fitCountry(); // restored country: land on it directly
   requestAnimationFrame(renderMap); // catch paths that mounted after the first pass
 })();
