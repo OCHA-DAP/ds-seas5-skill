@@ -8,16 +8,28 @@
   // the HNRP itself publishes, where each unit carries one severity class. The
   // fixed levels remain reachable as an unlisted ?adm=1|2|3 escape hatch (no
   // picker: switching would reload the page with that level's payload).
+  // [payload, subnational geometry, country outlines]. The third file is the
+  // mosaic dissolved by country, so the national border and the outer edge of
+  // the admin mosaic are the SAME line. Drawing it from countries.geojson (a
+  // different source at a different simplification) left them visibly out of
+  // register — 51 deg2 of disagreement across the map, 5.4 of it in Tanzania
+  // alone. It is per view because the plan and IPC views are drawn on different
+  // units, so each has its own edge.
   const ADM_FILES = {
-    low: ["data/hnrp_drought_low.json", "data/hnrp_low.geojson"],
+    low: ["data/hnrp_drought_low.json", "data/hnrp_low.geojson",
+          "data/hnrp_low_adm0.geojson"],
     // IPC's own units. The plan view and the IPC view disagree about what a unit
     // IS — DR Congo's plan speaks in 519 zones de santé, its IPC analysis in 26
     // provinces — so each source is drawn on its own geometry rather than one
     // being prorated onto the other. Selected by the Severity source, not ?adm.
-    ipc: ["data/hnrp_drought_ipc.json", "data/hnrp_ipc.geojson"],
-    1: ["data/hnrp_drought.json", "data/hnrp_adm1.geojson"],
-    2: ["data/hnrp_drought_adm2.json", "data/hnrp_adm2.geojson"],
-    3: ["data/hnrp_drought_adm3.json", "data/hnrp_adm3.geojson"],
+    ipc: ["data/hnrp_drought_ipc.json", "data/hnrp_ipc.geojson",
+          "data/hnrp_ipc_adm0.geojson"],
+    1: ["data/hnrp_drought.json", "data/hnrp_adm1.geojson",
+        "data/hnrp_adm1_adm0.geojson"],
+    2: ["data/hnrp_drought_adm2.json", "data/hnrp_adm2.geojson",
+        "data/hnrp_adm2_adm0.geojson"],
+    3: ["data/hnrp_drought_adm3.json", "data/hnrp_adm3.geojson",
+        "data/hnrp_adm3_adm0.geojson"],
   };
   const QS = new URLSearchParams(location.search);
   let ADM = QS.get("adm") ?? "low";
@@ -26,7 +38,7 @@
   // keeps both sources on it; the default view follows the source.
   let PAYLOAD = (ADM === "low" && QS.get("sev") === "ipc") ? "ipc" : ADM;
   const ADM_LABEL = { low: "lowest available level", 1: "admin 1", 2: "admin 2", 3: "admin 3" };
-  let data, geo, world, countryFc = {};
+  let data, geo, adm0, world, countryFc = {};
   try {
     // no-cache = revalidate: the admin-level switch is a plain navigation, which
     // otherwise serves stale payloads straight from HTTP cache mid-session.
@@ -38,12 +50,21 @@
     // being averaged up from admin units — an area mean is not a country forecast.
     // Optional: a missing file costs the country its forecast line, nothing else.
     countryFc = await fj("data/forecast.json").then((f) => f.data).catch(() => ({}));
+    // The outline file is OPTIONAL and loaded separately, so a build that could
+    // not run mapshaper still draws the tab — it just falls back to
+    // countries.geojson for the borders, as it did before. Bundling it into the
+    // Promise.all would make a cosmetic file able to blank the whole view.
+    const loadView = async (key) => {
+      const [d, g] = await Promise.all(ADM_FILES[key].slice(0, 2).map(fj));
+      const a = await fj(ADM_FILES[key][2]).catch(() => null);
+      return [d, g, a];
+    };
     try {
-      [data, geo] = await Promise.all(ADM_FILES[PAYLOAD].map(fj));
+      [data, geo, adm0] = await loadView(PAYLOAD);
     } catch {
       if (ADM !== "1") { // payload not built yet — fall back rather than a blank tab
         ADM = "1";
-        [data, geo] = await Promise.all(ADM_FILES[1].map(fj));
+        [data, geo, adm0] = await loadView(1);
       } else { throw new Error("no data"); }
     }
   } catch {
@@ -54,7 +75,7 @@
   // Every control survives a reload (and makes links shareable with their
   // settings): state is carried in the URL query string.
   const CTLS = {
-    skill: "hnrp-skill", rp: "hnrp-rp", tri: "hnrp-tri",
+    tri: "hnrp-tri",
     sev: "hnrp-sev-type", lvl: "hnrp-sev-lvl", ipcp: "hnrp-ipc-period",
     country: "hnrp-country", yr: "hnrp-plan-yr",
   };
@@ -68,6 +89,12 @@
       else u.searchParams.delete(k); // deselected (e.g. country "") must clear too
     }
     u.searchParams.delete("dro"); // retired "show only drought signals" filter
+    // Retired with the Skill and Return-period selectors. Cleared rather than
+    // ignored so an old shared link stops advertising a setting that no longer
+    // exists — ?skill=high once meant a different map, and leaving it in the bar
+    // would imply it still does.
+    u.searchParams.delete("skill");
+    u.searchParams.delete("rp");
     u.hash = "hnrp";
     return u;
   }
@@ -89,8 +116,21 @@
     }
   }
 
-  const skillSel = document.getElementById("hnrp-skill");
-  const rpSel = document.getElementById("hnrp-rp");
+  // The Skill and Return-period selectors are gone. They set the thresholds a
+  // slot must clear to count as an alert, and the legend's forecast selectors do
+  // the job a reader actually wanted from them — showing or hiding categories —
+  // without re-cutting the categories underneath. Both now sit at what was their
+  // default, so the tab opens exactly as it did before.
+  //
+  // The consequence, deliberately accepted: "High only (r >= 0.50)" and the
+  // 10-year return period are no longer reachable from the UI. Restoring either
+  // means restoring a control, not just a constant — every category on screen is
+  // computed against these.
+  // Functions, not constants: T is reassigned when the index loads, so anything
+  // captured at setup time would freeze the built-in fallback thresholds instead
+  // of the ones the build actually published.
+  const rMin = () => T.r_mod;      // moderate or high skill
+  const rpMin = () => T.sev_rp;    // the "alert" return period (3 yr)
   const srcTypeSel = document.getElementById("hnrp-sev-type");
   const srcLvlSel = document.getElementById("hnrp-sev-lvl");
   const srcLvlWrap = document.getElementById("hnrp-sev-lvl-wrap");
@@ -412,15 +452,14 @@
   const inScope = (r) => !countrySel.value || r.country === countrySel.value;
   const fbSlot = (r) => (r.fb_pct == null ? null
     : { key: r.fb_tri, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r, rainy: !!r.fb_rainy });
-  // Worst qualifying drought among the unit's valid trimesters, under the CURRENT
-  // skill threshold (unlike the export's precomputed slot, which is r_mod-gated).
+  // Worst qualifying drought among the unit's valid trimesters, at the moderate
+  // skill floor — the same one the export's precomputed slot is gated on.
   function worstSlot(r, inclInSeason) {
-    const rMin = skillSel.value === "high" ? T.r_high : T.r_mod;
     let best = null;
     for (const [key, t] of Object.entries(r.tris ?? {})) {
       if (!inclInSeason && t.lead < 0) continue;
       if (t.pct == null || t.pct >= 50 || !t.rainy || t.rp == null) continue;
-      if (t.r == null || t.r < rMin) continue;
+      if (t.r == null || t.r < rMin()) continue;
       if (!best || t.rp > best.rp) best = { key, lead: t.lead, rp: t.rp, pct: t.pct, r: t.r, rainy: true };
     }
     return best;
@@ -438,8 +477,8 @@
   // Qualifying drought signal = drought side, rainy season, skill + RP thresholds.
   function isDrought(s) {
     return !!s && s.pct != null && s.pct < 50 && s.rainy
-      && s.r != null && s.r >= (skillSel.value === "high" ? T.r_high : T.r_mod)
-      && s.rp != null && s.rp >= +rpSel.value;
+      && s.r != null && s.r >= rMin()
+      && s.rp != null && s.rp >= rpMin();
   }
   // Display slot: the qualifying drought slot, else the same season's real
   // category — flood/normal/low-skill/off-season, like the Map tab. Narrowing
@@ -610,7 +649,15 @@
     };
     const month = agg ? agg.monMonth : monMonth(r);
     const monYr = agg ? agg.monYr : r.mon_yr;
-    return `<div style="display:flex;gap:10px;align-items:center;margin-top:4px">` +
+    // flex-start, not center: centring re-positions the rings against the height
+    // of the text beside them, and that height changes from area to area — a
+    // measure that is "not reported" prints shorter than one carrying a share,
+    // and the longer lines wrap at some widths and not others. The rings then
+    // slid up and down as you moved between areas. Anchored to the top they hold
+    // still, and the whole block keeps a floor so the sections below it do not
+    // shuffle either when an area reports fewer figures.
+    return `<div style="display:flex;gap:10px;align-items:flex-start;margin-top:4px` +
+      (base == null ? "" : `;min-height:${2 * R + 6}px`) + `">` +
       (base == null ? ""
         : `<svg width="${2 * R + 6}" height="${2 * R + 6}" style="flex:none">${arcs}</svg>`) +
       `<div style="font-size:11px;line-height:1.5">` +
@@ -665,6 +712,68 @@
   // One renderer for both, because the country view is the same measurements
   // aggregated — anything that reads differently between the two is a place the
   // aggregate has quietly changed meaning.
+  // The country figures above are the plan's PUBLISHED totals, so they match
+  // Humanitarian Action — but the areas beneath them will not add up to those
+  // totals, and a reader who tries the arithmetic deserves to be told why rather
+  // than left to assume the map has lost something. The plan itself attributes
+  // only part of its caseload to areas: 76% of Chad's PiN, 66% of DR Congo's
+  // target, none of Ukraine's or Syria's.
+  //
+  // Stated only when it is materially short, and never as a bare percentage —
+  // "areas account for 66%" is a fact about the plan's own reporting, not a
+  // defect in ours, and the sentence has to carry that.
+  // Units the plan reports on that no published COD gives a boundary for. They
+  // are in the chart and in every total; they are simply not on the map. Saying
+  // so is the whole point — the alternative, and what this tab did until now,
+  // was to drop them silently, which took 45% of Mali's response and 20% of
+  // Burkina's off the tab with nothing on screen to admit it.
+  // How the plan's own units became the areas on screen. Worth its own section
+  // because the two counts routinely disagree and the reasons are not guessable:
+  // Ukraine plans on 48 front-line bands that are 24 oblasts here, Mali on 115
+  // units of which 53 have a boundary we hold. Without this the map simply shows
+  // a different number of areas than the plan describes, and a reader checking
+  // the arithmetic has nothing to go on.
+  function adminNote(agg) {
+    const m = (data.mon_admin ?? {})[agg.iso];
+    if (!m) return "";
+    const bits = [];
+    if (m.merged) {
+      // The causes vary — Ukraine's front-line bands, Mogadishu's districts
+      // inside the single Banadir polygon we hold, units an admin reform split —
+      // so the sentence describes what happened rather than naming one of them.
+      bits.push(`<div>${m.merged} ${m.merged === 1 ? "is" : "are"} finer than` +
+        ` any boundary we hold and ${m.merged === 1 ? "is" : "are"} summed into` +
+        ` the area that contains ${m.merged === 1 ? "it" : "them"}.</div>`);
+    }
+    if (m.nodraw) {
+      bits.push(`<div>${m.nodraw} ha${m.nodraw === 1 ? "s" : "ve"} no boundary` +
+        ` we can draw at all — counted in the totals and listed in the chart,` +
+        ` not on the map. Recent admin reforms, or planning areas no COD maps.</div>`);
+    }
+    if (!bits.length) return "";
+    return `<div class="sec"><div class="sec-t">Plan areas vs map areas</div>` +
+      `<div>The plan reports on ${m.src} area${m.src === 1 ? "" : "s"};` +
+      ` ${m.drawn} are drawn.</div>` +
+      `<div class="muted">${bits.join("")}</div></div>`;
+  }
+  function placedNote(agg) {
+    if (!agg.monNatl || !agg.monPlacedShare) return "";
+    const [pinSh, tgtSh] = agg.monPlacedShare;
+    const parts = [];
+    const word = (sh, what) => (sh < 0.005 ? `none of the ${what}`
+      : `${Math.round(100 * sh)}% of the ${what}`);
+    if (pinSh != null && pinSh < 0.98) parts.push(word(pinSh, "PiN"));
+    if (tgtSh != null && tgtSh < 0.98) parts.push(word(tgtSh, "target"));
+    if (!parts.length) return "";
+    // "accounts for none of it" has to be as plain as this. A country that
+    // publishes a full caseload and locates none of it would otherwise present a
+    // complete-looking country card above a map with nothing on it.
+    const none = (pinSh ?? 1) < 0.005 && (tgtSh ?? 1) < 0.005;
+    return `<div class="muted">Country totals are the plan's published figures.` +
+      ` ${none ? "This plan reports no subnational breakdown, so its areas"
+        : "Its areas"} account for ${parts.join(" and ")}` +
+      `${none ? "" : "; the rest is reported without a location"}.</div>`;
+  }
   function detailBody(r, agg = null) {
     const cat = agg ? agg.cat : catOf(r);
     const s = agg ? agg.slot : slotOf(r);
@@ -719,7 +828,9 @@
         `${agg.nWithSev ? `, ${agg.nWithSev} with ${pinMode() ? "a caseload"
           : "an IPC classification"}` : ""}</div>` +
         (agg.pop != null ? `<div class="muted">population ${fmtN(agg.pop)}</div>` : "") +
-        `</div>`;
+        placedNote(agg) +
+        `</div>` +
+        adminNote(agg);
     } else {
       // Membership must be per-unit, never assumed from scope: in IPC mode most of
       // a country's states can be in view yet outside its HNRP (Nigeria covers only
@@ -786,6 +897,13 @@
     const key = `${country}|${srcTypeSel.value}|${planYr()}|${ipcPeriodSel.value}|${lvl()}`;
     if (aggCache.has(key)) return aggCache.get(key);
     const rows = data.rows.filter((r) => r.country === country);
+    // Rows the MAP can draw. The rest are units the plan reports on that no
+    // published COD has a boundary for (Mali's post-2023 cercles, Burkina's
+    // post-2024 provinces): they carry real figures into the chart and the
+    // totals, but counting them as "areas on the map" would overstate what a
+    // reader can actually see.
+    const drawn = rows.filter((r) => !r.nog);
+    const nNoGeom = rows.length - drawn.length;
     const iso = rows[0]?.iso3;
     const sum = (f) => {
       let any = false, t = 0;
@@ -826,7 +944,7 @@
     // one tiny one. Built from whichever encoding is on screen.
     const mix = [0, 0, 0, 0, 0];
     let mixAny = false, nWithSev = 0;
-    for (const r of rows) {
+    for (const r of drawn) {
       if (ipcMode()) {
         const c = ipcComboOf(r);
         if (!c) continue;
@@ -841,19 +959,55 @@
       }
     }
     const clsBreakdown = mixAny ? mixHtml(mix) : "";
-    // Monitoring: only the units whose snapshot is the selected cycle contribute,
-    // the same rule a unit readout follows.
-    const mon = [0, 1, 2, 3, 4].map((i) => sum((r) => monLive(r)?.[i] ?? null));
+    // Monitoring at country level is the PUBLISHED national caseload, never the
+    // sum of the units. The two differ by up to a third: the source attributes
+    // only 76% of Chad's PiN and 66% of DR Congo's target to any area at all,
+    // and Ukraine, Syria and Venezuela attribute none of their target. A summed
+    // total would silently understate the country and disagree with the figure
+    // on Humanitarian Action, which is the one a reader will check it against.
+    //
+    // The summed figure is kept beside it, to say what share of the country the
+    // subnational rows account for rather than leaving the difference unexplained.
+    //
+    // This sums ALL rows, including the ones with no boundary. The question it
+    // answers is "how much of the published caseload does the plan break down at
+    // all", and a unit we cannot draw is still broken down. How much is DRAWN is
+    // a different question, answered by nNoGeom in the Coverage section — running
+    // the two together would blame the source for our missing polygons.
+    const monPlaced = [0, 1, 2, 3, 4].map((i) => sum((r) => monLive(r)?.[i] ?? null));
+    const natl = (data.mon_national ?? {})[iso] ?? null;
+    const useNatl = natl && natl.year === planYr();
+    const mon = useNatl ? natl.mon : monPlaced;
     const out = {
-      country, iso, nUnits: rows.length, nWithSev,
+      country, iso, nUnits: drawn.length, nNoGeom, nWithSev,
       slot, cat,
-      sevVal: sum((r) => sevValOf(r)),
+      // Same substitution, and for the same reason: in plan mode this IS the
+      // country's PiN, so summing the areas' would print a second, smaller PiN
+      // a few lines above the published one and leave a reader to guess which
+      // of the two the country actually has. In IPC mode there is no published
+      // national figure to prefer, so the sum stands.
+      sevVal: useNatl && pinMode() && natl.mon[0] != null
+        ? natl.mon[0] : sum((r) => sevValOf(r)),
       combo: ipcMode() && iso ? ipcPeriodOf(iso, ipcPeriodSel.value) : null,
-      tgt: sum((r) => tgtOf(r)),
+      tgt: useNatl && pinMode() && natl.mon[1] != null
+        ? natl.mon[1] : sum((r) => tgtOf(r)),
       pop: sum((r) => popOf(r)),
       hasCycle: rows.some((r) => cycOf(r)),
       mon: mon.some((v) => v != null) ? mon : null,
-      monYr: rows.find((r) => monLive(r))?.mon_yr ?? planYr(),
+      monNatl: !!useNatl,
+      // What share of the national PiN and target the mapped units carry. Null
+      // only where there is no national figure to compare against, so "we place
+      // all of it" and "we cannot tell" stay distinguishable.
+      //
+      // A null monPlaced is NOT null here — it is zero. No area reporting the
+      // measure means none of it is on the map, and that is the case most worth
+      // saying out loud: Ukraine, Syria and Venezuela publish a full national
+      // caseload and locate none of it, so without this the card reads as
+      // complete above a map showing nothing.
+      monPlacedShare: useNatl
+        ? [0, 1].map((i) => (natl.mon[i] ? (monPlaced[i] ?? 0) / natl.mon[i] : null))
+        : null,
+      monYr: (useNatl ? natl.year : rows.find((r) => monLive(r))?.mon_yr) ?? planYr(),
       monMonth: (data.mon_months ?? {})[iso] ?? null,
       clsBreakdown,
     };
@@ -1013,13 +1167,16 @@
     countrySel.dispatchEvent(new Event("change"));
   });
   // Country borders above the admin mosaic — without them the admins of
-  // neighbouring countries blend into one surface. Same world-layer source as
-  // the selected-country outline (edge misalignments vs the COD adm1 polygons
-  // are cosmetic).
+  // neighbouring countries blend into one surface. Drawn from the mosaic's own
+  // dissolved edge, so the border sits exactly on the outermost admin polygons
+  // instead of a few hundred metres off them; countries.geojson is the fallback
+  // for a build that could not produce the outline file.
   const dataIsos = new Set(data.rows.map((r) => r.iso3).filter(Boolean));
-  const bordersLayer = L.geoJSON(
-    { type: "FeatureCollection",
-      features: world.features.filter((f) => dataIsos.has(f.properties.iso3)) },
+  const outlineFeatures = () => (adm0
+    ? adm0.features
+    : world.features.filter((f) => dataIsos.has(f.properties.iso3)));
+  let bordersLayer = L.geoJSON(
+    { type: "FeatureCollection", features: outlineFeatures() },
     { interactive: false,
       style: { color: "#1d2021", weight: 1, opacity: 0.65, fill: false } },
   ).addTo(map);
@@ -1034,8 +1191,7 @@
   let hitClickAt = 0;  // when the country hit layer last handled a click
   const isoCountry = new Map(data.rows.map((r) => [r.iso3, r.country]).filter((x) => x[1]));
   const countryHit = L.geoJSON(
-    { type: "FeatureCollection",
-      features: world.features.filter((f) => dataIsos.has(f.properties.iso3)) },
+    { type: "FeatureCollection", features: outlineFeatures() },
     {
       style: { stroke: false, fill: true, fillOpacity: 0, fillColor: "#000" },
       onEachFeature: (f, l) => {
@@ -1128,6 +1284,37 @@
   map.on("zoomend moveend", () => { syncClips(); });
   bordersLayer.bringToFront(); // country borders sit above the inset rings
 
+  // ── Admin boundaries of the selected country ────────────────────────────────
+  // The inset category rings are 2.8px and deliberately flush, so two neighbours
+  // in the same category meet as one 5.6px band of colour. The mosaic's own
+  // boundary stroke is 0.6px, drawn UNDER the rings and in the category's own
+  // edge colour, so inside that band it is invisible: at country zoom the admin
+  // units stopped reading as separate areas at all.
+  //
+  // A thin neutral line above the rings puts them back. Only for the SELECTED
+  // country, which is where the rings are large enough to swallow the boundary
+  // and where a reader is actually comparing one unit against the next — doing
+  // it for all 6,300 units would add a third full-geometry layer to the DOM for
+  // an effect invisible at world zoom.
+  let adminLines = null, adminLinesFor = null;
+  function renderAdminLines() {
+    const c = countrySel.value;
+    if (c === adminLinesFor) return;   // layer churn mid-zoom can wedge Leaflet
+    adminLinesFor = c;
+    if (adminLines) { map.removeLayer(adminLines); adminLines = null; }
+    if (!c) return;
+    const iso3 = data.rows.find((r) => r.country === c)?.iso3;
+    if (!iso3) return;
+    const feats = geo.features.filter(
+      (f) => f.properties.iso3 === iso3 && /Polygon/.test(f.geometry?.type ?? ""));
+    if (feats.length < 2) return;      // one unit has no internal boundaries
+    adminLines = L.geoJSON(
+      { type: "FeatureCollection", features: feats },
+      { interactive: false,
+        style: { color: "#2b3536", weight: 0.7, opacity: 0.5, fill: false } },
+    ).addTo(map);
+  }
+
   // Selected-country outline: admin-1 borders alone make the country edge hard to
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
   // so tiny misalignments at the edge are cosmetic only).
@@ -1139,7 +1326,9 @@
     if (outlineLayer) { map.removeLayer(outlineLayer); outlineLayer = null; }
     if (!c) return;
     const iso3 = data.rows.find((r) => r.country === c)?.iso3;
-    const f = world.features.find((f) => f.properties.iso3 === iso3);
+    // The mosaic's own edge, so the selected-country outline traces the areas it
+    // is selecting rather than a neighbouring source's idea of the same border.
+    const f = outlineFeatures().find((f) => f.properties.iso3 === iso3);
     if (!f) return;
     outlineLayer = L.geoJSON(f, {
       interactive: false,
@@ -1305,6 +1494,7 @@
   const isDimmed = (cat, cls, r) => noMatch(cat, cls, r, activeOf);
   const isFilteredOut = (cat, cls, r) => noMatch(cat, cls, r, (dim) => pinned[dim]);
   function renderMap() {
+    renderAdminLines();
     renderOutline();
     // A pin cannot survive a change of geometry: the admin-level and source
     // swaps rebuild the payload on different units, and a pcode that is not in
@@ -1768,8 +1958,12 @@
     // Reached is only a column where the country reports it for this cycle, so
     // a sort left on it after a country or plan-year change has nothing to
     // order by — fall back rather than silently keeping the previous order.
-    if (/^(reached|prioritized|prioReached)/.test(barSort)
-        && !(pinMode() && anyReached(rows))) {
+    // The share columns were folded into the value columns as bracketed
+    // percentages, so no header offers a *Pct sort any more. A barSort left
+    // pointing at one would order the chart by a column no header claims — the
+    // same failure the reached check below guards against.
+    if (/Pct$/.test(barSort) || (/^(reached|prioritized|prioReached)/.test(barSort)
+        && !(pinMode() && anyReached(rows)))) {
       barSort = "value";
       barSortFlip = false;
       [cmp, isText] = BAR_SORTS.value;
@@ -1862,22 +2056,28 @@
     // all; only the reach denominator needs it to be usefully non-zero.
     const showPrio = pinMode() && anyPrio(allOfCountry);
     const showPrioRea = pinMode() && allOfCountry.some((r) => prioReaOf(r) != null);
-    // [key, label, denominator sub-label]. Every share column names what it is a
-    // share OF, on a second line: they do NOT share a denominator — caseload and
-    // targeting are read against the area's population, delivery against what was
-    // targeted. Three columns ending in "%" meaning three different things is
-    // exactly the sort of thing a reader is entitled to assume away.
+    // [key, label, sub-label, share key]. One column per quantity, in funnel
+    // order — PiN, targeted, prioritized, reached, prioritized reached — each
+    // printing its headcount with its own share beside it in grey brackets.
+    //
+    // The shares used to be five more columns of their own, which put the figure
+    // and its percentage at opposite ends of a ten-column block and made three
+    // headers all read "…%" while meaning three different denominators. They do
+    // NOT share one: caseload and targeting are read against the area's
+    // population, delivery against what was targeted, prioritized delivery
+    // against what was prioritized. So each denominator is named in that
+    // column's own sub-label, right above the brackets it applies to.
     const NUM_COLS = [
-      ["value", pinMode() ? "PiN" : sevLabel()],
-      ...(pinMode() ? [["targeted", "Targeted"]] : []),
-      ...(showPrio ? [["prioritized", "Targeted", "(prioritized)"]] : []),
-      ...(showReached ? [["reached", "Reached"]] : []),
-      ...(showPrioRea ? [["prioritizedReached", "Reached", "(prioritized)"]] : []),
-      ...(showPrio ? [["prioritizedPct", "Prioritized %", "of targeted"]] : []),
-      ...(showReached ? [["reachedPct", "Reached %", "of targeted"]] : []),
-      ...(showPrioRea ? [["prioReachedPct", "Reached %", "of prioritized"]] : []),
-      ["valuePct", `${pinMode() ? "PiN" : sevLabel()} %`, "of population"],
-      ...(pinMode() ? [["targetedPct", "Targeted %", "of population"]] : []),
+      ["value", pinMode() ? "PiN" : sevLabel(), "of population", "valuePct"],
+      ...(pinMode()
+        ? [["targeted", "Targeted", "of population", "targetedPct"]] : []),
+      ...(showPrio
+        ? [["prioritized", "Targeted (prio.)", "of targeted", "prioritizedPct"]] : []),
+      ...(showReached
+        ? [["reached", "Reached", "of targeted", "reachedPct"]] : []),
+      ...(showPrioRea
+        ? [["prioritizedReached", "Reached (prio.)", "of prioritized",
+            "prioReachedPct"]] : []),
     ];
     // Column width falls back from its preferred size until the bar keeps at
     // least MINBAR. A fixed width plus the bar's own minimum meant the two could
@@ -1885,32 +2085,22 @@
     // 6px into the bar. Floor at 50px, below which a header no longer fits its
     // own column and the honest answer is that the viewport is too narrow.
     const MINBAR = 80;
-    const prefW = NUM_COLS.length > 5 ? 62 : NUM_COLS.length > 4 ? 68 : 72;
+    // Each column now carries "123,456 (78%)", so it wants roughly half again
+    // what a bare headcount did. PCTW is the slice reserved on the right for the
+    // bracketed share, so the headcounts stay aligned on their own right edge
+    // instead of drifting with the width of the percentage beside them.
+    const PCTW = 40;
+    const prefW = 62 + PCTW;
     const NGAP = 4;
     const room = W - M.r - M.l - 18 - MINBAR;   // width the columns may take
     const widthFor = (n) => Math.max(50, Math.min(prefW,
       Math.floor((room - (n - 1) * NGAP) / n)));
-    const fits = (n) => n * widthFor(n) + (n - 1) * NGAP <= room;
-    // Too narrow even at the floor: shed the population-share columns rather than
-    // draw the numbers over the bars. Counts and reach-against-target survive —
-    // they answer the questions the chart exists for; "% of the area's population"
-    // is the one a reader can do in their head from the count and the base.
-    for (const key of ["targetedPct", "valuePct"]) {
-      if (fits(NUM_COLS.length)) break;
-      const i = NUM_COLS.findIndex((c) => c[0] === key);
-      if (i < 0) continue;
-      NUM_COLS.splice(i, 1);
-      if (barSort === key) {
-        // Re-sort, not just relabel: the rows were ordered by this column before
-        // it was dropped, and leaving them would put the chart in an order no
-        // visible header claims.
-        barSort = "value";
-        barSortFlip = false;
-        rows.sort(BAR_SORTS.value[0]);
-      }
-    }
     const NUMS = NUM_COLS.length;
     const NUMW = widthFor(NUMS);
+    // Too narrow to hold both: drop the brackets and keep the headcounts, rather
+    // than run the two into each other. The share is the part a reader can
+    // recover from the count and the base printed elsewhere; the count is not.
+    const showPct = NUMW >= 88;
     const NUMBLOCK = NUMS * NUMW + (NUMS - 1) * NGAP;
     const numRight = (i) => W - M.r - NUMBLOCK + i * (NUMW + NGAP) + NUMW;
     const barRight = Math.max(M.l + MINBAR, W - M.r - NUMBLOCK - 18);
@@ -1979,9 +2169,11 @@
                             "text-anchor": anchor,
                             fill: barSort === key ? "#1d2021" : "#555",
                             "font-weight": barSort === key ? 600 : 400 });
+      let subEl = null;
       if (sub) {
         const s = g("text", { x, y: M.t - 10, "font-size": 9, "text-anchor": anchor,
                               fill: "#8b9899" });
+        subEl = s;
         s.textContent = sub;
         s.style.cursor = "pointer";
         s.addEventListener("click", () => {
@@ -2003,13 +2195,27 @@
       // A swatch, not coloured label text: reached is a pale pink that is fine
       // as a 5px bar and illegible as 11px type, and darkening it for the label
       // would stop it matching the bar it names — which is the whole point.
-      // Placed by MEASURED text width, so it tracks the sort arrow appearing.
+      //
+      // Drawn as a glyph INSIDE the right-anchored label rather than as a rect
+      // positioned next to it. The rect was placed by measured text width, and
+      // getComputedTextLength returns 0 while the tab is still display:none — so
+      // the first render fell back to a character-count estimate that runs short
+      // on the narrow labels ("PiN ↓") and put the square on top of the text.
+      // As part of the text it cannot overlap it, at any width, in any font, and
+      // it follows the sort arrow appearing and disappearing for free.
+      //
+      // It rides the SUB-label, not the label. The columns are 90px and the
+      // widest label ("Targeted (prio.)") already fills about 82 of them, so a
+      // glyph on that line would push the header left into its neighbour. The
+      // sub-labels are 9px and half the width, and sit directly beneath, so the
+      // swatch still reads as belonging to the column it names.
       if (swatch) {
-        // getComputedTextLength returns 0 while the tab is display:none, so keep
-        // an estimate to fall back on — a swatch a few pixels off beats none.
-        const w = t.getComputedTextLength?.() || t.textContent.length * 5.6;
-        g("rect", { x: anchor === "end" ? x - w - 9 : x, y: M.t - 16,
-                    width: 6, height: 6, rx: 1.5, fill: swatch });
+        const host = subEl ?? t;
+        const sp = document.createElementNS(NS, "tspan");
+        sp.setAttribute("fill", swatch);
+        sp.setAttribute("font-size", "13");   // ~9px square, up from the 6px rect
+        sp.textContent = "■ ";
+        host.insertBefore(sp, host.firstChild);
       }
       return t;
     }
@@ -2106,12 +2312,27 @@
                      "font-size": 10, "font-weight": 600, "pointer-events": "none",
                      fill: inkOn(sevColors()[cls - 1]) }).textContent = String(cls);
       }
+      // No boundary for this unit in any published COD. It gets a DASHED empty
+      // swatch where a severity class would sit — the severity column is blank
+      // for these anyway, and an outline reads as "there is an area here we
+      // cannot draw" rather than as missing data.
+      if (r.nog && !cls) {
+        titled(gr("rect", { x: COL.sev, y: y + ROW / 2 - 8, width: 15, height: 15,
+                            rx: 2, fill: "none", stroke: "#9db1b3",
+                            "stroke-width": 1, "stroke-dasharray": "2 2" }),
+          "No boundary in our admin vintage — recent admin reform, not yet in a "
+          + "published COD. Its figures are counted here and in the country "
+          + "totals, but it cannot be drawn on the map.");
+      }
       const nm0 = r.name ?? r.pcode;
       const maxLen = 24;
-      const nameEl = gr("text", { x: COL.name, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" });
+      const nameEl = gr("text", { x: COL.name, y: y + ROW / 2 + 4, "font-size": 11,
+                                  fill: r.nog ? "#6b7a7b" : "#333",
+                                  ...(r.nog ? { "font-style": "italic" } : {}) });
       // textContent first: it would wipe a <title> child appended before it.
       nameEl.textContent = nm0.length > maxLen ? nm0.slice(0, maxLen - 1) + "…" : nm0;
-      titled(nameEl, dispName(r));
+      titled(nameEl, dispName(r) + (r.nog ? " — not on the map: no boundary in "
+        + "our admin vintage" : ""));
 
       // ── Bar (headcount, shared scale) + targeted tick ────────────────────
       const pop = popOf(r), popSrc = popSrcOf(r);
@@ -2230,14 +2451,27 @@
         prioReachedPct: pctCell(prioRea, prio, prioReachShare(r),
                                 "reached", "prioritized"),
       };
-      NUM_COLS.map(([k]) => [...CELL[k], k]).forEach(([v, text, tip, key], i) => {
-        // ">100%" is a flag, not a figure — mute it like a missing value.
-        const flagged = v == null || (key.endsWith("Pct") && v > 1);
-        const t = gr("text", { x: numRight(i), y: y + ROW / 2 + 4, "text-anchor": "end",
-                               "font-size": 11, fill: flagged ? "#aab6b7" : "#333",
+      NUM_COLS.forEach(([key, , , pctKey], i) => {
+        const [v, text, tip] = CELL[key];
+        const t = gr("text", { x: numRight(i) - (showPct ? PCTW : 0),
+                               y: y + ROW / 2 + 4, "text-anchor": "end",
+                               "font-size": 11, fill: v == null ? "#aab6b7" : "#333",
                                "font-variant-numeric": "tabular-nums" });
         t.textContent = v == null ? "–" : text;
         titled(t, `${r.name ?? r.pcode} — ${tip}`);
+        if (!showPct || !pctKey) return;
+        // The share, in grey brackets beside the figure it describes. Right
+        // anchored on the column edge so the brackets line up down the chart
+        // while the headcounts line up on their own edge.
+        const [pv, ptext, ptip] = CELL[pctKey];
+        // ">100%" is a flag, not a figure — mute it the way a missing value is
+        // muted, so it cannot be read as a precise result.
+        const over = pv != null && pv > 1;
+        const p = gr("text", { x: numRight(i), y: y + ROW / 2 + 4, "text-anchor": "end",
+                               "font-size": 10, fill: over ? "#c0b0a8" : "#8b9899",
+                               "font-variant-numeric": "tabular-nums" });
+        p.textContent = pv == null ? "" : `(${ptext})`;
+        if (pv != null) titled(p, `${r.name ?? r.pcode} — ${ptip}`);
       });
     });
     // Rows the filter dropped: fade them where they stand, then drop them for
@@ -2360,7 +2594,7 @@
     aggCache.clear(); // its key covers the controls, but the payload can swap too
     renderMap(); renderBars(); renderSide();
   }
-  for (const el of [skillSel, rpSel, srcLvlSel, triSel, ipcPeriodSel, planYrSel]) {
+  for (const el of [srcLvlSel, triSel, ipcPeriodSel, planYrSel]) {
     el.addEventListener("change", renderAll);
   }
   // Changing the source changes the GEOMETRY, not just the colours: the plan view
@@ -2369,10 +2603,13 @@
   // rebuilding three Leaflet layers in place. Every control is already in the URL,
   // so the only thing the user loses is the map's pan/zoom.
   // Switching source swaps the SUBNATIONAL geometry — the plan and IPC views are
-  // drawn on different units — but everything at country level is the same in both:
-  // the world backdrop, the country borders, the hit layer, and the map's own view.
-  // So swap the two payload-derived layers in place and leave the rest standing,
-  // rather than reloading the page and rebuilding the world from scratch.
+  // drawn on different units — so the world backdrop and the map's own view stay
+  // standing while the payload-derived layers are rebuilt in place.
+  //
+  // The country BORDER is payload-derived now: it is the mosaic's dissolved
+  // edge, and the two views have different mosaics. Leaving it standing would
+  // put the plan view's outline around the IPC view's areas, which is the exact
+  // misregistration this outline was introduced to remove.
   let swapping = false;
   srcTypeSel.addEventListener("change", async () => {
     const want = (ADM === "low" && srcTypeSel.value === "ipc") ? "ipc" : ADM;
@@ -2380,9 +2617,13 @@
     swapping = true;
     mapEl.classList.add("swapping");
     try {
-      const [nd, ng] = await Promise.all(ADM_FILES[want].map(
-        (f) => fetch(f, { cache: "no-cache" }).then((r) => (r.ok ? r.json() : Promise.reject(r)))));
-      data = nd; geo = ng; PAYLOAD = want;
+      const jf = (f) => fetch(f, { cache: "no-cache" })
+        .then((r) => (r.ok ? r.json() : Promise.reject(r)));
+      const [nd, ng] = await Promise.all(ADM_FILES[want].slice(0, 2).map(jf));
+      // Optional, exactly as on first load: a missing outline falls back to
+      // countries.geojson rather than failing the swap.
+      const na = await jf(ADM_FILES[want][2]).catch(() => null);
+      data = nd; geo = ng; adm0 = na; PAYLOAD = want;
       byPcode = new Map(data.rows.map((r) => [r.pcode, r]));
       // Rebuild only what the payload draws. Clip defs are keyed by pcode and the
       // old paths are about to be discarded, so drop them with their owner.
@@ -2391,7 +2632,23 @@
       clipPaths = {};
       layer = makeLayer().addTo(map);
       ringCat = makeRing().addTo(map);
+      // The border belongs to the mosaic that just changed, so it is replaced
+      // rather than re-fronted.
+      map.removeLayer(bordersLayer);
+      bordersLayer = L.geoJSON(
+        { type: "FeatureCollection", features: outlineFeatures() },
+        { interactive: false,
+          style: { color: "#1d2021", weight: 1, opacity: 0.65, fill: false } },
+      ).addTo(map);
       bordersLayer.bringToFront();   // borders stay above the new mosaic
+      // The country outline and the selected country's admin lines are both
+      // drawn from the geometry that just changed, and both short-circuit on an
+      // unchanged country name — which is exactly the case here. Invalidate them
+      // explicitly or they keep drawing the previous view's units.
+      outlineFor = null;
+      adminLinesFor = null;
+      renderAdminLines();
+      renderOutline();
       fillCountries();
       buildPlanYears();
       buildYearsWithTgt();

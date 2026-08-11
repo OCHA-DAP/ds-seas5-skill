@@ -108,6 +108,7 @@ import argparse
 import calendar
 import json
 import re
+import subprocess
 import sys
 import unicodedata
 from pathlib import Path
@@ -207,8 +208,10 @@ def export_geometry(isos: list[str], names: dict[str, str]) -> None:
 
     Source: the COD shapefiles the zonal-stats pipeline rasterized ({iso3}_shp.zip in
     the PROD `polygon` container), so pcodes match the skill data by construction.
-    Simplified per country with topology preserved (shared borders stay gap-free);
-    cross-country borders come from different files and may not align exactly.
+    Simplified per country with topology preserved, so shared borders WITHIN a
+    country stay gap-free. Borders BETWEEN countries come from different COD
+    files and do not align on their own — edge_match() below closes those seams
+    once the file is written.
     """
     parts = []
     for iso3 in isos:
@@ -245,7 +248,123 @@ def export_geometry(isos: list[str], names: dict[str, str]) -> None:
     gdf = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs=parts[0].crs)
     gdf["name"] = gdf["pcode"].map(names)
     GEO_OUT.write_text(gdf.to_json())
+    edge_match(GEO_OUT)
     print(f"Wrote {GEO_OUT}  ({GEO_OUT.stat().st_size / 1e6:.1f} MB, {len(gdf)} polygons)")
+
+
+# Gap smaller than this between two areas = a simplification artefact, fill it.
+# 10 km2 removes 97% of the slivers (1,791 holes -> 62) while leaving every
+# genuine hole in place: the six real ones here are 0.15-5.3 deg2 (lakes, and
+# enclaves of countries outside the scope), two orders of magnitude bigger. At
+# 30 km2 another 42 close, but a 30 km2 hole is 5x6 km and could be a real
+# unmapped feature, so the threshold stays where the answer is unambiguous.
+GAP_FILL_KM2 = 10
+# ~11 m. Two orders of magnitude finer than the simplification tolerance (0.02deg
+# is ~2 km), so nothing visible is lost, and it halves the mosaic: 6.1 MB -> 3.2.
+# It also has to be applied BEFORE the country outline is dissolved out of the
+# mosaic, or the two carry different coordinates and the seam reopens.
+COORD_PRECISION = 0.0001
+
+
+def edge_match(path: Path) -> None:
+    """Match boundaries across the seams the per-country simplification leaves.
+
+    Each country's polygons are simplified as one topology, so borders WITHIN a
+    country are already gap-free. Borders BETWEEN countries are not: they come
+    from different COD files, are simplified independently, and end up a few
+    hundred metres apart — 1,785 sliver gaps across the map. The mixed-level
+    views are worse again, because a country drawn at admin-1 sits against a
+    neighbour drawn at admin-2, simplified at a different tolerance.
+
+    mapshaper's `-clean` snaps those seams together and fills the slivers. It
+    runs over the finished geojson (6 MB) rather than the ~50 raw shapefiles, so
+    it costs tens of MB of memory rather than gigabytes.
+
+    Two things this must never do, both checked rather than assumed:
+      - lose an area. `-clean` drops features whose geometry collapses, and a
+        vanished area is the absent-data failure in its purest form. Only
+        features that ALREADY had null geometry may disappear; anything else
+        rejects the whole result and keeps the unmatched file.
+      - be required. No network, no npx, no mapshaper — the build still
+        produces a correct map, just with the seams it had before. It says so
+        rather than failing.
+    """
+    before = json.loads(path.read_text())
+    ids = lambda d: {f["properties"]["pcode"] for f in d["features"]}  # noqa: E731
+    null_geom = {f["properties"]["pcode"] for f in before["features"]
+                 if not f.get("geometry")}
+    tmp = path.with_name(path.stem + ".edge.geojson")
+    # precision is an INPUT option, deliberately: applied on the way out it
+    # quantizes finished polygons and leaves 40 of them self-intersecting or with
+    # a hole outside their shell, because collapsing coordinates onto a grid can
+    # cross two edges that were merely close. Applied on the way in, -clean runs
+    # afterwards and repairs exactly that. Same file size, zero invalid geometry.
+    cmd = ["npx", "-y", "mapshaper@0.6", str(path), f"precision={COORD_PRECISION}",
+           "-clean", f"gap-fill-area={GAP_FILL_KM2}km2", "-o", str(tmp)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        print(f"  edge-match SKIPPED ({type(exc).__name__}) — {path.name} keeps "
+              f"its per-country seams")
+        return
+    if r.returncode != 0 or not tmp.exists():
+        tmp.unlink(missing_ok=True)
+        print(f"  edge-match SKIPPED (mapshaper exit {r.returncode}) — "
+              f"{path.name} keeps its per-country seams")
+        return
+    after = json.loads(tmp.read_text())
+    lost = (ids(before) - ids(after)) - null_geom
+    if lost:
+        tmp.unlink()
+        print(f"  edge-match REJECTED for {path.name} — it would drop "
+              f"{len(lost)} drawable area(s): {sorted(lost)[:8]}")
+        return
+    tmp.replace(path)
+    note = next((ln for ln in r.stderr.splitlines() if "slivers" in ln), "")
+    print(f"  edge-matched {path.name}: {note.strip() or 'cleaned'} "
+          f"({len(after['features'])} features)")
+    write_outline(path)
+
+
+def outline_path(geo_path: Path) -> Path:
+    return geo_path.with_name(geo_path.stem + "_adm0.geojson")
+
+
+def write_outline(geo_path: Path) -> None:
+    """The country border layer, dissolved OUT OF the mosaic it will be drawn on.
+
+    It used to come from data/countries.geojson — a different source at a
+    different simplification, which left the national border and the outer edge
+    of the admin mosaic visibly out of register. Dissolving the mosaic instead
+    makes them the same line by construction, at every zoom, for every view.
+
+    Runs on the file AFTER edge-matching and precision reduction, so the outline
+    inherits exactly the coordinates the mosaic ships with. Dissolving the
+    pre-precision version would reintroduce the seam this exists to remove.
+
+    countries.geojson is still needed and still loaded: it draws the rest of the
+    world, which has no mosaic to dissolve.
+    """
+    out = outline_path(geo_path)
+    # No precision option here: the mosaic is already quantized and a dissolve
+    # only ever reuses its coordinates, so re-quantizing could nudge the outline
+    # off the very edge it is meant to trace.
+    cmd = ["npx", "-y", "mapshaper@0.6", str(geo_path), "-dissolve", "iso3",
+           "-o", str(out)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        print(f"  outline SKIPPED ({type(exc).__name__}) — the site falls back "
+              f"to countries.geojson for {geo_path.name}")
+        return
+    if r.returncode != 0 or not out.exists():
+        out.unlink(missing_ok=True)
+        print(f"  outline SKIPPED (mapshaper exit {r.returncode}) — the site "
+              f"falls back to countries.geojson for {geo_path.name}")
+        return
+    n = len(json.loads(out.read_text())["features"])
+    print(f"  wrote {out.name}: {n} country outlines "
+          f"({out.stat().st_size / 1e6:.1f} MB)")
 
 
 def _fold(s: str) -> str:
@@ -296,6 +415,13 @@ REFORM_XWALK = {
     ("BFA", "BF58"): ("BF52", None), ("BFA", "BF60"): ("BF52", None),  # Sirba, Tapoa ⊂ Est
     ("BFA", "BF63"): ("BF52", None),                                   # Goulmou ⊂ Est
     ("BFA", "BF59"): ("BF56", None), ("BFA", "BF64"): ("BF56", None),  # Soum, Liptako ⊂ Sahel
+    # Somalia: the plan plans on Mogadishu's newer districts, where our vintage
+    # holds Banadir whole as a single adm2 unit (SO2201). Safe to roll up because
+    # the source publishes NO other Banadir row — not even SO2201 itself — so
+    # nothing is double counted, and between them they carry a quarter of the
+    # country's target.
+    ("SOM", "SO2203"): ("SO2201", {"daynile", "dayniile"}),
+    ("SOM", "SO2210"): ("SO2201", {"kahda", "kaxda"}),
     # CAR: prefectures created 2020, after our COD vintage:
     ("CAF", "CF33"): ("CF32", None),  # Ouham-Fafa ⊂ Ouham
     ("CAF", "CF34"): ("CF31", None),  # Lim-Pendé ⊂ Ouham-Pendé
@@ -910,7 +1036,48 @@ def load_pbs_adm1() -> pd.DataFrame:
     return out
 
 
-def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
+def load_monitoring_national() -> dict[str, dict]:
+    """The PUBLISHED national caseload per country — not a sum of the units.
+
+    A country total must never be derived by summing the subnational rows. They
+    are an attribution of the national caseload to areas, and the source leaves
+    much of it unattributed: 24% of Chad's PiN and 34% of DR Congo's target sit
+    on no area at all, and Ukraine, Syria and Venezuela attribute none of their
+    target. Summing therefore understates the country by up to a third, and no
+    amount of p-code reconciliation here can recover a figure the source never
+    placed. The gap is a property of the source, so the honest fix is to show
+    the published figure and say what share of it the map accounts for.
+
+    Returns {iso3: {"mon": [pin, tgt, prio, rea, prioRea], "year": 2026}}.
+    """
+    q = """
+    SELECT m.iso3, m.year, m.in_need, m.targeted, m.prioritized_target,
+           m.reached, m.prioritized_reached
+    FROM hpc.monitoring_national m
+    JOIN (SELECT plan_id, max(snapshot_date) AS d
+          FROM hpc.monitoring_national GROUP BY plan_id) l
+      ON l.plan_id = m.plan_id AND l.d = m.snapshot_date
+    WHERE m.cluster_name = 'HNRP' AND m.iso3 IS NOT NULL
+    """
+    try:
+        with stratus.get_engine("dev").connect() as conn:
+            df = pd.read_sql(q, conn)
+    except Exception as exc:
+        print(f"  monitoring national: SKIPPED — {exc.__class__.__name__}: {exc}\n"
+              f"  country totals will fall back to the sum of units (an UNDERCOUNT)")
+        return {}
+    cols = ["in_need", "targeted", "prioritized_target", "reached",
+            "prioritized_reached"]
+    out = {}
+    for _, r in df.iterrows():
+        vals = [None if pd.isna(r[c]) else int(r[c]) for c in cols]
+        if any(v is not None for v in vals):
+            out[r["iso3"]] = {"mon": vals, "year": str(int(r["year"]))}
+    print(f"  monitoring national: {len(out)} published country caseloads")
+    return out
+
+
+def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str], dict[str, int]]:
     """Response monitoring per ADM1 unit: targeted, prioritized target, reached.
 
     From hpc.monitoring_admin (ds-hnrp-mirror), which mirrors the GHO monitoring
@@ -964,9 +1131,9 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
         # thing on screen.
         print(f"  monitoring: SKIPPED — {exc.__class__.__name__}: {exc}\n"
               f"  targeted/reached will be absent (not zero) for every unit")
-        return pd.DataFrame(columns=["pcode", "iso3"]), {}
+        return pd.DataFrame(columns=["pcode", "iso3"]), {}, {}
     if df.empty:
-        return df, {}
+        return df, {}, {}
     # The unit's own name, off the tail of "Province>Zone". normalize_pcodes has a
     # name fallback for codes it cannot reconcile, and it was doing nothing here
     # because this frame carried no name column at all — 418 of 3,917 monitored
@@ -975,6 +1142,13 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     # (CD1000ZS04) while the NAMES agree exactly.
     df["name"] = (df["location_path"].fillna("").str.rsplit(">", n=1).str[-1]
                   .str.strip().replace("", None))
+    # The PARENT's name too ("OT" from "OT>OT 0-20 km"). A row that rolls up onto
+    # its parent must be labelled with the parent, not with whichever child
+    # happened to sort first: Ukraine's four occupied-territory bands collapse to
+    # one row, and calling it "OT 0-20 km" would name a quarter of the thing it
+    # now represents. Only matters where the parent has no polygon of its own to
+    # supply a name.
+    df["parent_name"] = df["location_path"].fillna("").str.split(">").str[0].str.strip()
     df = df.drop(columns=["location_path"])
     # Rolling up is only possible where we hold the right parent code, and the
     # mirror carries admin1_code alone — so a deeper row can be rolled to admin-1
@@ -999,6 +1173,9 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
                   f"{', '.join(sorted(rolled['iso3'].unique()))} "
                   f"(front-line bands; the band detail does not survive)")
         df.loc[deep, "pcode"] = df.loc[deep, "admin1_code"]
+        # The row now IS its parent, so it must answer to the parent's name.
+        _par = df.loc[deep, "parent_name"].replace("", None)
+        df.loc[deep, "name"] = _par.combine_first(df.loc[deep, "name"])
     else:
         # A row coarser than this build cannot be split down it — that would be
         # the population downscale we deliberately removed. Drop, and say so.
@@ -1014,6 +1191,11 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
             print(f"  monitoring: {int(deep.sum())} row(s) below adm{LEVEL} rolled to "
                   f"their admin-1 parent is not meaningful here — dropped")
             df = df[~deep]
+    # How many units the plan actually reports on at this level, BEFORE the
+    # roll-up below collapses them. Ukraine's 48 front-line bands become 25 rows
+    # here, and the sidebar has to be able to say so — after this groupby the
+    # evidence that 48 existed is gone.
+    src_units = df.groupby("iso3").size().to_dict()
     df = (df.groupby(["iso3", "pcode", "year"], as_index=False)
           .agg({**{c: lambda s: s.sum(min_count=1)
                    for c in ("in_need", "targeted", "prioritized_target",
@@ -1047,7 +1229,7 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     n_rea = int((df["monRea"].fillna(0) > 0).sum())
     print(f"Monitoring: {df['iso3'].nunique()} countries, {len(df)} units, "
           f"{n_rea} with reach reported ({df['mon_year'].max()} cycle)")
-    return df, months
+    return df, months, src_units
 
 
 def load_population_adm1() -> pd.DataFrame:
@@ -1211,6 +1393,13 @@ def build_lowest() -> None:
     any_rows: dict[str, int] = {}
     for lvl in (1, 2, 3):
         for r in data[lvl]["rows"]:
+            # Geometry-less rows must not vote on the level. They exist precisely
+            # because they cannot be drawn, so letting them count would be a way
+            # to pick a level at which a country plots LESS of itself — Mali's
+            # unplaceable cercles would drag it to adm2 even if adm1 drew it
+            # whole. They ride along at whatever level the drawable rows choose.
+            if r.get("nog"):
+                continue
             iso = r["iso3"]
             any_rows[iso] = max(any_rows.get(iso, 1), lvl)
             cur = (newest is not None
@@ -1232,12 +1421,22 @@ def build_lowest() -> None:
     feats = [f for lvl in (1, 2, 3) for f in geo[lvl]["features"]
              if level_of.get(f["properties"].get("iso3")) == lvl]
 
-    payload = {**data[1], "adm_level": "low", "rows": rows}
+    # Per-country and level specific, so it cannot be inherited from level 1 the
+    # way the rest of the header is — a country drawn at adm2 needs its adm2
+    # counts, not its adm1 ones.
+    mon_admin = {iso: d for lvl in (1, 2, 3)
+                 for iso, d in (data[lvl].get("mon_admin") or {}).items()
+                 if level_of.get(iso) == lvl}
+    payload = {**data[1], "adm_level": "low", "rows": rows, "mon_admin": mon_admin}
     out = base / "hnrp_drought_low.json"
     out.write_text(json.dumps(payload, separators=(",", ":")))
     gout = base / "hnrp_low.geojson"
     gout.write_text(json.dumps({"type": "FeatureCollection", "features": feats},
                                separators=(",", ":")))
+    # After assembly, not before: this view mixes levels, so its worst seams are
+    # exactly the ones between a country drawn at admin-1 and its neighbour drawn
+    # at admin-2 — which only exist once the two are in the same file.
+    edge_match(gout)
     from collections import Counter
     mix = Counter(level_of.values())
     print(f"Lowest-level view: {len(rows)} units, {len(feats)} polygons "
@@ -1293,6 +1492,8 @@ def combine_ipc_view() -> None:
     plan_level: dict[str, int] = {}
     for lvl in (1, 2, 3):
         for r in data[lvl]["rows"]:
+            if r.get("nog"):   # cannot be drawn, so cannot choose the level
+                continue
             plan_level[r["iso3"]] = max(plan_level.get(r["iso3"], 1), lvl)
     no_ipc = sorted(set(plan_level) - set(level_of))
     for iso in no_ipc:
@@ -1306,12 +1507,19 @@ def combine_ipc_view() -> None:
     feats = [f for lvl in (1, 2, 3) for f in geo[lvl]["features"]
              if level_of.get(f["properties"].get("iso3")) == lvl]
 
-    payload = {**data[1], "adm_level": "ipc", "rows": rows}
+    mon_admin = {iso: d for lvl in (1, 2, 3)
+                 for iso, d in (data[lvl].get("mon_admin") or {}).items()
+                 if level_of.get(iso) == lvl}
+    payload = {**data[1], "adm_level": "ipc", "rows": rows, "mon_admin": mon_admin}
     out = base / "hnrp_drought_ipc.json"
     out.write_text(json.dumps(payload, separators=(",", ":")))
     gout = base / "hnrp_ipc.geojson"
     gout.write_text(json.dumps({"type": "FeatureCollection", "features": feats},
                                separators=(",", ":")))
+    # After assembly, not before: this view mixes levels, so its worst seams are
+    # exactly the ones between a country drawn at admin-1 and its neighbour drawn
+    # at admin-2 — which only exist once the two are in the same file.
+    edge_match(gout)
     from collections import Counter
     mix = Counter(level_of.values())
     with_ipc = sum(1 for r in rows if r.get("ipc"))
@@ -1330,7 +1538,21 @@ def main() -> None:
     ap.add_argument("--level", choices=("1", "2", "3", "low", "ipc"), default="1",
                     help="Admin level of the export (2/3 write *_admN outputs; "
                          "'low' combines the three per-country finest levels)")
+    ap.add_argument("--edge-match-only", action="store_true",
+                    help="Edge-match the geojsons that already exist and write "
+                         "their country outlines, without rebuilding anything. "
+                         "Reads no shapefiles and no database — mapshaper over "
+                         "the finished files, a few tens of MB of memory.")
     args = ap.parse_args()
+    if args.edge_match_only:
+        base = HERE.parent / "docs" / "data"
+        found = [p for p in (base / f"hnrp_{n}.geojson" for n in
+                             ("adm1", "adm2", "adm3", "low", "ipc")) if p.exists()]
+        if not found:
+            sys.exit("No geojsons to edge-match — build a level first")
+        for p in found:
+            edge_match(p)
+        return
     if args.level == "low":
         build_lowest()
         return
@@ -1464,7 +1686,8 @@ def main() -> None:
     df_hno = normalize_pcodes(load_hno_pop_adm1(sub_parent), poly, "hno-pop")
     df_hno = (df_hno.groupby("pcode", as_index=False)
               .agg({"hno_pop": "sum", "hno_year": "max"}))
-    df_mon_raw, mon_months = load_monitoring_adm1()
+    mon_national = load_monitoring_national()
+    df_mon_raw, mon_months, mon_src = load_monitoring_adm1()
     if len(df_mon_raw):
         df_mon = normalize_pcodes(df_mon_raw, poly, "monitoring")
         # Two rows can land on one unit for two very different reasons, and they
@@ -1476,7 +1699,12 @@ def main() -> None:
         #
         # A NAME match is inferred. Two areas reconciling onto one unit that way
         # means at least one guess is wrong, and summing them would produce a
-        # figure belonging to neither. Those are dropped instead.
+        # figure belonging to neither. Those must not land on the unit — but they
+        # are not thrown away either: they keep their ORIGINAL code and name and
+        # become geometry-less rows, because "we cannot tell which area this is"
+        # is a reason to stop drawing it, not a reason to stop counting it. Six
+        # real Malian cercles (San, Tominian, Douentza, Bandiagara, Koro, Bankass)
+        # were being deleted here, 12% of the country's caseload.
         _ref = set(poly["pcode"])
         certain = df_mon_raw.apply(
             lambda r: (REFORM_XWALK.get((r["iso3"], r["pcode"])) is not None
@@ -1489,8 +1717,14 @@ def main() -> None:
             listed = ", ".join(f"{i}:{c}({n})" for i, c, n
                                in zip(d["iso3"], d["pcode"], d["name"]))
             print(f"  monitoring: {int(drop.sum())} row(s) NAME-matched onto a unit "
-                  f"another row already holds — dropped, not summed: {listed}")
-            df_mon = df_mon[~drop]
+                  f"another row already holds — kept off the map, not summed "
+                  f"onto it: {listed}")
+        # Restore the identity the name match overwrote, so they travel as
+        # themselves rather than as the unit they were mistaken for.
+        mon_collided = df_mon.loc[drop].copy()
+        if len(mon_collided):
+            mon_collided["pcode"] = df_mon_raw.loc[mon_collided.index, "pcode"]
+        df_mon = df_mon[~drop]
         kept = dup & df_mon["_certain"].reindex(df_mon.index, fill_value=False)
         if kept.any():
             print(f"  monitoring: {int(kept.sum())} row(s) share a unit through a "
@@ -1500,10 +1734,66 @@ def main() -> None:
         # min_count=1 throughout: a country that reports no reach must stay None,
         # never 0 — "nobody reached" and "nobody reported" are different claims.
         _mon_sum = lambda s: s.sum(min_count=1)  # noqa: E731
+        # Units the plan reports on that our COD vintage has no polygon for, at
+        # any code or name. They cannot be DRAWN — but dropping them here is what
+        # made 45% of Mali's response and 20% of Burkina's disappear from the tab
+        # altogether: absent from the map AND from the bar chart, with nothing on
+        # screen to say a fifth of the country was missing. The admin reforms
+        # behind them (Mali 2023, Burkina 2024, CAR 2020) are not in any published
+        # COD yet — checked against fieldmaps' current originals, which are the
+        # same vintage we hold — so there is no boundary to find and no honest
+        # parent to fold them into.
+        #
+        # So keep them aside and re-admit them at payload time as geometry-less
+        # rows: they carry their figures into the bar chart and the country
+        # totals, and the site marks them as having no boundary.
+        _placed = df_mon["pcode"].isin(set(poly["pcode"]))
+        # How each country's planning units became map units, for the sidebar.
+        # A reader comparing our area count with the plan's deserves to know that
+        # Ukraine's 48 front-line bands are 24 oblasts here and that 62 of Mali's
+        # 115 units are not drawn at all — otherwise the arithmetic looks wrong
+        # and there is nothing on screen to explain it.
+        _all_mon = pd.concat(
+            [df_mon, mon_collided.drop(columns=["_certain"], errors="ignore")],
+            ignore_index=True)
+        _ref_pc = set(poly["pcode"])
+        mon_admin: dict[str, dict] = {}
+        for _iso, _g in _all_mon.groupby("iso3"):
+            _pl = _g[_g["pcode"].isin(_ref_pc)]
+            _drawn = int(_pl["pcode"].nunique())
+            _nodraw = int(_g["pcode"].nunique() - _drawn)
+            # src comes from the LOADER's input, not from this frame: roll-ups
+            # happen in two places (the loader folds sub-admin planning units onto
+            # their parent, then the reform crosswalk folds new units into old
+            # ones) and only the loader still knows how many there were to begin
+            # with. Everything the plan reports is therefore drawn, merged into
+            # something drawn, or undrawable — and those three account for src.
+            _src = int(mon_src.get(_iso, _g["pcode"].nunique()))
+            mon_admin[_iso] = {
+                "src": _src,                       # units the plan reports on
+                "drawn": _drawn,                   # polygons they landed on
+                "nodraw": _nodraw,                 # units with no polygon at all
+                "merged": max(0, _src - _drawn - _nodraw),  # folded into another
+            }
+        mon_unplaced = pd.concat(
+            [df_mon.loc[~_placed],
+             mon_collided.drop(columns=["_certain"], errors="ignore")],
+            ignore_index=True)
+        mon_unplaced = (mon_unplaced.groupby(["iso3", "pcode"], as_index=False)
+                        .agg({"name": "first", "mon_year": "max",
+                              **{c: _mon_sum for c in _mon_cols}}))
+        if len(mon_unplaced):
+            by_iso = mon_unplaced.groupby("iso3").size().sort_values(ascending=False)
+            print(f"  monitoring: {len(mon_unplaced)} unit(s) have no polygon to draw "
+                  f"— kept as geometry-less rows so their figures still count: "
+                  + ", ".join(f"{i}:{n}" for i, n in by_iso.items()))
+        df_mon = df_mon.loc[_placed]
         df_mon = (df_mon.groupby("pcode", as_index=False)
                   .agg({**{c: _mon_sum for c in _mon_cols}, "mon_year": "max"}))
     else:
         df_mon = pd.DataFrame(columns=["pcode"])
+        mon_unplaced = pd.DataFrame(columns=["iso3", "pcode", "name", "mon_year"])
+        mon_admin = {}
     ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
     ipc_lists = _ipc_lists(df_ipc)
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
@@ -1883,12 +2173,44 @@ def main() -> None:
             out["ipc"] = ipc_lists[rec["pcode"]]
         return out
 
+    # Units the plan reports on that have no polygon at this level. They travel as
+    # ordinary rows with "nog": 1 and no forecast — the map has nothing to draw for
+    # them, but the bar chart, the country totals and the sidebar all include them,
+    # which is the difference between a figure being SHOWN WITHOUT A BOUNDARY and a
+    # figure being silently gone.
+    def _nogeom_rows() -> list[dict]:
+        out = []
+        for rec in mon_unplaced.to_dict("records"):
+            mon = [rec.get(c) for c in
+                   ("monPin", "monTgt", "monPrio", "monRea", "monPrioRea")]
+            mon = [None if v is None or pd.isna(v) else int(v) for v in mon]
+            if not any(v is not None for v in mon):
+                continue
+            row = {"pcode": rec["pcode"], "iso3": rec["iso3"],
+                   "country": country_names.get(rec["iso3"]),
+                   "name": rec.get("name") or rec["pcode"],
+                   "nog": 1, "mon": mon}
+            yr = rec.get("mon_year")
+            if yr is not None and pd.notna(yr):
+                row["mon_yr"] = str(int(yr))
+            out.append(row)
+        return out
+
     payload = {
         "adm_level": LEVEL,
         # Which month each country last reported response monitoring. Countries
         # are on their own cadence, so there is no single "as of" — the site
         # prints the country's own month beside its reached figure.
         "mon_months": {k: v for k, v in sorted(mon_months.items())},
+        # The country's PUBLISHED caseload, so a country total on screen matches
+        # Humanitarian Action instead of the sum of whatever units we managed to
+        # place. See load_monitoring_national: the subnational rows do not add up
+        # to this and are not supposed to.
+        "mon_national": {k: mon_national[k] for k in sorted(mon_national)},
+        # How the plan's units map onto the ones we draw, per country. Level
+        # specific, so build_lowest / combine_ipc_view rebuild it from whichever
+        # level each country is actually drawn at.
+        "mon_admin": {k: mon_admin[k] for k in sorted(mon_admin)},
         "issued_label": issued_label,
         "issued_month": int(issued_month),
         "issued_year": int(global_max_iy),
@@ -1922,7 +2244,7 @@ def main() -> None:
             if row.get("pin") is not None or row.get("targeted") is not None
             or row.get("sec") or row.get("ipc") or (row.get("sev_total") or 0) > 0
             or row.get("sevc") or row.get("tris")
-        ],
+        ] + _nogeom_rows(),
     }
     OUT.write_text(json.dumps(payload, separators=(",", ":")))
     print(f"Wrote {OUT}  ({OUT.stat().st_size / 1024:.1f} KB)")
