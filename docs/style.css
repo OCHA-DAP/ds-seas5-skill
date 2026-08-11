@@ -185,9 +185,16 @@ h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 .legend-block .lb-title { font-weight: 500; color: var(--hdx-neutral-8); }
 .legend-strip { display: flex; }
 .legend-strip .ls-seg { display: flex; flex-direction: column; gap: 3px; cursor: default; }
+/* display:flex above outranks the UA [hidden] rule — the same trap .ctl hit. */
+.legend-strip .ls-seg[hidden] { display: none; }
 .legend-strip .ls-cell { height: 14px; width: 100%; }
 .legend-strip .ls-seg:first-child .ls-cell { border-radius: var(--hdx-radius-sm) 0 0 var(--hdx-radius-sm); }
 .legend-strip .ls-seg:last-child .ls-cell { border-radius: 0 var(--hdx-radius-sm) var(--hdx-radius-sm) 0; }
+/* Detached from the ramp beside it: its own box with its own corners and a gap,
+   so it does not read as the first step of the scale. */
+.legend-strip .ls-seg.sep { margin-right: 9px; }
+.legend-strip .ls-seg.sep .ls-cell { border-radius: var(--hdx-radius-sm); }
+.legend-strip .ls-seg.sep + .ls-seg .ls-cell { border-radius: var(--hdx-radius-sm) 0 0 var(--hdx-radius-sm); }
 .legend-strip .ls-lbl { font-size: 0.72rem; color: var(--hdx-neutral-7); text-align: center; line-height: 1.15; padding: 0 2px; }
 .legend-strip.interactive .ls-seg { cursor: pointer; transition: opacity 0.15s; }
 .legend-strip.interactive .ls-seg:hover .ls-lbl { color: var(--hdx-neutral-95); font-weight: 500; }

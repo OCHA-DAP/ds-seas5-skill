@@ -1179,7 +1179,7 @@
       // zooms); markers track the view exactly.
       const lb = usableBounds(l);
       if (!lb) return;
-      const dimmed = isDimmed(catOf(r), ADM === "low" ? sevClassOf(r) : null);
+      const dimmed = isDimmed(catOf(r), ADM === "low" ? sevClassOf(r) : null, r);
       triLabels.addLayer(L.marker(lb.getCenter(), {
         interactive: false, keyboard: false, opacity: dimmed ? 0.15 : 1,
         icon: L.divIcon({
@@ -1266,20 +1266,30 @@
     // cls dimension so it ORs with the numbered classes ("class 4 or not assessed")
     // and still ANDs with forecast category and skill.
     cls: (cat, cls, v) => (v === "na" ? cls == null : cls != null && String(cls) === v),
+    // Response reach, keyed off the ROW rather than the map's encoding — nothing
+    // on the map draws targeting, so these two exist only to pick areas out of it.
+    // "Has a figure above zero", not merely "reported one": an area that
+    // prioritises nobody is not a prioritised area, and picking it out with the
+    // others would be the same absent-vs-zero conflation in a filter.
+    resp: (cat, cls, v, r) => (v === "tgt" ? (tgtOf(r) ?? 0) > 0
+      : v === "prio" ? (prioOf(r) ?? 0) > 0 : false),
   };
   // OR within a dimension, AND across them: "strongly below" × "class 4" is the
   // intersection. A dimension with nothing selected constrains nothing.
-  function noMatch(cat, cls, setOf) {
+  function noMatch(cat, cls, r, setOf) {
     return HL_DIMS.some((dim) => {
+      // Targeting is plan data; in IPC mode its strip is hidden, so a pin left
+      // behind there must not go on quietly filtering a map that cannot show it.
+      if (dim === "resp" && !pinMode()) return false;
       const act = setOf(dim);
-      return act.size > 0 && ![...act].some((v) => HL_MATCH[dim](cat, cls, v));
+      return act.size > 0 && ![...act].some((v) => HL_MATCH[dim](cat, cls, v, r));
     });
   }
   // Hover is transient — it only pales. A pin is a filter: the bar chart drops
   // non-matching rows outright (the map keeps them, dimmed, since holes in a
   // choropleth read as missing data rather than as filtered out).
-  const isDimmed = (cat, cls) => noMatch(cat, cls, activeOf);
-  const isFilteredOut = (cat, cls) => noMatch(cat, cls, (dim) => pinned[dim]);
+  const isDimmed = (cat, cls, r) => noMatch(cat, cls, r, activeOf);
+  const isFilteredOut = (cat, cls, r) => noMatch(cat, cls, r, (dim) => pinned[dim]);
   function renderMap() {
     renderOutline();
     // A pin cannot survive a change of geometry: the admin-level and source
@@ -1337,7 +1347,7 @@
       // the neighbours keep their real severity colours so the selected country
       // is read in context, and they stay clickable, which is what makes one
       // country reachable from another in a single click.
-      const dim = isDimmed(cat, cls);
+      const dim = isDimmed(cat, cls, r);
       el.setAttribute("fill-opacity", dim ? "0.12" : offCountry ? "0.3" : "1");
       el.setAttribute("stroke-opacity", dim ? "0.2" : offCountry ? "0.25" : "1");
       // low_skill's STYLE colour is white — as a ring that reads as a hole;
@@ -1366,13 +1376,13 @@
   // dimension and AND across them. Non-matching legend entries pale to mirror
   // the map dim, and the clear button stands up the moment anything is pinned —
   // otherwise a click made three controls ago silently shrinks the highlight.
-  const HL_DIMS = ["cat", "skill", "cls"];
-  const pinned = { cat: new Set(), skill: new Set(), cls: new Set() };
+  const HL_DIMS = ["cat", "skill", "cls", "resp"];
+  const pinned = { cat: new Set(), skill: new Set(), cls: new Set(), resp: new Set() };
   let hover = null; // { dim, val } while the pointer is on a legend entry
   const activeOf = (dim) => (hover && hover.dim === dim
     ? new Set(pinned[dim]).add(hover.val) : pinned[dim]);
   const anyPinned = () => HL_DIMS.some((d) => pinned[d].size > 0);
-  let clearChip = null;
+  let clearChip = null, respBlock = null;
   function refreshLegendDim() {
     document.querySelectorAll("#hnrp-legend .ls-seg[data-hl-dim]").forEach((seg) => {
       const { hlDim: dim, hlVal: v } = seg.dataset;
@@ -1427,6 +1437,12 @@
         cell.className = "ls-cell"; cell.style.background = sg.fill;
         if (sg.hatch) cell.style.backgroundImage = hatchBg(sg.hatch);
         if (sg.border) cell.style.boxShadow = "inset 0 0 0 1px #c4d0d1";
+        // The map's boundary encoding, reproduced: a ring of the category colour
+        // around an empty box, rather than a block of it.
+        if (sg.edge) cell.style.border = `2px solid ${sg.edge}`;
+        // Detached from the ramp it sits beside — "not assessed" is not a step on
+        // the scale, and butting it against class 1 read as one.
+        if (sg.sep) seg.classList.add("sep");
         // Skill swatches quote the map's own encoding: at the lowest level the
         // category is a boundary line (solid = high skill, dashed = moderate),
         // at the fixed admin levels it is the fill (plain vs hatched).
@@ -1444,22 +1460,32 @@
       root.appendChild(block);
       return block;
     }
-    strip(ADM === "low" ? "Forecast category (boundary line)"
-                        : "Forecast category (fill)", [
-      { fill: "#7f5619", label: "strongly below", dim: "cat", val: "drought_vsev" },
-      { fill: "#dda555", label: "below normal", dim: "cat", val: "drought_sev" },
-      { fill: "#e2e8e8", label: "normal", border: true, dim: "cat", val: "none" },
-      { fill: "#74a1e8", label: "above normal", dim: "cat", val: "flood_sev" },
-      { fill: "#134ead", label: "strongly above", dim: "cat", val: "flood_vsev" },
-    ], 86);
+    // At the lowest level the map draws the category as a BOUNDARY, so the
+    // swatches are boundaries too — an outline in the category's colour rather
+    // than a block of it. The titles no longer have to explain the encoding in
+    // parentheses because the swatch now is the encoding.
+    const catOutline = ADM === "low";
+    const catSeg = (fill, label, val) => ({
+      fill: catOutline ? "#ffffff" : fill, label, dim: "cat", val,
+      ...(catOutline ? { edge: fill } : {}),
+    });
+    strip("Forecast category", [
+      catSeg("#7f5619", "strongly below", "drought_vsev"),
+      catSeg("#dda555", "below normal", "drought_sev"),
+      catOutline ? catSeg("#c4d0d1", "normal", "none")
+                 : { fill: "#e2e8e8", label: "normal", border: true, dim: "cat", val: "none" },
+      catSeg("#74a1e8", "above normal", "flood_sev"),
+      catSeg("#134ead", "strongly above", "flood_vsev"),
+    ], 58, catOutline ? "boxes" : "");
     strip("\u00a0", [
-      { fill: "#b1c1c2", label: "off season", dim: "cat", val: "off_season" },
-    ], 86);
+      catOutline ? catSeg("#b1c1c2", "off season", "off_season")
+                 : { fill: "#b1c1c2", label: "off season", dim: "cat", val: "off_season" },
+    ], 58, catOutline ? "boxes" : "");
     // Skill is how each category above is DRAWN, so these swatches carry no
     // colour of their own — white boxes wearing the map's own distinction.
     // Below the skill floor (r < 0.30) no category is drawn at all: at the
     // lowest level that means no boundary line, hence a swatch with no outline.
-    strip(ADM === "low" ? "Skill (line style)" : "Skill (fill style)", ADM === "low"
+    strip("Skill", ADM === "low"
       ? [{ fill: "#ffffff", outline: "solid", label: "high skill",
            dim: "skill", val: "skill_high" },
          { fill: "#ffffff", outline: "dashed", label: "moderate skill",
@@ -1472,7 +1498,7 @@
            dim: "skill", val: "skill_mod" },
          { fill: "#ffffff", outline: "solid", hatch: "cross", label: "no skill",
            dim: "skill", val: "low_skill" }],
-      84, "boxes");
+      58, "boxes");
     // Both sources classify every unit (PiN by the class holding its PiN, IPC by
     // the area rule), so the class strip belongs to the lowest view outright.
     if (ADM === "low") {
@@ -1482,13 +1508,26 @@
       // blanks 140 of 189 units), and "show me only what this cycle did NOT assess"
       // is the question that follows. It lives in the cls dimension as "na", so it
       // ORs with the numbered classes and ANDs with forecast category and skill.
-      strip(sevLegendTitle(), [...[1, 2, 3, 4, 5].map((c) => ({
-        fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
-        border: c <= 2, dim: "cls", val: c,
-      })), { fill: HNRP_MUTED.fill, border: true, label: "not assessed",
-             dim: "cls", val: "na" }],
-        44).querySelector(".lb-title").id = "hnrp-sev-strip-title";
+      strip(sevLegendTitle(), [
+        { fill: HNRP_MUTED.fill, border: true, label: "not assessed",
+          dim: "cls", val: "na", sep: true },
+        ...[1, 2, 3, 4, 5].map((c) => ({
+          fill: sevColors()[c - 1], ramp: c - 1, label: String(c),
+          border: c <= 2, dim: "cls", val: c,
+        }))],
+        38).querySelector(".lb-title").id = "hnrp-sev-strip-title";
     }
+    // Targeting and priority have no place on the map's own encoding — the fill
+    // is severity and the boundary is the forecast — so these two entries exist
+    // purely to pick those areas out of it by hover or pin. Offered only where
+    // the payload actually carries the figures.
+    // Built once and shown conditionally: the legend is not rebuilt when the
+    // source or plan year changes, and which of these two the payload can answer
+    // for depends on both.
+    respBlock = strip("Response", [
+      { fill: MON.tgt, label: "targeted", dim: "resp", val: "tgt" },
+      { fill: MON.prio, label: "prioritized", dim: "resp", val: "prio" },
+    ], 62, "boxes");
     // Pins outlive every other control change, so there is always one click
     // back to the unfiltered map.
     clearChip = document.createElement("button");
@@ -1625,8 +1664,9 @@
   // named in full wherever it is labelled.
   const sevClassTitle = () => (pinMode() ? "Intersectoral severity" : "IPC phase");
   // "IPC phase class" reads badly — the phase IS the class.
-  const sevLegendTitle = () => (pinMode() ? "Intersectoral severity class (fill)"
-    : "IPC phase (fill)");
+  // No "(fill)" any more: the forecast swatches are drawn as boundaries and these
+  // as blocks, so each strip states its own encoding by looking like it.
+  const sevLegendTitle = () => (pinMode() ? "Intersectoral severity" : "IPC phase");
   const fmtSI = (v) => (v == null ? "–"
     : v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M"
     : v >= 1e3 ? Math.round(v / 1e3) + "k" : String(Math.round(v)));
@@ -1702,7 +1742,7 @@
     const rows = country
       ? data.rows.filter((r) => r.country === country
             && (pinMode() ? sevValOf(r) != null : sevTotOf(r) > 0 && segsOf(r))
-            && !isFilteredOut(catOf(r), clsOf(r)))
+            && !isFilteredOut(catOf(r), clsOf(r), r))
           .sort(barSortFlip ? (a, b) => cmp(b, a) : cmp)
       : [];
     // Reached is only a column where the country reports it for this cycle, so
@@ -2005,7 +2045,7 @@
         row.innerHTML = "";
         row.style.transform = `translateY(${top}px)`; // slides, per the CSS transition
       }
-      barRows.push({ el: row, cat, cls });
+      barRows.push({ el: row, cat, cls, r });
       const gr = (tag, attrs) => g(tag, attrs, row);
       const titled = (el, text) => {
         const t = document.createElementNS(NS, "title");
@@ -2186,7 +2226,7 @@
   }
   function paintBarDim() {
     for (const b of barRows) {
-      b.el.setAttribute("opacity", isDimmed(b.cat, b.cls) ? "0.15" : "1");
+      b.el.setAttribute("opacity", isDimmed(b.cat, b.cls, b.r) ? "0.15" : "1");
     }
   }
 
@@ -2264,6 +2304,17 @@
     });
     const sevStripTitle = document.getElementById("hnrp-sev-strip-title");
     if (sevStripTitle) sevStripTitle.textContent = sevLegendTitle();
+    if (respBlock) {
+      // Each entry survives only if some area actually carries that figure for
+      // the selected cycle — an entry that can never match is a dead control.
+      const has = (f) => data.rows.some((r) => (f(r) ?? 0) > 0);
+      const okT = pinMode() && has(tgtOf), okP = pinMode() && has(prioOf);
+      respBlock.querySelectorAll('[data-hl-val="tgt"]').forEach(
+        (el) => { el.hidden = !okT; });
+      respBlock.querySelectorAll('[data-hl-val="prio"]').forEach(
+        (el) => { el.hidden = !okP; });
+      respBlock.hidden = !(okT || okP);
+    }
     refreshLegendDim();
     syncCountryHit();
     aggCache.clear(); // its key covers the controls, but the payload can swap too
