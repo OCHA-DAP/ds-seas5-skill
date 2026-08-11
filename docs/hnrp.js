@@ -177,7 +177,19 @@
   const pctOf = (num, den) => (num == null || !den ? null : (100 * num) / den);
   // PiN/targeted are always the plan's INTERSECTORAL figures, for the selected
   // plan year (per-sector series remain in r.sec should a sector view return).
-  const pinOf = (r) => cycOf(r)?.[0] ?? null;
+  // PiN: the needs analysis first, then response monitoring for the cycle it
+  // covers — the same fallback targeted already uses, and for the same reason.
+  // Verified to be the same measure, not an approximation of it: of 2,870 units
+  // carrying both a 2026 needs PiN and a monitoring PiN, 2,839 agree exactly and
+  // 23 more within 1%; 8 differ, 6 of them in Mali.
+  //
+  // Without this Myanmar and Venezuela have no subnational PiN for 2026 at all —
+  // neither publishes a JIAF workbook, and HAPI's 2026 rows for them stop at the
+  // national total — so 562 areas with a full monitoring record were dropped from
+  // the chart by a filter looking only at the needs analysis.
+  const pinOf = (r) => cycOf(r)?.[0] ?? monLive(r)?.[0] ?? null;
+  const pinSrcOf = (r) => (cycOf(r)?.[0] != null ? "needs analysis"
+    : monLive(r)?.[0] != null ? "response monitoring" : null);
   // Targeted: the needs analysis first, then response monitoring for the cycle
   // it covers. Not a blend of two measures — they are the same one, verified:
   // the monitoring table's national target sums reproduce hpc.plans exactly
@@ -1762,9 +1774,23 @@
     barsHint.hidden = rows.length > 0;
     // "Pick a country" is the wrong prompt when a country IS picked and the
     // legend filters emptied the chart.
-    barsHint.textContent = country && anyPinned()
-      ? "No areas in this country match the pinned legend filters."
-      : BARS_HINT;
+    // "Pick a country" is the wrong prompt when a country IS picked. Say what is
+    // actually missing, and which cycles the country does publish — an empty
+    // chart under a country that plainly has data on the map above it reads as a
+    // fault in the tab rather than as a gap in the plan year selected.
+    if (!rows.length && country) {
+      const yrs = [...new Set(allOfCountry.flatMap((r) => [
+        ...Object.keys(r.cyc ?? {}), ...(r.mon_yr ? [r.mon_yr] : []),
+      ]))].sort();
+      barsHint.textContent = anyPinned()
+        ? "No areas in this country match the pinned legend filters."
+        : pinMode()
+          ? `${country} publishes no subnational figures for the ${planYr()} cycle.`
+            + (yrs.length ? ` It has ${yrs.join(", ")} — pick one from Plan year.` : "")
+          : `${country} has no IPC/CH analysis for the selected estimate.`;
+    } else {
+      barsHint.textContent = BARS_HINT;
+    }
     if (!rows.length) { resetBarRows(); return; }
     // Name the level these rows actually sit at, not "lowest available" — the
     // whole point of the lowest view is that it differs by country, and a
@@ -2164,7 +2190,9 @@
               : ""}`,
       ];
       const CELL = {
-        value: [val, fmtSI(val), pctTxt(val)],
+        value: [val, fmtSI(val),
+                val == null ? "no caseload published for this area"
+                  : `${pctTxt(val)}${pinMode() && pinSrcOf(r) ? ` · ${pinSrcOf(r)}` : ""}`],
         targeted: [tgt, tgt == null ? "–" : fmtSI(tgt),
                    tgt == null ? "no target published for this area"
                      : `${pctTxt(tgt)} · ${tgtSrcOf(r)}`],
