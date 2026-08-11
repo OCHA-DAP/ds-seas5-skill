@@ -1276,6 +1276,37 @@
   map.on("zoomend moveend", () => { syncClips(); });
   bordersLayer.bringToFront(); // country borders sit above the inset rings
 
+  // ── Admin boundaries of the selected country ────────────────────────────────
+  // The inset category rings are 2.8px and deliberately flush, so two neighbours
+  // in the same category meet as one 5.6px band of colour. The mosaic's own
+  // boundary stroke is 0.6px, drawn UNDER the rings and in the category's own
+  // edge colour, so inside that band it is invisible: at country zoom the admin
+  // units stopped reading as separate areas at all.
+  //
+  // A thin neutral line above the rings puts them back. Only for the SELECTED
+  // country, which is where the rings are large enough to swallow the boundary
+  // and where a reader is actually comparing one unit against the next — doing
+  // it for all 6,300 units would add a third full-geometry layer to the DOM for
+  // an effect invisible at world zoom.
+  let adminLines = null, adminLinesFor = null;
+  function renderAdminLines() {
+    const c = countrySel.value;
+    if (c === adminLinesFor) return;   // layer churn mid-zoom can wedge Leaflet
+    adminLinesFor = c;
+    if (adminLines) { map.removeLayer(adminLines); adminLines = null; }
+    if (!c) return;
+    const iso3 = data.rows.find((r) => r.country === c)?.iso3;
+    if (!iso3) return;
+    const feats = geo.features.filter(
+      (f) => f.properties.iso3 === iso3 && /Polygon/.test(f.geometry?.type ?? ""));
+    if (feats.length < 2) return;      // one unit has no internal boundaries
+    adminLines = L.geoJSON(
+      { type: "FeatureCollection", features: feats },
+      { interactive: false,
+        style: { color: "#2b3536", weight: 0.7, opacity: 0.5, fill: false } },
+    ).addTo(map);
+  }
+
   // Selected-country outline: admin-1 borders alone make the country edge hard to
   // see. Drawn from the world layer (different source than the COD adm1 polygons,
   // so tiny misalignments at the edge are cosmetic only).
@@ -1455,6 +1486,7 @@
   const isDimmed = (cat, cls, r) => noMatch(cat, cls, r, activeOf);
   const isFilteredOut = (cat, cls, r) => noMatch(cat, cls, r, (dim) => pinned[dim]);
   function renderMap() {
+    renderAdminLines();
     renderOutline();
     // A pin cannot survive a change of geometry: the admin-level and source
     // swaps rebuild the payload on different units, and a pcode that is not in
@@ -2585,9 +2617,13 @@
           style: { color: "#1d2021", weight: 1, opacity: 0.65, fill: false } },
       ).addTo(map);
       bordersLayer.bringToFront();   // borders stay above the new mosaic
-      // The pinned-country outline is drawn from the same source; force it to be
-      // rebuilt against the new one instead of keeping the old view's line.
+      // The country outline and the selected country's admin lines are both
+      // drawn from the geometry that just changed, and both short-circuit on an
+      // unchanged country name — which is exactly the case here. Invalidate them
+      // explicitly or they keep drawing the previous view's units.
       outlineFor = null;
+      adminLinesFor = null;
+      renderAdminLines();
       renderOutline();
       fillCountries();
       buildPlanYears();
