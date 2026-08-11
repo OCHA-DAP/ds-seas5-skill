@@ -1023,6 +1023,13 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     # (CD1000ZS04) while the NAMES agree exactly.
     df["name"] = (df["location_path"].fillna("").str.rsplit(">", n=1).str[-1]
                   .str.strip().replace("", None))
+    # The PARENT's name too ("OT" from "OT>OT 0-20 km"). A row that rolls up onto
+    # its parent must be labelled with the parent, not with whichever child
+    # happened to sort first: Ukraine's four occupied-territory bands collapse to
+    # one row, and calling it "OT 0-20 km" would name a quarter of the thing it
+    # now represents. Only matters where the parent has no polygon of its own to
+    # supply a name.
+    df["parent_name"] = df["location_path"].fillna("").str.split(">").str[0].str.strip()
     df = df.drop(columns=["location_path"])
     # Rolling up is only possible where we hold the right parent code, and the
     # mirror carries admin1_code alone — so a deeper row can be rolled to admin-1
@@ -1047,6 +1054,9 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
                   f"{', '.join(sorted(rolled['iso3'].unique()))} "
                   f"(front-line bands; the band detail does not survive)")
         df.loc[deep, "pcode"] = df.loc[deep, "admin1_code"]
+        # The row now IS its parent, so it must answer to the parent's name.
+        _par = df.loc[deep, "parent_name"].replace("", None)
+        df.loc[deep, "name"] = _par.combine_first(df.loc[deep, "name"])
     else:
         # A row coarser than this build cannot be split down it — that would be
         # the population downscale we deliberately removed. Drop, and say so.
@@ -1259,6 +1269,13 @@ def build_lowest() -> None:
     any_rows: dict[str, int] = {}
     for lvl in (1, 2, 3):
         for r in data[lvl]["rows"]:
+            # Geometry-less rows must not vote on the level. They exist precisely
+            # because they cannot be drawn, so letting them count would be a way
+            # to pick a level at which a country plots LESS of itself — Mali's
+            # unplaceable cercles would drag it to adm2 even if adm1 drew it
+            # whole. They ride along at whatever level the drawable rows choose.
+            if r.get("nog"):
+                continue
             iso = r["iso3"]
             any_rows[iso] = max(any_rows.get(iso, 1), lvl)
             cur = (newest is not None
@@ -1341,6 +1358,8 @@ def combine_ipc_view() -> None:
     plan_level: dict[str, int] = {}
     for lvl in (1, 2, 3):
         for r in data[lvl]["rows"]:
+            if r.get("nog"):   # cannot be drawn, so cannot choose the level
+                continue
             plan_level[r["iso3"]] = max(plan_level.get(r["iso3"], 1), lvl)
     no_ipc = sorted(set(plan_level) - set(level_of))
     for iso in no_ipc:
@@ -1525,7 +1544,12 @@ def main() -> None:
         #
         # A NAME match is inferred. Two areas reconciling onto one unit that way
         # means at least one guess is wrong, and summing them would produce a
-        # figure belonging to neither. Those are dropped instead.
+        # figure belonging to neither. Those must not land on the unit — but they
+        # are not thrown away either: they keep their ORIGINAL code and name and
+        # become geometry-less rows, because "we cannot tell which area this is"
+        # is a reason to stop drawing it, not a reason to stop counting it. Six
+        # real Malian cercles (San, Tominian, Douentza, Bandiagara, Koro, Bankass)
+        # were being deleted here, 12% of the country's caseload.
         _ref = set(poly["pcode"])
         certain = df_mon_raw.apply(
             lambda r: (REFORM_XWALK.get((r["iso3"], r["pcode"])) is not None
@@ -1538,8 +1562,14 @@ def main() -> None:
             listed = ", ".join(f"{i}:{c}({n})" for i, c, n
                                in zip(d["iso3"], d["pcode"], d["name"]))
             print(f"  monitoring: {int(drop.sum())} row(s) NAME-matched onto a unit "
-                  f"another row already holds — dropped, not summed: {listed}")
-            df_mon = df_mon[~drop]
+                  f"another row already holds — kept off the map, not summed "
+                  f"onto it: {listed}")
+        # Restore the identity the name match overwrote, so they travel as
+        # themselves rather than as the unit they were mistaken for.
+        mon_collided = df_mon.loc[drop].copy()
+        if len(mon_collided):
+            mon_collided["pcode"] = df_mon_raw.loc[mon_collided.index, "pcode"]
+        df_mon = df_mon[~drop]
         kept = dup & df_mon["_certain"].reindex(df_mon.index, fill_value=False)
         if kept.any():
             print(f"  monitoring: {int(kept.sum())} row(s) share a unit through a "
@@ -1549,10 +1579,38 @@ def main() -> None:
         # min_count=1 throughout: a country that reports no reach must stay None,
         # never 0 — "nobody reached" and "nobody reported" are different claims.
         _mon_sum = lambda s: s.sum(min_count=1)  # noqa: E731
+        # Units the plan reports on that our COD vintage has no polygon for, at
+        # any code or name. They cannot be DRAWN — but dropping them here is what
+        # made 45% of Mali's response and 20% of Burkina's disappear from the tab
+        # altogether: absent from the map AND from the bar chart, with nothing on
+        # screen to say a fifth of the country was missing. The admin reforms
+        # behind them (Mali 2023, Burkina 2024, CAR 2020) are not in any published
+        # COD yet — checked against fieldmaps' current originals, which are the
+        # same vintage we hold — so there is no boundary to find and no honest
+        # parent to fold them into.
+        #
+        # So keep them aside and re-admit them at payload time as geometry-less
+        # rows: they carry their figures into the bar chart and the country
+        # totals, and the site marks them as having no boundary.
+        _placed = df_mon["pcode"].isin(set(poly["pcode"]))
+        mon_unplaced = pd.concat(
+            [df_mon.loc[~_placed],
+             mon_collided.drop(columns=["_certain"], errors="ignore")],
+            ignore_index=True)
+        mon_unplaced = (mon_unplaced.groupby(["iso3", "pcode"], as_index=False)
+                        .agg({"name": "first", "mon_year": "max",
+                              **{c: _mon_sum for c in _mon_cols}}))
+        if len(mon_unplaced):
+            by_iso = mon_unplaced.groupby("iso3").size().sort_values(ascending=False)
+            print(f"  monitoring: {len(mon_unplaced)} unit(s) have no polygon to draw "
+                  f"— kept as geometry-less rows so their figures still count: "
+                  + ", ".join(f"{i}:{n}" for i, n in by_iso.items()))
+        df_mon = df_mon.loc[_placed]
         df_mon = (df_mon.groupby("pcode", as_index=False)
                   .agg({**{c: _mon_sum for c in _mon_cols}, "mon_year": "max"}))
     else:
         df_mon = pd.DataFrame(columns=["pcode"])
+        mon_unplaced = pd.DataFrame(columns=["iso3", "pcode", "name", "mon_year"])
     ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
     ipc_lists = _ipc_lists(df_ipc)
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
@@ -1932,6 +1990,29 @@ def main() -> None:
             out["ipc"] = ipc_lists[rec["pcode"]]
         return out
 
+    # Units the plan reports on that have no polygon at this level. They travel as
+    # ordinary rows with "nog": 1 and no forecast — the map has nothing to draw for
+    # them, but the bar chart, the country totals and the sidebar all include them,
+    # which is the difference between a figure being SHOWN WITHOUT A BOUNDARY and a
+    # figure being silently gone.
+    def _nogeom_rows() -> list[dict]:
+        out = []
+        for rec in mon_unplaced.to_dict("records"):
+            mon = [rec.get(c) for c in
+                   ("monPin", "monTgt", "monPrio", "monRea", "monPrioRea")]
+            mon = [None if v is None or pd.isna(v) else int(v) for v in mon]
+            if not any(v is not None for v in mon):
+                continue
+            row = {"pcode": rec["pcode"], "iso3": rec["iso3"],
+                   "country": country_names.get(rec["iso3"]),
+                   "name": rec.get("name") or rec["pcode"],
+                   "nog": 1, "mon": mon}
+            yr = rec.get("mon_year")
+            if yr is not None and pd.notna(yr):
+                row["mon_yr"] = str(int(yr))
+            out.append(row)
+        return out
+
     payload = {
         "adm_level": LEVEL,
         # Which month each country last reported response monitoring. Countries
@@ -1976,7 +2057,7 @@ def main() -> None:
             if row.get("pin") is not None or row.get("targeted") is not None
             or row.get("sec") or row.get("ipc") or (row.get("sev_total") or 0) > 0
             or row.get("sevc") or row.get("tris")
-        ],
+        ] + _nogeom_rows(),
     }
     OUT.write_text(json.dumps(payload, separators=(",", ":")))
     print(f"Wrote {OUT}  ({OUT.stat().st_size / 1024:.1f} KB)")

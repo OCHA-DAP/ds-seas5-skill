@@ -79,11 +79,17 @@ def charts_in_ipc_mode(r):
 
 
 # Monitored units a country may lose between the mirror and the payload before it
-# counts as a finding. Some of the gap is structural and checked, and some is not
-# loss at all: Ukraine plans on 48 front-line bands that sum onto 24 oblasts, so
-# a row count necessarily halves without a figure going missing. Mali is real
-# loss — it publishes on communes while the site draws cercles.
-LOSS_BUDGET = {"MLI": 0.70, "UKR": 0.55, "CAF": 0.25, "BFA": 0.15}
+# counts as a finding. What remains is aggregation, not loss: Ukraine plans on 48
+# front-line bands that sum onto 24 oblasts plus one occupied-territory row, and
+# Somalia's two Mogadishu districts fold onto the single Banadir polygon our
+# vintage holds. A row count necessarily falls in both cases without a figure
+# going missing.
+#
+# Mali, Burkina and CAR used to need budgets of 15-70% here. They no longer do:
+# units with no polygon are kept as geometry-less rows rather than dropped, so
+# they reach the payload and this check counts them. Do not re-add a budget
+# without establishing that the units behind it are genuinely gone.
+LOSS_BUDGET = {"UKR": 0.55}
 DEFAULT_LOSS_BUDGET = 0.05
 
 
@@ -150,35 +156,37 @@ def audit_monitoring_placement():
 # it. The second gap is ours: units the source located that we failed to draw.
 # Only the second is a finding, and it is budgeted per country below.
 NATIONAL_TOLERANCE = 0.02
-PLACEMENT_BUDGET = {
-    # Our COD boundary vintage predates these countries' admin reforms, so a
-    # share of the published units has no polygon here under any code or name.
-    # Fixing them needs a COD update, not a crosswalk: inventing a parent for a
-    # new unit moves a real caseload onto the wrong area.
-    # Mali is the worst by far and is NOT a crosswalk away from being fixed: the
-    # 2023 reorganisation subdivided its cercles, and 62 of the 97 it now plans
-    # on have no polygon here under any code or name. Its country totals are
-    # right (they come from mon_national) but its MAP is missing 45% of the
-    # response. The fix is a COD vintage update, or drawing Mali at admin-1,
-    # where every one of its rows places through the reform crosswalk.
-    "MLI": 0.50,
-    "BFA": 0.25,   # 5 provinces of the 2024 reorganisation
-    "CAF": 0.20,   # 12 sub-prefectures created after our vintage
-    "HTI": 0.03,   # ZMPP, the Port-au-Prince metro planning zone (see below)
-}
+# Empty on purpose. Every country now carries 100% of what the source attributes
+# to areas, because a unit with no polygon is kept as a GEOMETRY-LESS ROW — in
+# the bar chart and in every total, just not drawn — instead of being dropped.
+# Before that, Mali needed 50% here, Burkina 25%, CAR 20%.
+#
+# A country appearing in this dict again means figures are being DELETED
+# somewhere, which is exactly what this check exists to catch. Establish where
+# before granting a budget.
+PLACEMENT_BUDGET = {}
 DEFAULT_PLACEMENT_BUDGET = 0.02
-# Deliberately NOT placed, and the budgets above make room for them:
+# How the awkward units are handled, for the record:
 #
 #   HTI HT01xx "ZMPP" (147k PiN) is the Zone Metropolitaine de Port-au-Prince, a
 #   planning area OVERLAPPING ten communes the plan already reports separately
 #   (Port-au-Prince, Delmas, Carrefour, Cite Soleil...). Rolling it onto any one
-#   of them, or onto Ouest, would put the same people on the map twice. It has no
-#   boundary of its own in any COD, so it stays unplaced.
+#   of them, or onto Ouest, would draw the same people twice — so it is counted
+#   as a geometry-less row and never placed.
 #
-# By contrast SOM SO2203 Daynile and SO2210 Kahda ARE placed, via REFORM_XWALK:
-# they are Mogadishu districts, our vintage holds Banadir whole as SO2201, and
-# the source publishes no other Banadir row — so the roll-up is exact and adds
-# no double count. Between them they carry a quarter of Somalia's target.
+#   MLI / BFA / CAF reform units (Mali's post-2023 cercles, Burkina's post-2024
+#   provinces, CAR's post-2020 sub-prefectures) have no boundary in ANY published
+#   COD — checked against fieldmaps' current originals, which are the same
+#   vintage we hold. Also geometry-less rows.
+#
+#   Six Malian cercles (San, Tominian, Douentza, Bandiagara, Koro, Bankass)
+#   name-match onto a unit another row already holds. They keep their own code
+#   and name as geometry-less rows rather than being summed onto a neighbour.
+#
+#   SOM SO2203 Daynile and SO2210 Kahda ARE placed, via REFORM_XWALK: they are
+#   Mogadishu districts, our vintage holds Banadir whole as SO2201, and the
+#   source publishes no other Banadir row — an exact roll-up with no double
+#   count, worth a quarter of Somalia's target.
 
 
 def audit_national_totals():

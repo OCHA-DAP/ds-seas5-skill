@@ -675,6 +675,24 @@
   // Stated only when it is materially short, and never as a bare percentage —
   // "areas account for 66%" is a fact about the plan's own reporting, not a
   // defect in ours, and the sentence has to carry that.
+  // Units the plan reports on that no published COD gives a boundary for. They
+  // are in the chart and in every total; they are simply not on the map. Saying
+  // so is the whole point — the alternative, and what this tab did until now,
+  // was to drop them silently, which took 45% of Mali's response and 20% of
+  // Burkina's off the tab with nothing on screen to admit it.
+  function noGeomNote(agg) {
+    if (!agg.nNoGeom) return "";
+    // Three different causes reach this note — units created by an admin reform
+    // no COD has caught up with, planning areas that are not administrative units
+    // at all (Port-au-Prince's metro zone, Ukraine's occupied territory), and
+    // units whose code we cannot tell apart from a neighbour's. Naming only the
+    // first would be wrong for the others, so the wording covers the ground it
+    // can actually stand on.
+    return `<div class="muted">${agg.nNoGeom} further area` +
+      `${agg.nNoGeom === 1 ? " has" : "s have"} figures but no boundary we can` +
+      ` draw — counted in the totals and listed in the chart, but not on the map.` +
+      ` They are recent admin reforms, or planning areas no COD maps.</div>`;
+  }
   function placedNote(agg) {
     if (!agg.monNatl || !agg.monPlacedShare) return "";
     const [pinSh, tgtSh] = agg.monPlacedShare;
@@ -747,6 +765,7 @@
         `${agg.nWithSev ? `, ${agg.nWithSev} with ${pinMode() ? "a caseload"
           : "an IPC classification"}` : ""}</div>` +
         (agg.pop != null ? `<div class="muted">population ${fmtN(agg.pop)}</div>` : "") +
+        noGeomNote(agg) +
         placedNote(agg) +
         `</div>`;
     } else {
@@ -815,6 +834,13 @@
     const key = `${country}|${srcTypeSel.value}|${planYr()}|${ipcPeriodSel.value}|${lvl()}`;
     if (aggCache.has(key)) return aggCache.get(key);
     const rows = data.rows.filter((r) => r.country === country);
+    // Rows the MAP can draw. The rest are units the plan reports on that no
+    // published COD has a boundary for (Mali's post-2023 cercles, Burkina's
+    // post-2024 provinces): they carry real figures into the chart and the
+    // totals, but counting them as "areas on the map" would overstate what a
+    // reader can actually see.
+    const drawn = rows.filter((r) => !r.nog);
+    const nNoGeom = rows.length - drawn.length;
     const iso = rows[0]?.iso3;
     const sum = (f) => {
       let any = false, t = 0;
@@ -855,7 +881,7 @@
     // one tiny one. Built from whichever encoding is on screen.
     const mix = [0, 0, 0, 0, 0];
     let mixAny = false, nWithSev = 0;
-    for (const r of rows) {
+    for (const r of drawn) {
       if (ipcMode()) {
         const c = ipcComboOf(r);
         if (!c) continue;
@@ -878,13 +904,19 @@
     // on Humanitarian Action, which is the one a reader will check it against.
     //
     // The summed figure is kept beside it, to say what share of the country the
-    // map actually accounts for rather than leaving the difference unexplained.
+    // subnational rows account for rather than leaving the difference unexplained.
+    //
+    // This sums ALL rows, including the ones with no boundary. The question it
+    // answers is "how much of the published caseload does the plan break down at
+    // all", and a unit we cannot draw is still broken down. How much is DRAWN is
+    // a different question, answered by nNoGeom in the Coverage section — running
+    // the two together would blame the source for our missing polygons.
     const monPlaced = [0, 1, 2, 3, 4].map((i) => sum((r) => monLive(r)?.[i] ?? null));
     const natl = (data.mon_national ?? {})[iso] ?? null;
     const useNatl = natl && natl.year === planYr();
     const mon = useNatl ? natl.mon : monPlaced;
     const out = {
-      country, iso, nUnits: rows.length, nWithSev,
+      country, iso, nUnits: drawn.length, nNoGeom, nWithSev,
       slot, cat,
       // Same substitution, and for the same reason: in plan mode this IS the
       // country's PiN, so summing the areas' would print a second, smaller PiN
@@ -2165,12 +2197,27 @@
                      "font-size": 10, "font-weight": 600, "pointer-events": "none",
                      fill: inkOn(sevColors()[cls - 1]) }).textContent = String(cls);
       }
+      // No boundary for this unit in any published COD. It gets a DASHED empty
+      // swatch where a severity class would sit — the severity column is blank
+      // for these anyway, and an outline reads as "there is an area here we
+      // cannot draw" rather than as missing data.
+      if (r.nog && !cls) {
+        titled(gr("rect", { x: COL.sev, y: y + ROW / 2 - 8, width: 15, height: 15,
+                            rx: 2, fill: "none", stroke: "#9db1b3",
+                            "stroke-width": 1, "stroke-dasharray": "2 2" }),
+          "No boundary in our admin vintage — recent admin reform, not yet in a "
+          + "published COD. Its figures are counted here and in the country "
+          + "totals, but it cannot be drawn on the map.");
+      }
       const nm0 = r.name ?? r.pcode;
       const maxLen = 24;
-      const nameEl = gr("text", { x: COL.name, y: y + ROW / 2 + 4, "font-size": 11, fill: "#333" });
+      const nameEl = gr("text", { x: COL.name, y: y + ROW / 2 + 4, "font-size": 11,
+                                  fill: r.nog ? "#6b7a7b" : "#333",
+                                  ...(r.nog ? { "font-style": "italic" } : {}) });
       // textContent first: it would wipe a <title> child appended before it.
       nameEl.textContent = nm0.length > maxLen ? nm0.slice(0, maxLen - 1) + "…" : nm0;
-      titled(nameEl, dispName(r));
+      titled(nameEl, dispName(r) + (r.nog ? " — not on the map: no boundary in "
+        + "our admin vintage" : ""));
 
       // ── Bar (headcount, shared scale) + targeted tick ────────────────────
       const pop = popOf(r), popSrc = popSrcOf(r);
