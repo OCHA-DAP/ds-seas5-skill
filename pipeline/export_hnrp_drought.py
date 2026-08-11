@@ -296,6 +296,13 @@ REFORM_XWALK = {
     ("BFA", "BF58"): ("BF52", None), ("BFA", "BF60"): ("BF52", None),  # Sirba, Tapoa ⊂ Est
     ("BFA", "BF63"): ("BF52", None),                                   # Goulmou ⊂ Est
     ("BFA", "BF59"): ("BF56", None), ("BFA", "BF64"): ("BF56", None),  # Soum, Liptako ⊂ Sahel
+    # Somalia: the plan plans on Mogadishu's newer districts, where our vintage
+    # holds Banadir whole as a single adm2 unit (SO2201). Safe to roll up because
+    # the source publishes NO other Banadir row — not even SO2201 itself — so
+    # nothing is double counted, and between them they carry a quarter of the
+    # country's target.
+    ("SOM", "SO2203"): ("SO2201", {"daynile", "dayniile"}),
+    ("SOM", "SO2210"): ("SO2201", {"kahda", "kaxda"}),
     # CAR: prefectures created 2020, after our COD vintage:
     ("CAF", "CF33"): ("CF32", None),  # Ouham-Fafa ⊂ Ouham
     ("CAF", "CF34"): ("CF31", None),  # Lim-Pendé ⊂ Ouham-Pendé
@@ -910,6 +917,47 @@ def load_pbs_adm1() -> pd.DataFrame:
     return out
 
 
+def load_monitoring_national() -> dict[str, dict]:
+    """The PUBLISHED national caseload per country — not a sum of the units.
+
+    A country total must never be derived by summing the subnational rows. They
+    are an attribution of the national caseload to areas, and the source leaves
+    much of it unattributed: 24% of Chad's PiN and 34% of DR Congo's target sit
+    on no area at all, and Ukraine, Syria and Venezuela attribute none of their
+    target. Summing therefore understates the country by up to a third, and no
+    amount of p-code reconciliation here can recover a figure the source never
+    placed. The gap is a property of the source, so the honest fix is to show
+    the published figure and say what share of it the map accounts for.
+
+    Returns {iso3: {"mon": [pin, tgt, prio, rea, prioRea], "year": 2026}}.
+    """
+    q = """
+    SELECT m.iso3, m.year, m.in_need, m.targeted, m.prioritized_target,
+           m.reached, m.prioritized_reached
+    FROM hpc.monitoring_national m
+    JOIN (SELECT plan_id, max(snapshot_date) AS d
+          FROM hpc.monitoring_national GROUP BY plan_id) l
+      ON l.plan_id = m.plan_id AND l.d = m.snapshot_date
+    WHERE m.cluster_name = 'HNRP' AND m.iso3 IS NOT NULL
+    """
+    try:
+        with stratus.get_engine("dev").connect() as conn:
+            df = pd.read_sql(q, conn)
+    except Exception as exc:
+        print(f"  monitoring national: SKIPPED — {exc.__class__.__name__}: {exc}\n"
+              f"  country totals will fall back to the sum of units (an UNDERCOUNT)")
+        return {}
+    cols = ["in_need", "targeted", "prioritized_target", "reached",
+            "prioritized_reached"]
+    out = {}
+    for _, r in df.iterrows():
+        vals = [None if pd.isna(r[c]) else int(r[c]) for c in cols]
+        if any(v is not None for v in vals):
+            out[r["iso3"]] = {"mon": vals, "year": str(int(r["year"]))}
+    print(f"  monitoring national: {len(out)} published country caseloads")
+    return out
+
+
 def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     """Response monitoring per ADM1 unit: targeted, prioritized target, reached.
 
@@ -1464,6 +1512,7 @@ def main() -> None:
     df_hno = normalize_pcodes(load_hno_pop_adm1(sub_parent), poly, "hno-pop")
     df_hno = (df_hno.groupby("pcode", as_index=False)
               .agg({"hno_pop": "sum", "hno_year": "max"}))
+    mon_national = load_monitoring_national()
     df_mon_raw, mon_months = load_monitoring_adm1()
     if len(df_mon_raw):
         df_mon = normalize_pcodes(df_mon_raw, poly, "monitoring")
@@ -1889,6 +1938,11 @@ def main() -> None:
         # are on their own cadence, so there is no single "as of" — the site
         # prints the country's own month beside its reached figure.
         "mon_months": {k: v for k, v in sorted(mon_months.items())},
+        # The country's PUBLISHED caseload, so a country total on screen matches
+        # Humanitarian Action instead of the sum of whatever units we managed to
+        # place. See load_monitoring_national: the subnational rows do not add up
+        # to this and are not supposed to.
+        "mon_national": {k: mon_national[k] for k in sorted(mon_national)},
         "issued_label": issued_label,
         "issued_month": int(issued_month),
         "issued_year": int(global_max_iy),

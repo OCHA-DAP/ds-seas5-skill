@@ -665,6 +665,34 @@
   // One renderer for both, because the country view is the same measurements
   // aggregated — anything that reads differently between the two is a place the
   // aggregate has quietly changed meaning.
+  // The country figures above are the plan's PUBLISHED totals, so they match
+  // Humanitarian Action — but the areas beneath them will not add up to those
+  // totals, and a reader who tries the arithmetic deserves to be told why rather
+  // than left to assume the map has lost something. The plan itself attributes
+  // only part of its caseload to areas: 76% of Chad's PiN, 66% of DR Congo's
+  // target, none of Ukraine's or Syria's.
+  //
+  // Stated only when it is materially short, and never as a bare percentage —
+  // "areas account for 66%" is a fact about the plan's own reporting, not a
+  // defect in ours, and the sentence has to carry that.
+  function placedNote(agg) {
+    if (!agg.monNatl || !agg.monPlacedShare) return "";
+    const [pinSh, tgtSh] = agg.monPlacedShare;
+    const parts = [];
+    const word = (sh, what) => (sh < 0.005 ? `none of the ${what}`
+      : `${Math.round(100 * sh)}% of the ${what}`);
+    if (pinSh != null && pinSh < 0.98) parts.push(word(pinSh, "PiN"));
+    if (tgtSh != null && tgtSh < 0.98) parts.push(word(tgtSh, "target"));
+    if (!parts.length) return "";
+    // "accounts for none of it" has to be as plain as this. A country that
+    // publishes a full caseload and locates none of it would otherwise present a
+    // complete-looking country card above a map with nothing on it.
+    const none = (pinSh ?? 1) < 0.005 && (tgtSh ?? 1) < 0.005;
+    return `<div class="muted">Country totals are the plan's published figures.` +
+      ` ${none ? "This plan reports no subnational breakdown, so its areas"
+        : "Its areas"} account for ${parts.join(" and ")}` +
+      `${none ? "" : "; the rest is reported without a location"}.</div>`;
+  }
   function detailBody(r, agg = null) {
     const cat = agg ? agg.cat : catOf(r);
     const s = agg ? agg.slot : slotOf(r);
@@ -719,6 +747,7 @@
         `${agg.nWithSev ? `, ${agg.nWithSev} with ${pinMode() ? "a caseload"
           : "an IPC classification"}` : ""}</div>` +
         (agg.pop != null ? `<div class="muted">population ${fmtN(agg.pop)}</div>` : "") +
+        placedNote(agg) +
         `</div>`;
     } else {
       // Membership must be per-unit, never assumed from scope: in IPC mode most of
@@ -841,19 +870,49 @@
       }
     }
     const clsBreakdown = mixAny ? mixHtml(mix) : "";
-    // Monitoring: only the units whose snapshot is the selected cycle contribute,
-    // the same rule a unit readout follows.
-    const mon = [0, 1, 2, 3, 4].map((i) => sum((r) => monLive(r)?.[i] ?? null));
+    // Monitoring at country level is the PUBLISHED national caseload, never the
+    // sum of the units. The two differ by up to a third: the source attributes
+    // only 76% of Chad's PiN and 66% of DR Congo's target to any area at all,
+    // and Ukraine, Syria and Venezuela attribute none of their target. A summed
+    // total would silently understate the country and disagree with the figure
+    // on Humanitarian Action, which is the one a reader will check it against.
+    //
+    // The summed figure is kept beside it, to say what share of the country the
+    // map actually accounts for rather than leaving the difference unexplained.
+    const monPlaced = [0, 1, 2, 3, 4].map((i) => sum((r) => monLive(r)?.[i] ?? null));
+    const natl = (data.mon_national ?? {})[iso] ?? null;
+    const useNatl = natl && natl.year === planYr();
+    const mon = useNatl ? natl.mon : monPlaced;
     const out = {
       country, iso, nUnits: rows.length, nWithSev,
       slot, cat,
-      sevVal: sum((r) => sevValOf(r)),
+      // Same substitution, and for the same reason: in plan mode this IS the
+      // country's PiN, so summing the areas' would print a second, smaller PiN
+      // a few lines above the published one and leave a reader to guess which
+      // of the two the country actually has. In IPC mode there is no published
+      // national figure to prefer, so the sum stands.
+      sevVal: useNatl && pinMode() && natl.mon[0] != null
+        ? natl.mon[0] : sum((r) => sevValOf(r)),
       combo: ipcMode() && iso ? ipcPeriodOf(iso, ipcPeriodSel.value) : null,
-      tgt: sum((r) => tgtOf(r)),
+      tgt: useNatl && pinMode() && natl.mon[1] != null
+        ? natl.mon[1] : sum((r) => tgtOf(r)),
       pop: sum((r) => popOf(r)),
       hasCycle: rows.some((r) => cycOf(r)),
       mon: mon.some((v) => v != null) ? mon : null,
-      monYr: rows.find((r) => monLive(r))?.mon_yr ?? planYr(),
+      monNatl: !!useNatl,
+      // What share of the national PiN and target the mapped units carry. Null
+      // only where there is no national figure to compare against, so "we place
+      // all of it" and "we cannot tell" stay distinguishable.
+      //
+      // A null monPlaced is NOT null here — it is zero. No area reporting the
+      // measure means none of it is on the map, and that is the case most worth
+      // saying out loud: Ukraine, Syria and Venezuela publish a full national
+      // caseload and locate none of it, so without this the card reads as
+      // complete above a map showing nothing.
+      monPlacedShare: useNatl
+        ? [0, 1].map((i) => (natl.mon[i] ? (monPlaced[i] ?? 0) / natl.mon[i] : null))
+        : null,
+      monYr: (useNatl ? natl.year : rows.find((r) => monLive(r))?.mon_yr) ?? planYr(),
       monMonth: (data.mon_months ?? {})[iso] ?? null,
       clsBreakdown,
     };
