@@ -108,6 +108,7 @@ import argparse
 import calendar
 import json
 import re
+import subprocess
 import sys
 import unicodedata
 from pathlib import Path
@@ -207,8 +208,10 @@ def export_geometry(isos: list[str], names: dict[str, str]) -> None:
 
     Source: the COD shapefiles the zonal-stats pipeline rasterized ({iso3}_shp.zip in
     the PROD `polygon` container), so pcodes match the skill data by construction.
-    Simplified per country with topology preserved (shared borders stay gap-free);
-    cross-country borders come from different files and may not align exactly.
+    Simplified per country with topology preserved, so shared borders WITHIN a
+    country stay gap-free. Borders BETWEEN countries come from different COD
+    files and do not align on their own — edge_match() below closes those seams
+    once the file is written.
     """
     parts = []
     for iso3 in isos:
@@ -245,7 +248,71 @@ def export_geometry(isos: list[str], names: dict[str, str]) -> None:
     gdf = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), crs=parts[0].crs)
     gdf["name"] = gdf["pcode"].map(names)
     GEO_OUT.write_text(gdf.to_json())
+    edge_match(GEO_OUT)
     print(f"Wrote {GEO_OUT}  ({GEO_OUT.stat().st_size / 1e6:.1f} MB, {len(gdf)} polygons)")
+
+
+# Gap smaller than this between two areas = a simplification artefact, fill it.
+# 10 km2 removes 97% of the slivers (1,791 holes -> 62) while leaving every
+# genuine hole in place: the six real ones here are 0.15-5.3 deg2 (lakes, and
+# enclaves of countries outside the scope), two orders of magnitude bigger. At
+# 30 km2 another 42 close, but a 30 km2 hole is 5x6 km and could be a real
+# unmapped feature, so the threshold stays where the answer is unambiguous.
+GAP_FILL_KM2 = 10
+
+
+def edge_match(path: Path) -> None:
+    """Match boundaries across the seams the per-country simplification leaves.
+
+    Each country's polygons are simplified as one topology, so borders WITHIN a
+    country are already gap-free. Borders BETWEEN countries are not: they come
+    from different COD files, are simplified independently, and end up a few
+    hundred metres apart — 1,785 sliver gaps across the map. The mixed-level
+    views are worse again, because a country drawn at admin-1 sits against a
+    neighbour drawn at admin-2, simplified at a different tolerance.
+
+    mapshaper's `-clean` snaps those seams together and fills the slivers. It
+    runs over the finished geojson (6 MB) rather than the ~50 raw shapefiles, so
+    it costs tens of MB of memory rather than gigabytes.
+
+    Two things this must never do, both checked rather than assumed:
+      - lose an area. `-clean` drops features whose geometry collapses, and a
+        vanished area is the absent-data failure in its purest form. Only
+        features that ALREADY had null geometry may disappear; anything else
+        rejects the whole result and keeps the unmatched file.
+      - be required. No network, no npx, no mapshaper — the build still
+        produces a correct map, just with the seams it had before. It says so
+        rather than failing.
+    """
+    before = json.loads(path.read_text())
+    ids = lambda d: {f["properties"]["pcode"] for f in d["features"]}  # noqa: E731
+    null_geom = {f["properties"]["pcode"] for f in before["features"]
+                 if not f.get("geometry")}
+    tmp = path.with_name(path.stem + ".edge.geojson")
+    cmd = ["npx", "-y", "mapshaper@0.6", str(path),
+           "-clean", f"gap-fill-area={GAP_FILL_KM2}km2", "-o", str(tmp)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        print(f"  edge-match SKIPPED ({type(exc).__name__}) — {path.name} keeps "
+              f"its per-country seams")
+        return
+    if r.returncode != 0 or not tmp.exists():
+        tmp.unlink(missing_ok=True)
+        print(f"  edge-match SKIPPED (mapshaper exit {r.returncode}) — "
+              f"{path.name} keeps its per-country seams")
+        return
+    after = json.loads(tmp.read_text())
+    lost = (ids(before) - ids(after)) - null_geom
+    if lost:
+        tmp.unlink()
+        print(f"  edge-match REJECTED for {path.name} — it would drop "
+              f"{len(lost)} drawable area(s): {sorted(lost)[:8]}")
+        return
+    tmp.replace(path)
+    note = next((ln for ln in r.stderr.splitlines() if "slivers" in ln), "")
+    print(f"  edge-matched {path.name}: {note.strip() or 'cleaned'} "
+          f"({len(after['features'])} features)")
 
 
 def _fold(s: str) -> str:
@@ -1314,6 +1381,10 @@ def build_lowest() -> None:
     gout = base / "hnrp_low.geojson"
     gout.write_text(json.dumps({"type": "FeatureCollection", "features": feats},
                                separators=(",", ":")))
+    # After assembly, not before: this view mixes levels, so its worst seams are
+    # exactly the ones between a country drawn at admin-1 and its neighbour drawn
+    # at admin-2 — which only exist once the two are in the same file.
+    edge_match(gout)
     from collections import Counter
     mix = Counter(level_of.values())
     print(f"Lowest-level view: {len(rows)} units, {len(feats)} polygons "
@@ -1393,6 +1464,10 @@ def combine_ipc_view() -> None:
     gout = base / "hnrp_ipc.geojson"
     gout.write_text(json.dumps({"type": "FeatureCollection", "features": feats},
                                separators=(",", ":")))
+    # After assembly, not before: this view mixes levels, so its worst seams are
+    # exactly the ones between a country drawn at admin-1 and its neighbour drawn
+    # at admin-2 — which only exist once the two are in the same file.
+    edge_match(gout)
     from collections import Counter
     mix = Counter(level_of.values())
     with_ipc = sum(1 for r in rows if r.get("ipc"))
