@@ -81,6 +81,63 @@ def charts_in_ipc_mode(r):
     return any(any(v > 0 for v in c["p"]) for c in (r.get("ipc") or []))
 
 
+# Monitored units a country may lose between the mirror and the payload before it
+# counts as a finding. Some loss is structural and checked: Mali publishes its
+# monitoring on communes while the site draws cercles, Ukraine on planning units
+# with no admin polygon at all.
+LOSS_BUDGET = {"MLI": 0.70, "UKR": 1.00, "CAF": 0.25, "BFA": 0.15}
+DEFAULT_LOSS_BUDGET = 0.05
+
+
+def audit_monitoring_placement():
+    """How much of the monitoring mirror actually reaches the map?
+
+    Separate from the coverage check above because it compares the payload with
+    its SOURCE, not with itself. It exists because 418 of 3,917 monitored units —
+    DR Congo's entire 262 among them — were being dropped for want of a name to
+    reconcile their pcodes by, and nothing in the build said so out loud.
+    """
+    try:
+        import ocha_stratus as stratus
+        import pandas as pd
+    except ImportError:
+        print("\n(monitoring placement check skipped — ocha_stratus not available)")
+        return []
+    try:
+        engine = stratus.get_engine("dev")
+        with engine.connect() as conn:
+            mirror = pd.read_sql(
+                "SELECT iso3, count(*) AS n FROM hpc.monitoring_admin "
+                "WHERE cluster_name = 'HNRP' AND snapshot_date = "
+                "(SELECT max(snapshot_date) FROM hpc.monitoring_admin) "
+                "GROUP BY iso3", conn)
+    except Exception as exc:
+        print(f"\n(monitoring placement check skipped — {exc.__class__.__name__})")
+        return []
+    payload = json.loads((BASE / "hnrp_drought_low.json").read_text())
+    on_site = {}
+    for r in payload["rows"]:
+        if r.get("mon") and r.get("mon_yr"):
+            on_site.setdefault(r["iso3"], set()).add(r["pcode"])
+    out = []
+    print("\nmonitoring placement (mirror -> map):")
+    for _, row in mirror.sort_values("iso3").iterrows():
+        iso3, n = row["iso3"], int(row["n"])
+        placed = len(on_site.get(iso3, ()))
+        lost = n - placed
+        if not lost:
+            continue
+        budget = LOSS_BUDGET.get(iso3, DEFAULT_LOSS_BUDGET)
+        share = lost / n
+        flag = "" if share <= budget else "  <-- OVER BUDGET"
+        print(f"  {iso3}: {placed}/{n} placed, {lost} lost ({share:.0%}, "
+              f"budget {budget:.0%}){flag}")
+        if share > budget:
+            out.append(f"monitoring: {iso3} loses {lost} of {n} units ({share:.0%}) "
+                       f"between the mirror and the map, over its {budget:.0%} budget")
+    return out
+
+
 def main():
     findings = []
     for view, path in (("plan", "hnrp_drought_low.json"), ("ipc", "hnrp_drought_ipc.json")):
@@ -109,8 +166,9 @@ def main():
                 findings.append(
                     f"{view}: {name} ({iso3}) charts NOTHING for the {y} cycle "
                     f"— {len(rs)} units on the map")
+    findings += audit_monitoring_placement()
     if findings:
-        print(f"\n{len(findings)} country/cycle combination(s) would render an empty "
+        print(f"\n{len(findings)} problem(s) would render an empty "
               f"chart without being declared expected:")
         for f in findings:
             print(f"  {f}")

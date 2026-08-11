@@ -933,6 +933,7 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     # counted and printed.
     q = """
     SELECT m.iso3, m.pcode, m.admin1_code, m.admin_level, m.year,
+           m.location_path,
            m.in_need, m.targeted, m.prioritized_target,
            m.reached, m.prioritized_reached
     FROM hpc.monitoring_admin m
@@ -966,6 +967,15 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
         return pd.DataFrame(columns=["pcode", "iso3"]), {}
     if df.empty:
         return df, {}
+    # The unit's own name, off the tail of "Province>Zone". normalize_pcodes has a
+    # name fallback for codes it cannot reconcile, and it was doing nothing here
+    # because this frame carried no name column at all — 418 of 3,917 monitored
+    # units were being dropped for want of it, DR Congo's 262 among them, whose
+    # codes (CD100004) belong to a different scheme than our health-zone vintage
+    # (CD1000ZS04) while the NAMES agree exactly.
+    df["name"] = (df["location_path"].fillna("").str.rsplit(">", n=1).str[-1]
+                  .str.strip().replace("", None))
+    df = df.drop(columns=["location_path"])
     # Rolling up is only possible where we hold the right parent code, and the
     # mirror carries admin1_code alone — so a deeper row can be rolled to admin-1
     # and nowhere else. At LEVEL 2 that used to rewrite admin-3 rows to an ADMIN-1
@@ -991,9 +1001,13 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
                   f"their admin-1 parent is not meaningful here — dropped")
             df = df[~deep]
     df = (df.groupby(["iso3", "pcode", "year"], as_index=False)
-          .agg({c: lambda s: s.sum(min_count=1)
-                for c in ("in_need", "targeted", "prioritized_target",
-                          "reached", "prioritized_reached")}))
+          .agg({**{c: lambda s: s.sum(min_count=1)
+                   for c in ("in_need", "targeted", "prioritized_target",
+                             "reached", "prioritized_reached")},
+                # Carried through deliberately: normalize_pcodes falls back to a
+                # name when it cannot reconcile a code, and dropping the column
+                # here is what silently disabled that for this whole source.
+                "name": "first"}))
     # One cycle only (the dashboard publishes the current plan year), so the
     # year travels as a scalar rather than a per-year dict like cyc/sevc.
     # The source files a literal 0 where a country reported nothing, so absence
@@ -1439,6 +1453,35 @@ def main() -> None:
     df_mon_raw, mon_months = load_monitoring_adm1()
     if len(df_mon_raw):
         df_mon = normalize_pcodes(df_mon_raw, poly, "monitoring")
+        # Two rows can land on one unit for two very different reasons, and they
+        # deserve opposite treatment.
+        #
+        # A REFORM crosswalk is a documented mapping: Burkina's BF61 and BF62 are
+        # both inside the old BF46, so summing them IS the right aggregation, and
+        # it is what every other loader here does.
+        #
+        # A NAME match is inferred. Two areas reconciling onto one unit that way
+        # means at least one guess is wrong, and summing them would produce a
+        # figure belonging to neither. Those are dropped instead.
+        _ref = set(poly["pcode"])
+        certain = df_mon_raw.apply(
+            lambda r: (REFORM_XWALK.get((r["iso3"], r["pcode"])) is not None
+                       or r["pcode"] in _ref), axis=1)
+        df_mon["_certain"] = certain.reindex(df_mon.index, fill_value=False)
+        dup = df_mon["pcode"].notna() & df_mon.duplicated("pcode", keep=False)
+        drop = dup & ~df_mon["_certain"]
+        if drop.any():
+            d = df_mon.loc[drop]
+            listed = ", ".join(f"{i}:{c}({n})" for i, c, n
+                               in zip(d["iso3"], d["pcode"], d["name"]))
+            print(f"  monitoring: {int(drop.sum())} row(s) NAME-matched onto a unit "
+                  f"another row already holds — dropped, not summed: {listed}")
+            df_mon = df_mon[~drop]
+        kept = dup & df_mon["_certain"].reindex(df_mon.index, fill_value=False)
+        if kept.any():
+            print(f"  monitoring: {int(kept.sum())} row(s) share a unit through a "
+                  f"reform crosswalk (new units inside an old one) — summed")
+        df_mon = df_mon.drop(columns=["_certain"])
         _mon_cols = ["monPin", "monTgt", "monPrio", "monRea", "monPrioRea"]
         # min_count=1 throughout: a country that reports no reach must stay None,
         # never 0 — "nobody reached" and "nobody reported" are different claims.
