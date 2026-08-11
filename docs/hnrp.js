@@ -688,24 +688,15 @@
     if (agg) {
       rows += agg.clsBreakdown;
     } else {
-      // The area's own split across the classes — its IPC population by phase, or
-      // the PiN-by-severity distribution behind its plan class. Shown at every
-      // admin level, not just the lowest: the breakdown is a property of the
-      // unit's analysis, and it was the whole reason to open an area.
+      // The area's class, then the split behind it: its IPC population by phase,
+      // or the PiN-by-severity distribution. Both in one section, class first —
+      // that is what the area IS; the split is how its people divide.
       const mix = ipcMode() ? (ipcComboOf(r)?.p ?? null)
         : ((r.sevc ?? {})[planYr()]?.pb ?? null);
-      rows += mixHtml(mix);
-      if (ADM === "low") {
-        const cls = sevClassOf(r);
-        if (cls) {
-          // Which class the AREA is, and where that came from — a different fact
-          // from the split above, which is how its people are distributed.
-          rows += `<div><span style="display:inline-block;width:10px;height:10px;` +
-            `background:${sevColors()[cls - 1]};border:1px solid #9db1b3;` +
-            `vertical-align:baseline"></span> ${sevClassDesc(r)}</div>`;
-        } else if (pinMode() && pinOf(r) != null) {
-          rows += `<div class="muted">No severity published for this area</div>`;
-        }
+      const headline = ADM === "low" ? sevClassHeadline(r) : null;
+      rows += mixHtml(mix, headline);
+      if (ADM === "low" && !headline && pinMode() && pinOf(r) != null) {
+        rows += `<div class="muted">No severity published for this area</div>`;
       }
     }
     if (agg) {
@@ -739,16 +730,42 @@
   // Population split across the five classes, as counts and shares. Used at both
   // levels: an area's own IPC phase / PbS distribution, and the country's mix
   // summed over its areas. Same renderer, so the two are directly comparable.
-  function mixHtml(mix) {
+  // `headline` is the unit's OWN class, printed once at the head of the section
+  // it belongs to. It goes first because it is the answer — the split beneath is
+  // the working — and it is stated plainly rather than appended to a list of
+  // populations, where it read as one more row.
+  function mixHtml(mix, headline = null) {
     const total = (mix ?? []).reduce((a, b) => a + (b || 0), 0);
-    if (!(total > 0)) return "";
+    if (!(total > 0) && !headline) return "";
+    // A split into ONE class says nothing the headline has not already said, and
+    // its count is the caseload printed further up. Most plan units are like this
+    // — the breakdown is worth its space only when the population actually
+    // divides, which is the normal case for IPC and the rare one for PbS.
+    const classes = (mix ?? []).filter((v) => v > 0).length;
+    const showSplit = total > 0 && !(headline && classes <= 1);
     return `<div class="sec"><div class="sec-t">${sevClassTitle()}</div>` +
-      mix.map((v, i) => (!(v > 0) ? "" :
-        `<div><span style="display:inline-block;width:10px;height:10px;` +
-        `background:${sevColors()[i]};border:1px solid #9db1b3;` +
-        `vertical-align:baseline"></span> ${sevClassLabels()[i]} — ${fmtN(v)}` +
-        ` <span class="muted">(${Math.round((100 * v) / total)}%)</span></div>`)).join("") +
+      (headline ?? "") +
+      (showSplit
+        ? mix.map((v, i) => (!(v > 0) ? "" :
+            `<div><span style="display:inline-block;width:10px;height:10px;` +
+            `background:${sevColors()[i]};border:1px solid #9db1b3;` +
+            `vertical-align:baseline"></span> ${sevClassLabels()[i]} — ${fmtN(v)}` +
+            ` <span class="muted">(${Math.round((100 * v) / total)}%)</span></div>`)).join("")
+        : "") +
       `</div>`;
+  }
+  // The class line WITHOUT the caseload spread that sevClassDesc appends. The
+  // sidebar prints the full breakdown directly beneath it, so a partial repeat
+  // ("· also 1: 236k, 2: 393k") is noise. The bar chart's tooltips keep the long
+  // form, having no breakdown of their own to defer to.
+  function sevClassHeadline(r) {
+    const { cls, src } = sevClassInfo(r);
+    if (!cls) return null;
+    return `<div style="margin-bottom:2px"><span style="display:inline-block;` +
+      `width:12px;height:12px;background:${sevColors()[cls - 1]};` +
+      `border:1px solid #9db1b3;vertical-align:-2px"></span> ` +
+      `<strong>${sevClassTitle()} ${cls} — ${sevClassWord(cls)}</strong>` +
+      `<span class="muted">${CLS_SRC_NOTE[src] ?? ""}</span></div>`;
   }
   const aggCache = new Map();
   function countryAgg(country) {
