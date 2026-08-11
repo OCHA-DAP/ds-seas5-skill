@@ -1893,8 +1893,12 @@
     // Reached is only a column where the country reports it for this cycle, so
     // a sort left on it after a country or plan-year change has nothing to
     // order by — fall back rather than silently keeping the previous order.
-    if (/^(reached|prioritized|prioReached)/.test(barSort)
-        && !(pinMode() && anyReached(rows))) {
+    // The share columns were folded into the value columns as bracketed
+    // percentages, so no header offers a *Pct sort any more. A barSort left
+    // pointing at one would order the chart by a column no header claims — the
+    // same failure the reached check below guards against.
+    if (/Pct$/.test(barSort) || (/^(reached|prioritized|prioReached)/.test(barSort)
+        && !(pinMode() && anyReached(rows)))) {
       barSort = "value";
       barSortFlip = false;
       [cmp, isText] = BAR_SORTS.value;
@@ -1987,22 +1991,28 @@
     // all; only the reach denominator needs it to be usefully non-zero.
     const showPrio = pinMode() && anyPrio(allOfCountry);
     const showPrioRea = pinMode() && allOfCountry.some((r) => prioReaOf(r) != null);
-    // [key, label, denominator sub-label]. Every share column names what it is a
-    // share OF, on a second line: they do NOT share a denominator — caseload and
-    // targeting are read against the area's population, delivery against what was
-    // targeted. Three columns ending in "%" meaning three different things is
-    // exactly the sort of thing a reader is entitled to assume away.
+    // [key, label, sub-label, share key]. One column per quantity, in funnel
+    // order — PiN, targeted, prioritized, reached, prioritized reached — each
+    // printing its headcount with its own share beside it in grey brackets.
+    //
+    // The shares used to be five more columns of their own, which put the figure
+    // and its percentage at opposite ends of a ten-column block and made three
+    // headers all read "…%" while meaning three different denominators. They do
+    // NOT share one: caseload and targeting are read against the area's
+    // population, delivery against what was targeted, prioritized delivery
+    // against what was prioritized. So each denominator is named in that
+    // column's own sub-label, right above the brackets it applies to.
     const NUM_COLS = [
-      ["value", pinMode() ? "PiN" : sevLabel()],
-      ...(pinMode() ? [["targeted", "Targeted"]] : []),
-      ...(showPrio ? [["prioritized", "Targeted", "(prioritized)"]] : []),
-      ...(showReached ? [["reached", "Reached"]] : []),
-      ...(showPrioRea ? [["prioritizedReached", "Reached", "(prioritized)"]] : []),
-      ...(showPrio ? [["prioritizedPct", "Prioritized %", "of targeted"]] : []),
-      ...(showReached ? [["reachedPct", "Reached %", "of targeted"]] : []),
-      ...(showPrioRea ? [["prioReachedPct", "Reached %", "of prioritized"]] : []),
-      ["valuePct", `${pinMode() ? "PiN" : sevLabel()} %`, "of population"],
-      ...(pinMode() ? [["targetedPct", "Targeted %", "of population"]] : []),
+      ["value", pinMode() ? "PiN" : sevLabel(), "of population", "valuePct"],
+      ...(pinMode()
+        ? [["targeted", "Targeted", "of population", "targetedPct"]] : []),
+      ...(showPrio
+        ? [["prioritized", "Targeted (prio.)", "of targeted", "prioritizedPct"]] : []),
+      ...(showReached
+        ? [["reached", "Reached", "of targeted", "reachedPct"]] : []),
+      ...(showPrioRea
+        ? [["prioritizedReached", "Reached (prio.)", "of prioritized",
+            "prioReachedPct"]] : []),
     ];
     // Column width falls back from its preferred size until the bar keeps at
     // least MINBAR. A fixed width plus the bar's own minimum meant the two could
@@ -2010,32 +2020,22 @@
     // 6px into the bar. Floor at 50px, below which a header no longer fits its
     // own column and the honest answer is that the viewport is too narrow.
     const MINBAR = 80;
-    const prefW = NUM_COLS.length > 5 ? 62 : NUM_COLS.length > 4 ? 68 : 72;
+    // Each column now carries "123,456 (78%)", so it wants roughly half again
+    // what a bare headcount did. PCTW is the slice reserved on the right for the
+    // bracketed share, so the headcounts stay aligned on their own right edge
+    // instead of drifting with the width of the percentage beside them.
+    const PCTW = 40;
+    const prefW = 62 + PCTW;
     const NGAP = 4;
     const room = W - M.r - M.l - 18 - MINBAR;   // width the columns may take
     const widthFor = (n) => Math.max(50, Math.min(prefW,
       Math.floor((room - (n - 1) * NGAP) / n)));
-    const fits = (n) => n * widthFor(n) + (n - 1) * NGAP <= room;
-    // Too narrow even at the floor: shed the population-share columns rather than
-    // draw the numbers over the bars. Counts and reach-against-target survive —
-    // they answer the questions the chart exists for; "% of the area's population"
-    // is the one a reader can do in their head from the count and the base.
-    for (const key of ["targetedPct", "valuePct"]) {
-      if (fits(NUM_COLS.length)) break;
-      const i = NUM_COLS.findIndex((c) => c[0] === key);
-      if (i < 0) continue;
-      NUM_COLS.splice(i, 1);
-      if (barSort === key) {
-        // Re-sort, not just relabel: the rows were ordered by this column before
-        // it was dropped, and leaving them would put the chart in an order no
-        // visible header claims.
-        barSort = "value";
-        barSortFlip = false;
-        rows.sort(BAR_SORTS.value[0]);
-      }
-    }
     const NUMS = NUM_COLS.length;
     const NUMW = widthFor(NUMS);
+    // Too narrow to hold both: drop the brackets and keep the headcounts, rather
+    // than run the two into each other. The share is the part a reader can
+    // recover from the count and the base printed elsewhere; the count is not.
+    const showPct = NUMW >= 88;
     const NUMBLOCK = NUMS * NUMW + (NUMS - 1) * NGAP;
     const numRight = (i) => W - M.r - NUMBLOCK + i * (NUMW + NGAP) + NUMW;
     const barRight = Math.max(M.l + MINBAR, W - M.r - NUMBLOCK - 18);
@@ -2370,14 +2370,27 @@
         prioReachedPct: pctCell(prioRea, prio, prioReachShare(r),
                                 "reached", "prioritized"),
       };
-      NUM_COLS.map(([k]) => [...CELL[k], k]).forEach(([v, text, tip, key], i) => {
-        // ">100%" is a flag, not a figure — mute it like a missing value.
-        const flagged = v == null || (key.endsWith("Pct") && v > 1);
-        const t = gr("text", { x: numRight(i), y: y + ROW / 2 + 4, "text-anchor": "end",
-                               "font-size": 11, fill: flagged ? "#aab6b7" : "#333",
+      NUM_COLS.forEach(([key, , , pctKey], i) => {
+        const [v, text, tip] = CELL[key];
+        const t = gr("text", { x: numRight(i) - (showPct ? PCTW : 0),
+                               y: y + ROW / 2 + 4, "text-anchor": "end",
+                               "font-size": 11, fill: v == null ? "#aab6b7" : "#333",
                                "font-variant-numeric": "tabular-nums" });
         t.textContent = v == null ? "–" : text;
         titled(t, `${r.name ?? r.pcode} — ${tip}`);
+        if (!showPct || !pctKey) return;
+        // The share, in grey brackets beside the figure it describes. Right
+        // anchored on the column edge so the brackets line up down the chart
+        // while the headcounts line up on their own edge.
+        const [pv, ptext, ptip] = CELL[pctKey];
+        // ">100%" is a flag, not a figure — mute it the way a missing value is
+        // muted, so it cannot be read as a precise result.
+        const over = pv != null && pv > 1;
+        const p = gr("text", { x: numRight(i), y: y + ROW / 2 + 4, "text-anchor": "end",
+                               "font-size": 10, fill: over ? "#c0b0a8" : "#8b9899",
+                               "font-variant-numeric": "tabular-nums" });
+        p.textContent = pv == null ? "" : `(${ptext})`;
+        if (pv != null) titled(p, `${r.name ?? r.pcode} — ${ptip}`);
       });
     });
     // Rows the filter dropped: fade them where they stand, then drop them for
