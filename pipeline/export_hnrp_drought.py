@@ -983,7 +983,21 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     # vanished without a word.
     lvl = df["admin_level"]
     if LEVEL == 1:
-        deep = lvl.notna() & (lvl > 1)
+        # NULL level counts as "below admin-1" here. Ukraine plans on oblast x
+        # distance-from-the-front-line bands (UA12_U20A = Dnipropetrovska 0-20 km,
+        # UA23_UCAP = Zaporizhzhia city) and ships them with no level at all. They
+        # are not administrative areas and no COD publishes them, but they
+        # PARTITION their oblast — no oblast carries both an all-oblast row and
+        # bands — so summing them onto the oblast is an exact roll-up, and the
+        # oblast is a real unit we hold. The alternative was showing nothing.
+        deep = (lvl.isna() | (lvl > 1)) & df["admin1_code"].notna()
+        rolled = df.loc[deep & lvl.isna()]
+        if len(rolled):
+            n_par = rolled["admin1_code"].nunique()
+            print(f"  monitoring: {len(rolled)} row(s) published on non-admin planning "
+                  f"units summed onto their {n_par} admin-1 parent(s) — "
+                  f"{', '.join(sorted(rolled['iso3'].unique()))} "
+                  f"(front-line bands; the band detail does not survive)")
         df.loc[deep, "pcode"] = df.loc[deep, "admin1_code"]
     else:
         # A row coarser than this build cannot be split down it — that would be
