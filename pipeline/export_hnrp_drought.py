@@ -259,6 +259,11 @@ def export_geometry(isos: list[str], names: dict[str, str]) -> None:
 # 30 km2 another 42 close, but a 30 km2 hole is 5x6 km and could be a real
 # unmapped feature, so the threshold stays where the answer is unambiguous.
 GAP_FILL_KM2 = 10
+# ~11 m. Two orders of magnitude finer than the simplification tolerance (0.02deg
+# is ~2 km), so nothing visible is lost, and it halves the mosaic: 6.1 MB -> 3.2.
+# It also has to be applied BEFORE the country outline is dissolved out of the
+# mosaic, or the two carry different coordinates and the seam reopens.
+COORD_PRECISION = 0.0001
 
 
 def edge_match(path: Path) -> None:
@@ -289,7 +294,12 @@ def edge_match(path: Path) -> None:
     null_geom = {f["properties"]["pcode"] for f in before["features"]
                  if not f.get("geometry")}
     tmp = path.with_name(path.stem + ".edge.geojson")
-    cmd = ["npx", "-y", "mapshaper@0.6", str(path),
+    # precision is an INPUT option, deliberately: applied on the way out it
+    # quantizes finished polygons and leaves 40 of them self-intersecting or with
+    # a hole outside their shell, because collapsing coordinates onto a grid can
+    # cross two edges that were merely close. Applied on the way in, -clean runs
+    # afterwards and repairs exactly that. Same file size, zero invalid geometry.
+    cmd = ["npx", "-y", "mapshaper@0.6", str(path), f"precision={COORD_PRECISION}",
            "-clean", f"gap-fill-area={GAP_FILL_KM2}km2", "-o", str(tmp)]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
@@ -313,6 +323,48 @@ def edge_match(path: Path) -> None:
     note = next((ln for ln in r.stderr.splitlines() if "slivers" in ln), "")
     print(f"  edge-matched {path.name}: {note.strip() or 'cleaned'} "
           f"({len(after['features'])} features)")
+    write_outline(path)
+
+
+def outline_path(geo_path: Path) -> Path:
+    return geo_path.with_name(geo_path.stem + "_adm0.geojson")
+
+
+def write_outline(geo_path: Path) -> None:
+    """The country border layer, dissolved OUT OF the mosaic it will be drawn on.
+
+    It used to come from data/countries.geojson — a different source at a
+    different simplification, which left the national border and the outer edge
+    of the admin mosaic visibly out of register. Dissolving the mosaic instead
+    makes them the same line by construction, at every zoom, for every view.
+
+    Runs on the file AFTER edge-matching and precision reduction, so the outline
+    inherits exactly the coordinates the mosaic ships with. Dissolving the
+    pre-precision version would reintroduce the seam this exists to remove.
+
+    countries.geojson is still needed and still loaded: it draws the rest of the
+    world, which has no mosaic to dissolve.
+    """
+    out = outline_path(geo_path)
+    # No precision option here: the mosaic is already quantized and a dissolve
+    # only ever reuses its coordinates, so re-quantizing could nudge the outline
+    # off the very edge it is meant to trace.
+    cmd = ["npx", "-y", "mapshaper@0.6", str(geo_path), "-dissolve", "iso3",
+           "-o", str(out)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        print(f"  outline SKIPPED ({type(exc).__name__}) — the site falls back "
+              f"to countries.geojson for {geo_path.name}")
+        return
+    if r.returncode != 0 or not out.exists():
+        out.unlink(missing_ok=True)
+        print(f"  outline SKIPPED (mapshaper exit {r.returncode}) — the site "
+              f"falls back to countries.geojson for {geo_path.name}")
+        return
+    n = len(json.loads(out.read_text())["features"])
+    print(f"  wrote {out.name}: {n} country outlines "
+          f"({out.stat().st_size / 1e6:.1f} MB)")
 
 
 def _fold(s: str) -> str:
@@ -1486,7 +1538,21 @@ def main() -> None:
     ap.add_argument("--level", choices=("1", "2", "3", "low", "ipc"), default="1",
                     help="Admin level of the export (2/3 write *_admN outputs; "
                          "'low' combines the three per-country finest levels)")
+    ap.add_argument("--edge-match-only", action="store_true",
+                    help="Edge-match the geojsons that already exist and write "
+                         "their country outlines, without rebuilding anything. "
+                         "Reads no shapefiles and no database — mapshaper over "
+                         "the finished files, a few tens of MB of memory.")
     args = ap.parse_args()
+    if args.edge_match_only:
+        base = HERE.parent / "docs" / "data"
+        found = [p for p in (base / f"hnrp_{n}.geojson" for n in
+                             ("adm1", "adm2", "adm3", "low", "ipc")) if p.exists()]
+        if not found:
+            sys.exit("No geojsons to edge-match — build a level first")
+        for p in found:
+            edge_match(p)
+        return
     if args.level == "low":
         build_lowest()
         return

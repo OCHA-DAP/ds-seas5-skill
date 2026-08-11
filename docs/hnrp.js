@@ -8,16 +8,28 @@
   // the HNRP itself publishes, where each unit carries one severity class. The
   // fixed levels remain reachable as an unlisted ?adm=1|2|3 escape hatch (no
   // picker: switching would reload the page with that level's payload).
+  // [payload, subnational geometry, country outlines]. The third file is the
+  // mosaic dissolved by country, so the national border and the outer edge of
+  // the admin mosaic are the SAME line. Drawing it from countries.geojson (a
+  // different source at a different simplification) left them visibly out of
+  // register — 51 deg2 of disagreement across the map, 5.4 of it in Tanzania
+  // alone. It is per view because the plan and IPC views are drawn on different
+  // units, so each has its own edge.
   const ADM_FILES = {
-    low: ["data/hnrp_drought_low.json", "data/hnrp_low.geojson"],
+    low: ["data/hnrp_drought_low.json", "data/hnrp_low.geojson",
+          "data/hnrp_low_adm0.geojson"],
     // IPC's own units. The plan view and the IPC view disagree about what a unit
     // IS — DR Congo's plan speaks in 519 zones de santé, its IPC analysis in 26
     // provinces — so each source is drawn on its own geometry rather than one
     // being prorated onto the other. Selected by the Severity source, not ?adm.
-    ipc: ["data/hnrp_drought_ipc.json", "data/hnrp_ipc.geojson"],
-    1: ["data/hnrp_drought.json", "data/hnrp_adm1.geojson"],
-    2: ["data/hnrp_drought_adm2.json", "data/hnrp_adm2.geojson"],
-    3: ["data/hnrp_drought_adm3.json", "data/hnrp_adm3.geojson"],
+    ipc: ["data/hnrp_drought_ipc.json", "data/hnrp_ipc.geojson",
+          "data/hnrp_ipc_adm0.geojson"],
+    1: ["data/hnrp_drought.json", "data/hnrp_adm1.geojson",
+        "data/hnrp_adm1_adm0.geojson"],
+    2: ["data/hnrp_drought_adm2.json", "data/hnrp_adm2.geojson",
+        "data/hnrp_adm2_adm0.geojson"],
+    3: ["data/hnrp_drought_adm3.json", "data/hnrp_adm3.geojson",
+        "data/hnrp_adm3_adm0.geojson"],
   };
   const QS = new URLSearchParams(location.search);
   let ADM = QS.get("adm") ?? "low";
@@ -26,7 +38,7 @@
   // keeps both sources on it; the default view follows the source.
   let PAYLOAD = (ADM === "low" && QS.get("sev") === "ipc") ? "ipc" : ADM;
   const ADM_LABEL = { low: "lowest available level", 1: "admin 1", 2: "admin 2", 3: "admin 3" };
-  let data, geo, world, countryFc = {};
+  let data, geo, adm0, world, countryFc = {};
   try {
     // no-cache = revalidate: the admin-level switch is a plain navigation, which
     // otherwise serves stale payloads straight from HTTP cache mid-session.
@@ -38,12 +50,21 @@
     // being averaged up from admin units — an area mean is not a country forecast.
     // Optional: a missing file costs the country its forecast line, nothing else.
     countryFc = await fj("data/forecast.json").then((f) => f.data).catch(() => ({}));
+    // The outline file is OPTIONAL and loaded separately, so a build that could
+    // not run mapshaper still draws the tab — it just falls back to
+    // countries.geojson for the borders, as it did before. Bundling it into the
+    // Promise.all would make a cosmetic file able to blank the whole view.
+    const loadView = async (key) => {
+      const [d, g] = await Promise.all(ADM_FILES[key].slice(0, 2).map(fj));
+      const a = await fj(ADM_FILES[key][2]).catch(() => null);
+      return [d, g, a];
+    };
     try {
-      [data, geo] = await Promise.all(ADM_FILES[PAYLOAD].map(fj));
+      [data, geo, adm0] = await loadView(PAYLOAD);
     } catch {
       if (ADM !== "1") { // payload not built yet — fall back rather than a blank tab
         ADM = "1";
-        [data, geo] = await Promise.all(ADM_FILES[1].map(fj));
+        [data, geo, adm0] = await loadView(1);
       } else { throw new Error("no data"); }
     }
   } catch {
@@ -1138,13 +1159,16 @@
     countrySel.dispatchEvent(new Event("change"));
   });
   // Country borders above the admin mosaic — without them the admins of
-  // neighbouring countries blend into one surface. Same world-layer source as
-  // the selected-country outline (edge misalignments vs the COD adm1 polygons
-  // are cosmetic).
+  // neighbouring countries blend into one surface. Drawn from the mosaic's own
+  // dissolved edge, so the border sits exactly on the outermost admin polygons
+  // instead of a few hundred metres off them; countries.geojson is the fallback
+  // for a build that could not produce the outline file.
   const dataIsos = new Set(data.rows.map((r) => r.iso3).filter(Boolean));
-  const bordersLayer = L.geoJSON(
-    { type: "FeatureCollection",
-      features: world.features.filter((f) => dataIsos.has(f.properties.iso3)) },
+  const outlineFeatures = () => (adm0
+    ? adm0.features
+    : world.features.filter((f) => dataIsos.has(f.properties.iso3)));
+  let bordersLayer = L.geoJSON(
+    { type: "FeatureCollection", features: outlineFeatures() },
     { interactive: false,
       style: { color: "#1d2021", weight: 1, opacity: 0.65, fill: false } },
   ).addTo(map);
@@ -1159,8 +1183,7 @@
   let hitClickAt = 0;  // when the country hit layer last handled a click
   const isoCountry = new Map(data.rows.map((r) => [r.iso3, r.country]).filter((x) => x[1]));
   const countryHit = L.geoJSON(
-    { type: "FeatureCollection",
-      features: world.features.filter((f) => dataIsos.has(f.properties.iso3)) },
+    { type: "FeatureCollection", features: outlineFeatures() },
     {
       style: { stroke: false, fill: true, fillOpacity: 0, fillColor: "#000" },
       onEachFeature: (f, l) => {
@@ -1264,7 +1287,9 @@
     if (outlineLayer) { map.removeLayer(outlineLayer); outlineLayer = null; }
     if (!c) return;
     const iso3 = data.rows.find((r) => r.country === c)?.iso3;
-    const f = world.features.find((f) => f.properties.iso3 === iso3);
+    // The mosaic's own edge, so the selected-country outline traces the areas it
+    // is selecting rather than a neighbouring source's idea of the same border.
+    const f = outlineFeatures().find((f) => f.properties.iso3 === iso3);
     if (!f) return;
     outlineLayer = L.geoJSON(f, {
       interactive: false,
@@ -2522,10 +2547,13 @@
   // rebuilding three Leaflet layers in place. Every control is already in the URL,
   // so the only thing the user loses is the map's pan/zoom.
   // Switching source swaps the SUBNATIONAL geometry — the plan and IPC views are
-  // drawn on different units — but everything at country level is the same in both:
-  // the world backdrop, the country borders, the hit layer, and the map's own view.
-  // So swap the two payload-derived layers in place and leave the rest standing,
-  // rather than reloading the page and rebuilding the world from scratch.
+  // drawn on different units — so the world backdrop and the map's own view stay
+  // standing while the payload-derived layers are rebuilt in place.
+  //
+  // The country BORDER is payload-derived now: it is the mosaic's dissolved
+  // edge, and the two views have different mosaics. Leaving it standing would
+  // put the plan view's outline around the IPC view's areas, which is the exact
+  // misregistration this outline was introduced to remove.
   let swapping = false;
   srcTypeSel.addEventListener("change", async () => {
     const want = (ADM === "low" && srcTypeSel.value === "ipc") ? "ipc" : ADM;
@@ -2533,9 +2561,13 @@
     swapping = true;
     mapEl.classList.add("swapping");
     try {
-      const [nd, ng] = await Promise.all(ADM_FILES[want].map(
-        (f) => fetch(f, { cache: "no-cache" }).then((r) => (r.ok ? r.json() : Promise.reject(r)))));
-      data = nd; geo = ng; PAYLOAD = want;
+      const jf = (f) => fetch(f, { cache: "no-cache" })
+        .then((r) => (r.ok ? r.json() : Promise.reject(r)));
+      const [nd, ng] = await Promise.all(ADM_FILES[want].slice(0, 2).map(jf));
+      // Optional, exactly as on first load: a missing outline falls back to
+      // countries.geojson rather than failing the swap.
+      const na = await jf(ADM_FILES[want][2]).catch(() => null);
+      data = nd; geo = ng; adm0 = na; PAYLOAD = want;
       byPcode = new Map(data.rows.map((r) => [r.pcode, r]));
       // Rebuild only what the payload draws. Clip defs are keyed by pcode and the
       // old paths are about to be discarded, so drop them with their owner.
@@ -2544,7 +2576,19 @@
       clipPaths = {};
       layer = makeLayer().addTo(map);
       ringCat = makeRing().addTo(map);
+      // The border belongs to the mosaic that just changed, so it is replaced
+      // rather than re-fronted.
+      map.removeLayer(bordersLayer);
+      bordersLayer = L.geoJSON(
+        { type: "FeatureCollection", features: outlineFeatures() },
+        { interactive: false,
+          style: { color: "#1d2021", weight: 1, opacity: 0.65, fill: false } },
+      ).addTo(map);
       bordersLayer.bringToFront();   // borders stay above the new mosaic
+      // The pinned-country outline is drawn from the same source; force it to be
+      // rebuilt against the new one instead of keeping the old view's line.
+      outlineFor = null;
+      renderOutline();
       fillCountries();
       buildPlanYears();
       buildYearsWithTgt();
