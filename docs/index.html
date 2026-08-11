@@ -287,6 +287,12 @@
         <a href="https://humanitarianaction.info/document/global-humanitarian-overview-2026/article/monitoring-humanitarian-action-interactive-dashboard"
         target="_blank" rel="noopener">GHO monitoring dashboard</a>, mirrored daily
         by <a href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>.
+        These are the plan's <strong>overall</strong> figures — People targeted and
+        People reached. The dashboard also publishes a smaller
+        <em>hyper-prioritized</em> caseload (its headline "targeted (prioritized)"),
+        which is mirrored alongside but not shown here; nationally it runs 0.22 of
+        the plan target in Afghanistan, 0.68 in Sudan, 0.79 in Yemen, so the two are
+        not interchangeable.
         This is the <em>only</em> public source for subnational reach: the HPC API
         publishes no measurements for 2026 plans and HAPI's 2026 rows stop at the
         national total, which is why this tab previously showed an empty Targeted
@@ -597,8 +603,14 @@
         left the chart; it is the numbered swatch in the gutter, which states the
         class rather than asking anyone to read it off a five-step ramp.
         Figure columns follow — the caseload, the targeted population and (where
-        reported) reach, with the caseload and target each also as a
-        <strong>share of the area's population</strong> — and each column header
+        reported) reach, then the shares. <strong>The share columns do not have a
+        common denominator</strong>, so each names its own on a second line:
+        caseload and target are read against the area's population, reach against
+        <em>what was targeted</em>. Reach over 100% of target is printed as it
+        stands rather than capped — partners report against their own caseloads and
+        over-delivery is ordinary, unlike a caseload exceeding the population,
+        which is a data problem. On a narrow window the two population-share
+        columns drop out before the chart will overlap its own bars. Each header
         sorts by what it shows, so the same chart answers "where are the most people"
         and "where is the largest share of an area affected". The population base is
         the <strong>largest</strong> figure held for the area — its COD-PS total, the
@@ -846,7 +858,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260810r"></script>
+  <script src="hnrp.js?v=20260810s"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>

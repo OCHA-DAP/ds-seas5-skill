@@ -561,13 +561,17 @@
             ? `<path d="${arcPath(R + 3, R + 3, rad, 1)}" fill="none" stroke="#1d2021"` +
               ` stroke-width="6" stroke-dasharray="2 4" opacity="0.45"/>` : "")
       )).join("");
-    // The PiN line is the denominator — "100% of PiN" beside it says nothing.
-    const line = (label, v, col, showPct = true) => {
-      const f = showPct ? frac(v) : null;
+    // Each share names its own denominator, because they differ: targeting is
+    // read against need, but delivery is read against what was targeted — "17% of
+    // PiN" answers a question nobody asked of a response. The PiN line carries no
+    // share at all; it IS the denominator.
+    const line = (label, v, col, den = null, denLabel = "") => {
+      const f = den && v != null ? v / den : null;
       return `<div><span style="display:inline-block;width:8px;height:8px;` +
         `border-radius:50%;background:${col}"></span> ${label}: ` +
         (v == null ? `<span style="color:#9db1b3">not reported</span>`
-          : `${fmtN(v)}${f == null ? "" : ` · ${Math.round(100 * f)}% of PiN`}`) + `</div>`;
+          : `${fmtN(v)}${f == null ? ""
+            : ` · ${Math.round(100 * f)}% of ${denLabel}`}`) + `</div>`;
     };
     const month = agg ? agg.monMonth : monMonth(r);
     const monYr = agg ? agg.monYr : r.mon_yr;
@@ -575,8 +579,9 @@
       (base == null ? ""
         : `<svg width="${2 * R + 6}" height="${2 * R + 6}" style="flex:none">${arcs}</svg>`) +
       `<div style="font-size:11px;line-height:1.5">` +
-      line("PiN", pin, MON.pin, false) + line("Targeted", tgt, MON.tgt) +
-      line("Reached", rea, MON.rea) +
+      line("PiN", pin, MON.pin) +
+      line("Targeted", tgt, MON.tgt, base, "PiN") +
+      line("Reached", rea, MON.rea, tgt || base, tgt ? "targeted" : "PiN") +
       `<div class="muted">HNRP ${monYr} response` +
       `${month ? ` · as of ${month}` : ""}</div></div></div>`;
   }
@@ -1488,6 +1493,17 @@
   // is only worth its width where something fills it, and an all-dash column
   // reads as broken rather than as unreported.
   const anyReached = (rows) => rows.some((r) => reaOf(r) != null);
+  // Delivery against plan: reached ÷ targeted. Null where either side is missing
+  // or the target is zero — "reached 400 of a target of 0" is not a percentage.
+  const reachShare = (r) => {
+    const t = tgtOf(r), v = reaOf(r);
+    return t && v != null ? v / t : null;
+  };
+  // Deliberately NOT fmtPct, which caps at ">100%": over-delivery against a
+  // target is ordinary and interesting (partners report against their own
+  // caseloads), and rounding it away to a ceiling hides the very thing worth
+  // seeing. A population share over 100% is a data problem; this is not.
+  const fmtReachPct = (f) => (f == null ? "–" : `${Math.round(100 * f)}%`);
   const segsOf = (r) => (pinMode() ? null : (ipcComboOf(r)?.p ?? null));
   const barsWrap = document.getElementById("hnrp-bars-wrap");
   const barsHint = document.getElementById("hnrp-bars-hint");
@@ -1584,6 +1600,7 @@
     reached: [numCmp((r) => reaOf(r)), false],
     valuePct: [numCmp((r) => shareOfPop(r, sevValOf(r))), false],
     targetedPct: [numCmp((r) => shareOfPop(r, tgtOf(r))), false],
+    reachedPct: [numCmp((r) => reachShare(r)), false],
   };
   let barSort = "value", barSortFlip = false;
 
@@ -1602,7 +1619,7 @@
     // Reached is only a column where the country reports it for this cycle, so
     // a sort left on it after a country or plan-year change has nothing to
     // order by — fall back rather than silently keeping the previous order.
-    if (barSort === "reached" && !(pinMode() && anyReached(rows))) {
+    if (barSort.startsWith("reached") && !(pinMode() && anyReached(rows))) {
       barSort = "value";
       barSortFlip = false;
       [cmp, isText] = BAR_SORTS.value;
@@ -1657,7 +1674,10 @@
     // square, admin name. Column starts are set by the HEADER widths, not the
     // 13px swatches — "Intersectoral severity" is the widest thing here.
     const COL = { cat: 2, sev: 108, name: 226 };
-    const ROW = 26, M = { l: 392, r: 24, t: 26, b: 34 };
+    // t leaves room for a two-line header: the label at t-22, its denominator at
+    // t-10. Applied whether or not a sub-label is present, so the grid and the
+    // first row do not shift as columns come and go.
+    const ROW = 26, M = { l: 392, r: 24, t: 40, b: 34 };
     // Caseload columns, GHO-dashboard style (as on the Country alerts tab): a
     // fixed-width track = the area's whole population, filled to the share this
     // caseload takes, with the headcount printed beside it. Fixed tracks, not one
@@ -1668,22 +1688,54 @@
     // for the selected plan year, so it has no business on an IPC chart, where
     // the plan year is not even a visible control. IPC mode shows two columns.
     const showReached = pinMode() && anyReached(rows);
+    // [key, label, denominator sub-label]. Every share column names what it is a
+    // share OF, on a second line: they do NOT share a denominator — caseload and
+    // targeting are read against the area's population, delivery against what was
+    // targeted. Three columns ending in "%" meaning three different things is
+    // exactly the sort of thing a reader is entitled to assume away.
     const NUM_COLS = [
       ["value", pinMode() ? "PiN" : sevLabel()],
-      ...(pinMode() ? [["targeted", "Targeted"]] : []),
+      ...(pinMode() ? [["targeted", "Target"]] : []),
       ...(showReached ? [["reached", "Reached"]] : []),
-      ["valuePct", `${pinMode() ? "PiN" : sevLabel()} %`],
-      ...(pinMode() ? [["targetedPct", "Targeted %"]] : []),
+      ["valuePct", `${pinMode() ? "PiN" : sevLabel()} %`, "of population"],
+      ...(pinMode() ? [["targetedPct", "Target %", "of population"]] : []),
+      ...(showReached ? [["reachedPct", "Reached %", "of target"]] : []),
     ];
-    // Five columns need to be narrower than four, or the bar they share the row
-    // with is squeezed to nothing on a laptop width — but not so narrow that a
-    // header's swatch crosses into the column to its left: the widest label with
-    // its sort arrow ("Targeted ↓") runs ~56px, plus 9 for the swatch.
-    const NUMW = NUM_COLS.length > 4 ? 68 : 72;
-    const NGAP = 4, NUMS = NUM_COLS.length;
+    // Column width falls back from its preferred size until the bar keeps at
+    // least MINBAR. A fixed width plus the bar's own minimum meant the two could
+    // both be honoured only by overlapping — at 900px the six-column block ran
+    // 6px into the bar. Floor at 50px, below which a header no longer fits its
+    // own column and the honest answer is that the viewport is too narrow.
+    const MINBAR = 80;
+    const prefW = NUM_COLS.length > 5 ? 62 : NUM_COLS.length > 4 ? 68 : 72;
+    const NGAP = 4;
+    const room = W - M.r - M.l - 18 - MINBAR;   // width the columns may take
+    const widthFor = (n) => Math.max(50, Math.min(prefW,
+      Math.floor((room - (n - 1) * NGAP) / n)));
+    const fits = (n) => n * widthFor(n) + (n - 1) * NGAP <= room;
+    // Too narrow even at the floor: shed the population-share columns rather than
+    // draw the numbers over the bars. Counts and reach-against-target survive —
+    // they answer the questions the chart exists for; "% of the area's population"
+    // is the one a reader can do in their head from the count and the base.
+    for (const key of ["targetedPct", "valuePct"]) {
+      if (fits(NUM_COLS.length)) break;
+      const i = NUM_COLS.findIndex((c) => c[0] === key);
+      if (i < 0) continue;
+      NUM_COLS.splice(i, 1);
+      if (barSort === key) {
+        // Re-sort, not just relabel: the rows were ordered by this column before
+        // it was dropped, and leaving them would put the chart in an order no
+        // visible header claims.
+        barSort = "value";
+        barSortFlip = false;
+        rows.sort(BAR_SORTS.value[0]);
+      }
+    }
+    const NUMS = NUM_COLS.length;
+    const NUMW = widthFor(NUMS);
     const NUMBLOCK = NUMS * NUMW + (NUMS - 1) * NGAP;
     const numRight = (i) => W - M.r - NUMBLOCK + i * (NUMW + NGAP) + NUMW;
-    const barRight = Math.max(M.l + 80, W - M.r - NUMBLOCK - 18);
+    const barRight = Math.max(M.l + MINBAR, W - M.r - NUMBLOCK - 18);
     // Two layers: chrome (grid, headers, axis) is redrawn every render; rows
     // persist between renders, keyed by pcode, so a legend pin can slide and
     // fade them rather than blink the chart.
@@ -1741,10 +1793,25 @@
     // column beneath it and sorts by it (by the headcount, not the share — the
     // bars are shares, but "which area has the largest caseload" is the question
     // a click on a caseload header is asking).
-    function header(x, key, label, anchor = "start", swatch = null) {
-      const t = g("text", { x, y: M.t - 10, "font-size": 11, "text-anchor": anchor,
+    function header(x, key, label, anchor = "start", swatch = null, sub = null) {
+      // Two lines when the column needs its denominator spelled out; the sub-line
+      // is part of the same click target, since a reader aiming at "of target" is
+      // aiming at that column.
+      const t = g("text", { x, y: M.t - (sub ? 22 : 10), "font-size": 11,
+                            "text-anchor": anchor,
                             fill: barSort === key ? "#1d2021" : "#555",
                             "font-weight": barSort === key ? 600 : 400 });
+      if (sub) {
+        const s = g("text", { x, y: M.t - 10, "font-size": 9, "text-anchor": anchor,
+                              fill: "#8b9899" });
+        s.textContent = sub;
+        s.style.cursor = "pointer";
+        s.addEventListener("click", () => {
+          if (barSort === key) barSortFlip = !barSortFlip;
+          else { barSort = key; barSortFlip = false; }
+          renderBars();
+        });
+      }
       // ↓ always means "descending" — which is the DEFAULT for values (high
       // first) and the flipped state for names (Z→A), as in the table below.
       const desc = BAR_SORTS[key][1] ? barSortFlip : !barSortFlip;
@@ -1801,8 +1868,9 @@
     } else {
       capt.textContent = "IPC phases (bar)";
     }
-    NUM_COLS.forEach(([key, label], i) =>
-      header(numRight(i), key, label, "end", pinMode() ? HEADER_SWATCH[key] : null));
+    NUM_COLS.forEach(([key, label, sub], i) =>
+      header(numRight(i), key, label, "end",
+             pinMode() ? HEADER_SWATCH[key] : null, sub));
     g("line", { x1: 0, x2: W - M.r, y1: M.t - 4, y2: M.t - 4, stroke: "#e2e8e8" });
 
     barRows.length = 0;
@@ -1955,6 +2023,13 @@
                     : `${pctTxt(rea)}${tgt ? ` · ${Math.round((100 * rea) / tgt)}% of targeted` : ""}`],
         valuePct: [share(val), fmtPct(share(val)), pctTxt(val)],
         targetedPct: [share(tgt), tgt == null ? "–" : fmtPct(share(tgt)), pctTxt(tgt)],
+        reachedPct: [reachShare(r), fmtReachPct(reachShare(r)),
+                     reachShare(r) == null
+                       ? (rea == null ? "no response reported for this area"
+                          : "no target published to measure it against")
+                       : `${fmtN(rea)} reached of ${fmtN(tgt)} targeted` +
+                         `${reachShare(r) > 1 ? " — more people reached than targeted,"
+                           + " which partners do report" : ""}`],
       };
       NUM_COLS.map(([k]) => [...CELL[k], k]).forEach(([v, text, tip, key], i) => {
         // ">100%" is a flag, not a figure — mute it like a missing value.
