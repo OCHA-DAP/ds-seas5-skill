@@ -287,6 +287,14 @@
         <a href="https://humanitarianaction.info/document/global-humanitarian-overview-2026/article/monitoring-humanitarian-action-interactive-dashboard"
         target="_blank" rel="noopener">GHO monitoring dashboard</a>, mirrored daily
         by <a href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>.
+        Four figures travel together, as one funnel: <strong>PiN → targeted →
+        prioritized → reached</strong>. "Targeted" is the plan's overall target;
+        "prioritized" is the smaller <em>hyper-prioritized</em> caseload the GHO
+        dashboard headlines, and the two are in no sense interchangeable —
+        nationally the priority figure runs 0.22 of the plan target in Afghanistan,
+        0.68 in Sudan, 0.79 in Yemen. Each step is shown as a share of the step
+        above it, which is the question worth asking of a funnel: what fraction of
+        need was planned for, of the plan prioritized, of the priority delivered.
         This is the <em>only</em> public source for subnational reach: the HPC API
         publishes no measurements for 2026 plans and HAPI's 2026 rows stop at the
         national total, which is why this tab previously showed an empty Targeted
@@ -297,7 +305,20 @@
         17.48M, Sudan 20.42M, Yemen 12.00M) — so the Targeted column is continuous
         across plan years; hover it to see which source answered.
         Hovering an area gives a <strong>ring chart</strong>: the full circle is
-        the area's PiN, with targeted and reached drawn as arcs of it.
+        the area's PiN, with the rest of the funnel drawn as arcs of it.
+        Colours are taken from OCHA's own report definitions so a reader arriving
+        from either dashboard finds the same colour on the same figure —
+        <span style="color:#009EDB;font-weight:700">in need</span>,
+        <span style="color:#F58220;font-weight:700">targeted</span> and
+        <span style="color:#ED1845;font-weight:700">prioritized</span> from the
+        <a href="https://humanitarianaction.info/document/global-humanitarian-overview-2026/article/gho-country-plans-interactive-dashboard"
+        target="_blank" rel="noopener">country plans dashboard</a>, and
+        <span style="color:#D15353;font-weight:700">reached</span> from the
+        monitoring one, which is the only place it is published.
+        A reach ratio past 300% is printed as <em>&gt;300%</em> with the exact
+        figure in the tooltip: 20 areas report a priority caseload so small
+        (Sudan's Um Bada prioritizes 2,000 of a 386,000 target) that the ratio
+        describes the denominator rather than the response.
         <strong>Three caveats travel with these figures.</strong>
         They carry a <em>per-country vintage</em>, not a common as-of date —
         Afghanistan last reported in March, DR Congo in May, Chad in June — so the
@@ -596,9 +617,20 @@
         as a hairline at the origin where a real zero was published. Severity has not
         left the chart; it is the numbered swatch in the gutter, which states the
         class rather than asking anyone to read it off a five-step ramp.
-        Figure columns follow — the caseload, the targeted population and (where
-        reported) reach, with the caseload and target each also as a
-        <strong>share of the area's population</strong> — and each column header
+        Figure columns follow — the caseload, the target, the prioritized target
+        and reach where reported, then the shares. <strong>The share columns do not
+        have a common denominator</strong>, so each names its own on a second line:
+        caseload and target are read against the area's population, the priority
+        against the target, and reach against the priority. Where a country
+        prioritizes nothing in most of its areas — a published zero, which 1,973 of
+        3,469 monitored units carry — reach is read against the target instead, for
+        the whole country at once and with the header saying so; a denominator that
+        changed row by row would be two ratios wearing one heading.
+        Reach over 100% of its caseload is printed as it
+        stands rather than capped — partners report against their own caseloads and
+        over-delivery is ordinary, unlike a caseload exceeding the population,
+        which is a data problem. On a narrow window the two population-share
+        columns drop out before the chart will overlap its own bars. Each header
         sorts by what it shows, so the same chart answers "where are the most people"
         and "where is the largest share of an area affected". The population base is
         the <strong>largest</strong> figure held for the area — its COD-PS total, the
@@ -846,7 +878,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260810r"></script>
+  <script src="hnrp.js?v=20260811b"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
