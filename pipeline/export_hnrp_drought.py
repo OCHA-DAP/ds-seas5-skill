@@ -926,7 +926,12 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     engine = stratus.get_engine("dev")
     # Coarser rows can't be split down to our level, the same rule the PiN
     # loader applies; rows deeper than LEVEL roll up on their admin1_code.
-    q = f"""
+    # No admin_level predicate in SQL. Ukraine's 48 rows carry a NULL level, and
+    # `NULL >= 1` is NULL, so a level filter here dropped the country silently at
+    # every build level — the pcode is the thing that identifies the unit, and it
+    # is never null. Levels are handled in pandas below, where a drop can be
+    # counted and printed.
+    q = """
     SELECT m.iso3, m.pcode, m.admin1_code, m.admin_level, m.year,
            m.in_need, m.targeted, m.prioritized_target,
            m.reached, m.prioritized_reached
@@ -935,7 +940,6 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
           FROM hpc.monitoring_admin GROUP BY plan_id) l
       ON l.plan_id = m.plan_id AND l.d = m.snapshot_date
     WHERE m.cluster_name = 'HNRP' AND m.iso3 IS NOT NULL
-      AND m.admin_level >= {LEVEL}
     """
     # strpos, not `NOT LIKE '%;%'`: pandas hands the SQL to the driver as a
     # format string, so a bare % is read as a parameter placeholder and the
@@ -962,9 +966,30 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
         return pd.DataFrame(columns=["pcode", "iso3"]), {}
     if df.empty:
         return df, {}
-    # Rows below our level roll up onto their admin-1 parent, as PiN does.
-    deep = df["admin_level"] > LEVEL
-    df.loc[deep, "pcode"] = df.loc[deep, "admin1_code"]
+    # Rolling up is only possible where we hold the right parent code, and the
+    # mirror carries admin1_code alone — so a deeper row can be rolled to admin-1
+    # and nowhere else. At LEVEL 2 that used to rewrite admin-3 rows to an ADMIN-1
+    # pcode and drop them into an admin-2 payload, where they matched nothing and
+    # vanished without a word.
+    lvl = df["admin_level"]
+    if LEVEL == 1:
+        deep = lvl.notna() & (lvl > 1)
+        df.loc[deep, "pcode"] = df.loc[deep, "admin1_code"]
+    else:
+        # A row coarser than this build cannot be split down it — that would be
+        # the population downscale we deliberately removed. Drop, and say so.
+        coarse = lvl.notna() & (lvl < LEVEL)
+        if coarse.any():
+            byiso = df.loc[coarse].groupby("iso3").size().sort_values(ascending=False)
+            print(f"  monitoring: {int(coarse.sum())} row(s) published ABOVE adm{LEVEL} "
+                  f"cannot be split down to it — "
+                  f"{', '.join(f'{i}:{n}' for i, n in byiso.items())}")
+            df = df[~coarse]
+        deep = lvl.notna() & (lvl > LEVEL)
+        if deep.any():
+            print(f"  monitoring: {int(deep.sum())} row(s) below adm{LEVEL} rolled to "
+                  f"their admin-1 parent is not meaningful here — dropped")
+            df = df[~deep]
     df = (df.groupby(["iso3", "pcode", "year"], as_index=False)
           .agg({c: lambda s: s.sum(min_count=1)
                 for c in ("in_need", "targeted", "prioritized_target",
@@ -1144,10 +1169,36 @@ def build_lowest() -> None:
         data[lvl] = json.loads(dp.read_text())
         geo[lvl] = json.loads(gp.read_text())
 
-    level_of: dict[str, int] = {}
+    # Deepest level with rows — but only among levels that carry the CURRENT
+    # cycle. Burkina Faso publishes 2025 at admin-3 and 2026 at admin-2, so
+    # "deepest with any rows" picked admin-3 and stranded its whole 2026 cycle:
+    # 141 JIAF units and 47 monitored ones, invisible behind a country that
+    # otherwise looked fine. Resolution is worth having only where the data a
+    # reader is looking at actually lives.
+    newest = max((y for lvl in (1, 2, 3) for r in data[lvl]["rows"]
+                  for y in list((r.get("cyc") or {}).keys()) + ([r["mon_yr"]]
+                                                                if r.get("mon_yr") else [])),
+                 default=None)
+    has_cur: dict[tuple[str, int], bool] = {}
+    any_rows: dict[str, int] = {}
     for lvl in (1, 2, 3):
         for r in data[lvl]["rows"]:
-            level_of[r["iso3"]] = max(level_of.get(r["iso3"], 1), lvl)
+            iso = r["iso3"]
+            any_rows[iso] = max(any_rows.get(iso, 1), lvl)
+            cur = (newest is not None
+                   and ((r.get("cyc") or {}).get(newest) is not None
+                        or r.get("mon_yr") == newest))
+            if cur:
+                has_cur[(iso, lvl)] = True
+    level_of: dict[str, int] = {}
+    for iso, deepest in any_rows.items():
+        cur_levels = [lvl for lvl in (1, 2, 3) if has_cur.get((iso, lvl))]
+        level_of[iso] = max(cur_levels) if cur_levels else deepest
+    moved = {i: (any_rows[i], level_of[i]) for i in level_of if level_of[i] != any_rows[i]}
+    if moved:
+        print(f"Lowest-level view: {len(moved)} country/ies drawn ABOVE their deepest "
+              f"level because the {newest} cycle is not published there — "
+              + ", ".join(f"{i} adm{a}->adm{b}" for i, (a, b) in sorted(moved.items())))
     rows = [dict(r, lvl=lvl) for lvl in (1, 2, 3) for r in data[lvl]["rows"]
             if level_of.get(r["iso3"]) == lvl]
     feats = [f for lvl in (1, 2, 3) for f in geo[lvl]["features"]
