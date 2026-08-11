@@ -287,12 +287,14 @@
         <a href="https://humanitarianaction.info/document/global-humanitarian-overview-2026/article/monitoring-humanitarian-action-interactive-dashboard"
         target="_blank" rel="noopener">GHO monitoring dashboard</a>, mirrored daily
         by <a href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>.
-        These are the plan's <strong>overall</strong> figures — People targeted and
-        People reached. The dashboard also publishes a smaller
-        <em>hyper-prioritized</em> caseload (its headline "targeted (prioritized)"),
-        which is mirrored alongside but not shown here; nationally it runs 0.22 of
-        the plan target in Afghanistan, 0.68 in Sudan, 0.79 in Yemen, so the two are
-        not interchangeable.
+        Four figures travel together, as one funnel: <strong>PiN → targeted →
+        prioritized → reached</strong>. "Targeted" is the plan's overall target;
+        "prioritized" is the smaller <em>hyper-prioritized</em> caseload the GHO
+        dashboard headlines, and the two are in no sense interchangeable —
+        nationally the priority figure runs 0.22 of the plan target in Afghanistan,
+        0.68 in Sudan, 0.79 in Yemen. Each step is shown as a share of the step
+        above it, which is the question worth asking of a funnel: what fraction of
+        need was planned for, of the plan prioritized, of the priority delivered.
         This is the <em>only</em> public source for subnational reach: the HPC API
         publishes no measurements for 2026 plans and HAPI's 2026 rows stop at the
         national total, which is why this tab previously showed an empty Targeted
@@ -602,11 +604,16 @@
         as a hairline at the origin where a real zero was published. Severity has not
         left the chart; it is the numbered swatch in the gutter, which states the
         class rather than asking anyone to read it off a five-step ramp.
-        Figure columns follow — the caseload, the targeted population and (where
-        reported) reach, then the shares. <strong>The share columns do not have a
-        common denominator</strong>, so each names its own on a second line:
-        caseload and target are read against the area's population, reach against
-        <em>what was targeted</em>. Reach over 100% of target is printed as it
+        Figure columns follow — the caseload, the target, the prioritized target
+        and reach where reported, then the shares. <strong>The share columns do not
+        have a common denominator</strong>, so each names its own on a second line:
+        caseload and target are read against the area's population, the priority
+        against the target, and reach against the priority. Where a country
+        prioritizes nothing in most of its areas — a published zero, which 1,973 of
+        3,469 monitored units carry — reach is read against the target instead, for
+        the whole country at once and with the header saying so; a denominator that
+        changed row by row would be two ratios wearing one heading.
+        Reach over 100% of its caseload is printed as it
         stands rather than capped — partners report against their own caseloads and
         over-delivery is ordinary, unlike a caseload exceeding the population,
         which is a data problem. On a narrow window the two population-share
@@ -858,7 +865,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260810s"></script>
+  <script src="hnrp.js?v=20260810t"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
