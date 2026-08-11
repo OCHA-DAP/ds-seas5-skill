@@ -680,18 +680,34 @@
   // so is the whole point — the alternative, and what this tab did until now,
   // was to drop them silently, which took 45% of Mali's response and 20% of
   // Burkina's off the tab with nothing on screen to admit it.
-  function noGeomNote(agg) {
-    if (!agg.nNoGeom) return "";
-    // Three different causes reach this note — units created by an admin reform
-    // no COD has caught up with, planning areas that are not administrative units
-    // at all (Port-au-Prince's metro zone, Ukraine's occupied territory), and
-    // units whose code we cannot tell apart from a neighbour's. Naming only the
-    // first would be wrong for the others, so the wording covers the ground it
-    // can actually stand on.
-    return `<div class="muted">${agg.nNoGeom} further area` +
-      `${agg.nNoGeom === 1 ? " has" : "s have"} figures but no boundary we can` +
-      ` draw — counted in the totals and listed in the chart, but not on the map.` +
-      ` They are recent admin reforms, or planning areas no COD maps.</div>`;
+  // How the plan's own units became the areas on screen. Worth its own section
+  // because the two counts routinely disagree and the reasons are not guessable:
+  // Ukraine plans on 48 front-line bands that are 24 oblasts here, Mali on 115
+  // units of which 53 have a boundary we hold. Without this the map simply shows
+  // a different number of areas than the plan describes, and a reader checking
+  // the arithmetic has nothing to go on.
+  function adminNote(agg) {
+    const m = (data.mon_admin ?? {})[agg.iso];
+    if (!m) return "";
+    const bits = [];
+    if (m.merged) {
+      // The causes vary — Ukraine's front-line bands, Mogadishu's districts
+      // inside the single Banadir polygon we hold, units an admin reform split —
+      // so the sentence describes what happened rather than naming one of them.
+      bits.push(`<div>${m.merged} ${m.merged === 1 ? "is" : "are"} finer than` +
+        ` any boundary we hold and ${m.merged === 1 ? "is" : "are"} summed into` +
+        ` the area that contains ${m.merged === 1 ? "it" : "them"}.</div>`);
+    }
+    if (m.nodraw) {
+      bits.push(`<div>${m.nodraw} ha${m.nodraw === 1 ? "s" : "ve"} no boundary` +
+        ` we can draw at all — counted in the totals and listed in the chart,` +
+        ` not on the map. Recent admin reforms, or planning areas no COD maps.</div>`);
+    }
+    if (!bits.length) return "";
+    return `<div class="sec"><div class="sec-t">Plan areas vs map areas</div>` +
+      `<div>The plan reports on ${m.src} area${m.src === 1 ? "" : "s"};` +
+      ` ${m.drawn} are drawn.</div>` +
+      `<div class="muted">${bits.join("")}</div></div>`;
   }
   function placedNote(agg) {
     if (!agg.monNatl || !agg.monPlacedShare) return "";
@@ -765,9 +781,9 @@
         `${agg.nWithSev ? `, ${agg.nWithSev} with ${pinMode() ? "a caseload"
           : "an IPC classification"}` : ""}</div>` +
         (agg.pop != null ? `<div class="muted">population ${fmtN(agg.pop)}</div>` : "") +
-        noGeomNote(agg) +
         placedNote(agg) +
-        `</div>`;
+        `</div>` +
+        adminNote(agg);
     } else {
       // Membership must be per-unit, never assumed from scope: in IPC mode most of
       // a country's states can be in view yet outside its HNRP (Nigeria covers only

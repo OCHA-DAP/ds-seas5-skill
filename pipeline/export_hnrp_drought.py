@@ -958,7 +958,7 @@ def load_monitoring_national() -> dict[str, dict]:
     return out
 
 
-def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
+def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str], dict[str, int]]:
     """Response monitoring per ADM1 unit: targeted, prioritized target, reached.
 
     From hpc.monitoring_admin (ds-hnrp-mirror), which mirrors the GHO monitoring
@@ -1012,9 +1012,9 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
         # thing on screen.
         print(f"  monitoring: SKIPPED — {exc.__class__.__name__}: {exc}\n"
               f"  targeted/reached will be absent (not zero) for every unit")
-        return pd.DataFrame(columns=["pcode", "iso3"]), {}
+        return pd.DataFrame(columns=["pcode", "iso3"]), {}, {}
     if df.empty:
-        return df, {}
+        return df, {}, {}
     # The unit's own name, off the tail of "Province>Zone". normalize_pcodes has a
     # name fallback for codes it cannot reconcile, and it was doing nothing here
     # because this frame carried no name column at all — 418 of 3,917 monitored
@@ -1072,6 +1072,11 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
             print(f"  monitoring: {int(deep.sum())} row(s) below adm{LEVEL} rolled to "
                   f"their admin-1 parent is not meaningful here — dropped")
             df = df[~deep]
+    # How many units the plan actually reports on at this level, BEFORE the
+    # roll-up below collapses them. Ukraine's 48 front-line bands become 25 rows
+    # here, and the sidebar has to be able to say so — after this groupby the
+    # evidence that 48 existed is gone.
+    src_units = df.groupby("iso3").size().to_dict()
     df = (df.groupby(["iso3", "pcode", "year"], as_index=False)
           .agg({**{c: lambda s: s.sum(min_count=1)
                    for c in ("in_need", "targeted", "prioritized_target",
@@ -1105,7 +1110,7 @@ def load_monitoring_adm1() -> tuple[pd.DataFrame, dict[str, str]]:
     n_rea = int((df["monRea"].fillna(0) > 0).sum())
     print(f"Monitoring: {df['iso3'].nunique()} countries, {len(df)} units, "
           f"{n_rea} with reach reported ({df['mon_year'].max()} cycle)")
-    return df, months
+    return df, months, src_units
 
 
 def load_population_adm1() -> pd.DataFrame:
@@ -1297,7 +1302,13 @@ def build_lowest() -> None:
     feats = [f for lvl in (1, 2, 3) for f in geo[lvl]["features"]
              if level_of.get(f["properties"].get("iso3")) == lvl]
 
-    payload = {**data[1], "adm_level": "low", "rows": rows}
+    # Per-country and level specific, so it cannot be inherited from level 1 the
+    # way the rest of the header is — a country drawn at adm2 needs its adm2
+    # counts, not its adm1 ones.
+    mon_admin = {iso: d for lvl in (1, 2, 3)
+                 for iso, d in (data[lvl].get("mon_admin") or {}).items()
+                 if level_of.get(iso) == lvl}
+    payload = {**data[1], "adm_level": "low", "rows": rows, "mon_admin": mon_admin}
     out = base / "hnrp_drought_low.json"
     out.write_text(json.dumps(payload, separators=(",", ":")))
     gout = base / "hnrp_low.geojson"
@@ -1373,7 +1384,10 @@ def combine_ipc_view() -> None:
     feats = [f for lvl in (1, 2, 3) for f in geo[lvl]["features"]
              if level_of.get(f["properties"].get("iso3")) == lvl]
 
-    payload = {**data[1], "adm_level": "ipc", "rows": rows}
+    mon_admin = {iso: d for lvl in (1, 2, 3)
+                 for iso, d in (data[lvl].get("mon_admin") or {}).items()
+                 if level_of.get(iso) == lvl}
+    payload = {**data[1], "adm_level": "ipc", "rows": rows, "mon_admin": mon_admin}
     out = base / "hnrp_drought_ipc.json"
     out.write_text(json.dumps(payload, separators=(",", ":")))
     gout = base / "hnrp_ipc.geojson"
@@ -1532,7 +1546,7 @@ def main() -> None:
     df_hno = (df_hno.groupby("pcode", as_index=False)
               .agg({"hno_pop": "sum", "hno_year": "max"}))
     mon_national = load_monitoring_national()
-    df_mon_raw, mon_months = load_monitoring_adm1()
+    df_mon_raw, mon_months, mon_src = load_monitoring_adm1()
     if len(df_mon_raw):
         df_mon = normalize_pcodes(df_mon_raw, poly, "monitoring")
         # Two rows can land on one unit for two very different reasons, and they
@@ -1593,6 +1607,33 @@ def main() -> None:
         # rows: they carry their figures into the bar chart and the country
         # totals, and the site marks them as having no boundary.
         _placed = df_mon["pcode"].isin(set(poly["pcode"]))
+        # How each country's planning units became map units, for the sidebar.
+        # A reader comparing our area count with the plan's deserves to know that
+        # Ukraine's 48 front-line bands are 24 oblasts here and that 62 of Mali's
+        # 115 units are not drawn at all — otherwise the arithmetic looks wrong
+        # and there is nothing on screen to explain it.
+        _all_mon = pd.concat(
+            [df_mon, mon_collided.drop(columns=["_certain"], errors="ignore")],
+            ignore_index=True)
+        _ref_pc = set(poly["pcode"])
+        mon_admin: dict[str, dict] = {}
+        for _iso, _g in _all_mon.groupby("iso3"):
+            _pl = _g[_g["pcode"].isin(_ref_pc)]
+            _drawn = int(_pl["pcode"].nunique())
+            _nodraw = int(_g["pcode"].nunique() - _drawn)
+            # src comes from the LOADER's input, not from this frame: roll-ups
+            # happen in two places (the loader folds sub-admin planning units onto
+            # their parent, then the reform crosswalk folds new units into old
+            # ones) and only the loader still knows how many there were to begin
+            # with. Everything the plan reports is therefore drawn, merged into
+            # something drawn, or undrawable — and those three account for src.
+            _src = int(mon_src.get(_iso, _g["pcode"].nunique()))
+            mon_admin[_iso] = {
+                "src": _src,                       # units the plan reports on
+                "drawn": _drawn,                   # polygons they landed on
+                "nodraw": _nodraw,                 # units with no polygon at all
+                "merged": max(0, _src - _drawn - _nodraw),  # folded into another
+            }
         mon_unplaced = pd.concat(
             [df_mon.loc[~_placed],
              mon_collided.drop(columns=["_certain"], errors="ignore")],
@@ -1611,6 +1652,7 @@ def main() -> None:
     else:
         df_mon = pd.DataFrame(columns=["pcode"])
         mon_unplaced = pd.DataFrame(columns=["iso3", "pcode", "name", "mon_year"])
+        mon_admin = {}
     ipc_iso3 = df_ipc.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
     ipc_lists = _ipc_lists(df_ipc)
     # Normalization can merge codes (renumberings) — re-aggregate to one row per pcode.
@@ -2024,6 +2066,10 @@ def main() -> None:
         # place. See load_monitoring_national: the subnational rows do not add up
         # to this and are not supposed to.
         "mon_national": {k: mon_national[k] for k in sorted(mon_national)},
+        # How the plan's units map onto the ones we draw, per country. Level
+        # specific, so build_lowest / combine_ipc_view rebuild it from whichever
+        # level each country is actually drawn at.
+        "mon_admin": {k: mon_admin[k] for k in sorted(mon_admin)},
         "issued_label": issued_label,
         "issued_month": int(issued_month),
         "issued_year": int(global_max_iy),
