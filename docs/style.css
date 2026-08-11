@@ -174,7 +174,10 @@ h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 .skill-axttl { font-size: 11px; fill: #555; }
 
 #legend, #skill-map-legend { display: flex; flex-wrap: wrap; gap: 10px 24px; padding: 14px 0; font-size: 0.8rem; align-items: flex-start; }
-.legend-group { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+/* flex-start, not center: the blocks are different heights because some labels
+   wrap to two lines, and centring floated the short ones down out of line with
+   the rest. Their swatch rows should sit on one line across the whole legend. */
+.legend-group { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-start; }
 .legend-item { display: inline-flex; align-items: center; gap: 5px; }
 .swatch { width: 16px; height: 12px; border: 1px solid var(--hdx-neutral-3); display: inline-block; }
 
@@ -206,6 +209,19 @@ h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 /* Standalone swatches (unordered keys, e.g. skill): separated boxes rather than
    a contiguous ramp, since neither entry sits "next to" the other on a scale. */
 .legend-strip.boxes { gap: 10px; }
+/* Forecast categories drawn as the map draws them — a ring, not a block. Close
+   together, since they are still an ordered scale; the off-season strip is a
+   separate block and keeps the legend's own wider gap from them. */
+.legend-strip.rings { gap: 3px; }
+.legend-strip.rings .ls-seg .ls-cell {
+  height: 15px; box-sizing: border-box; border-radius: var(--hdx-radius-sm);
+}
+/* Selectors with no counterpart on the map: same 14px cell as every other strip,
+   so they line up, and no colour, so they promise no encoding. */
+.legend-strip.chips { gap: 8px; }
+.legend-strip.chips .ls-seg .ls-cell {
+  box-sizing: border-box; border-radius: var(--hdx-radius-sm);
+}
 /* .ls-seg in the selector so this outranks the strip's first/last-child corner rules */
 .legend-strip.boxes .ls-seg .ls-cell {
   height: 17px; box-sizing: border-box; border-radius: var(--hdx-radius-sm);

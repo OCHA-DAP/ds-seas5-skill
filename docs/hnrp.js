@@ -1439,7 +1439,7 @@
         if (sg.border) cell.style.boxShadow = "inset 0 0 0 1px #c4d0d1";
         // The map's boundary encoding, reproduced: a ring of the category colour
         // around an empty box, rather than a block of it.
-        if (sg.edge) cell.style.border = `2px solid ${sg.edge}`;
+        if (sg.edge) cell.style.border = `3px solid ${sg.edge}`;
         // Detached from the ramp it sits beside — "not assessed" is not a step on
         // the scale, and butting it against class 1 read as one.
         if (sg.sep) seg.classList.add("sep");
@@ -1476,11 +1476,11 @@
                  : { fill: "#e2e8e8", label: "normal", border: true, dim: "cat", val: "none" },
       catSeg("#74a1e8", "above normal", "flood_sev"),
       catSeg("#134ead", "strongly above", "flood_vsev"),
-    ], 58, catOutline ? "boxes" : "");
+    ], 58, catOutline ? "rings" : "");
     strip("\u00a0", [
       catOutline ? catSeg("#b1c1c2", "off season", "off_season")
                  : { fill: "#b1c1c2", label: "off season", dim: "cat", val: "off_season" },
-    ], 58, catOutline ? "boxes" : "");
+    ], 58, catOutline ? "rings" : "");
     // Skill is how each category above is DRAWN, so these swatches carry no
     // colour of their own — white boxes wearing the map's own distinction.
     // Below the skill floor (r < 0.30) no category is drawn at all: at the
@@ -1524,10 +1524,14 @@
     // Built once and shown conditionally: the legend is not rebuilt when the
     // source or plan year changes, and which of these two the payload can answer
     // for depends on both.
+    // Neutral, deliberately. Nothing on the map is drawn in the response
+    // colours, so a coloured swatch here would promise an encoding that does not
+    // exist — these are selectors, not a key. Same 14px cell as every other
+    // strip; the "boxes" modifier's taller cell made them sit oddly beside the rest.
     respBlock = strip("Response", [
-      { fill: MON.tgt, label: "targeted", dim: "resp", val: "tgt" },
-      { fill: MON.prio, label: "prioritized", dim: "resp", val: "prio" },
-    ], 62, "boxes");
+      { fill: "#ffffff", faint: true, label: "targeted", dim: "resp", val: "tgt" },
+      { fill: "#ffffff", faint: true, label: "prioritized", dim: "resp", val: "prio" },
+    ], 62, "chips");
     // Pins outlive every other control change, so there is always one click
     // back to the unfiltered map.
     clearChip = document.createElement("button");
@@ -1802,11 +1806,14 @@
     // Left gutter holds three labelled columns: forecast swatch, severity
     // square, admin name. Column starts are set by the HEADER widths, not the
     // 13px swatches — "Intersectoral severity" is the widest thing here.
-    const COL = { cat: 2, sev: 108, name: 226 };
+    // Two-line headers let the gutter close up: "Forecast category" and
+    // "Intersectoral severity" set these columns' width, and broken in half they
+    // need barely more than the swatches beneath them. 82px back for the bars.
+    const COL = { cat: 2, sev: 76, name: 158 };
     // t leaves room for a two-line header: the label at t-22, its denominator at
     // t-10. Applied whether or not a sub-label is present, so the grid and the
     // first row do not shift as columns come and go.
-    const ROW = 26, M = { l: 392, r: 24, t: 40, b: 34 };
+    const ROW = 26, M = { l: 310, r: 24, t: 40, b: 34 };
     // Caseload columns, GHO-dashboard style (as on the Country alerts tab): a
     // fixed-width track = the area's whole population, filled to the share this
     // caseload takes, with the headcount printed beside it. Fixed tracks, not one
@@ -1827,14 +1834,14 @@
     // exactly the sort of thing a reader is entitled to assume away.
     const NUM_COLS = [
       ["value", pinMode() ? "PiN" : sevLabel()],
-      ...(pinMode() ? [["targeted", "Target"]] : []),
-      ...(showPrio ? [["prioritized", "Priority", "target"]] : []),
+      ...(pinMode() ? [["targeted", "Targeted"]] : []),
+      ...(showPrio ? [["prioritized", "Targeted", "(prioritized)"]] : []),
       ...(showReached ? [["reached", "Reached"]] : []),
-      ...(showPrio ? [["prioritizedPct", "Priority %", "of target"]] : []),
+      ...(showPrio ? [["prioritizedPct", "Prioritized %", "of targeted"]] : []),
       ...(showReached ? [["reachedPct", "Reached %",
-                          showPrio ? "of priority" : "of target"]] : []),
+                          showPrio ? "of prioritized" : "of targeted"]] : []),
       ["valuePct", `${pinMode() ? "PiN" : sevLabel()} %`, "of population"],
-      ...(pinMode() ? [["targetedPct", "Target %", "of population"]] : []),
+      ...(pinMode() ? [["targetedPct", "Targeted %", "of population"]] : []),
     ];
     // Column width falls back from its preferred size until the bar keeps at
     // least MINBAR. A fixed width plus the bar's own minimum meant the two could
@@ -1973,8 +1980,9 @@
     // Which numeric columns name a bar, and in which colour.
     const HEADER_SWATCH = { value: MON.pin, targeted: MON.tgt,
                           prioritized: MON.prio, reached: MON.rea };
-    header(COL.cat, "forecast", "Forecast category");
-    header(COL.sev, "severity", sevClassTitle());
+    header(COL.cat, "forecast", "Forecast", "start", null, "category");
+    const sevHead = pinMode() ? ["Intersectoral", "severity"] : ["IPC", "phase"];
+    header(COL.sev, "severity", sevHead[0], "start", null, sevHead[1]);
     header(COL.name, "name", "Admin name");
     // The bar itself is not a sort target — the four numeric columns are, one
     // per quantity it draws (headcount and share, caseload and targeted).
