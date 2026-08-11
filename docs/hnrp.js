@@ -649,7 +649,15 @@
     };
     const month = agg ? agg.monMonth : monMonth(r);
     const monYr = agg ? agg.monYr : r.mon_yr;
-    return `<div style="display:flex;gap:10px;align-items:center;margin-top:4px">` +
+    // flex-start, not center: centring re-positions the rings against the height
+    // of the text beside them, and that height changes from area to area — a
+    // measure that is "not reported" prints shorter than one carrying a share,
+    // and the longer lines wrap at some widths and not others. The rings then
+    // slid up and down as you moved between areas. Anchored to the top they hold
+    // still, and the whole block keeps a floor so the sections below it do not
+    // shuffle either when an area reports fewer figures.
+    return `<div style="display:flex;gap:10px;align-items:flex-start;margin-top:4px` +
+      (base == null ? "" : `;min-height:${2 * R + 6}px`) + `">` +
       (base == null ? ""
         : `<svg width="${2 * R + 6}" height="${2 * R + 6}" style="flex:none">${arcs}</svg>`) +
       `<div style="font-size:11px;line-height:1.5">` +
@@ -2161,9 +2169,11 @@
                             "text-anchor": anchor,
                             fill: barSort === key ? "#1d2021" : "#555",
                             "font-weight": barSort === key ? 600 : 400 });
+      let subEl = null;
       if (sub) {
         const s = g("text", { x, y: M.t - 10, "font-size": 9, "text-anchor": anchor,
                               fill: "#8b9899" });
+        subEl = s;
         s.textContent = sub;
         s.style.cursor = "pointer";
         s.addEventListener("click", () => {
@@ -2185,13 +2195,27 @@
       // A swatch, not coloured label text: reached is a pale pink that is fine
       // as a 5px bar and illegible as 11px type, and darkening it for the label
       // would stop it matching the bar it names — which is the whole point.
-      // Placed by MEASURED text width, so it tracks the sort arrow appearing.
+      //
+      // Drawn as a glyph INSIDE the right-anchored label rather than as a rect
+      // positioned next to it. The rect was placed by measured text width, and
+      // getComputedTextLength returns 0 while the tab is still display:none — so
+      // the first render fell back to a character-count estimate that runs short
+      // on the narrow labels ("PiN ↓") and put the square on top of the text.
+      // As part of the text it cannot overlap it, at any width, in any font, and
+      // it follows the sort arrow appearing and disappearing for free.
+      //
+      // It rides the SUB-label, not the label. The columns are 90px and the
+      // widest label ("Targeted (prio.)") already fills about 82 of them, so a
+      // glyph on that line would push the header left into its neighbour. The
+      // sub-labels are 9px and half the width, and sit directly beneath, so the
+      // swatch still reads as belonging to the column it names.
       if (swatch) {
-        // getComputedTextLength returns 0 while the tab is display:none, so keep
-        // an estimate to fall back on — a swatch a few pixels off beats none.
-        const w = t.getComputedTextLength?.() || t.textContent.length * 5.6;
-        g("rect", { x: anchor === "end" ? x - w - 9 : x, y: M.t - 16,
-                    width: 6, height: 6, rx: 1.5, fill: swatch });
+        const host = subEl ?? t;
+        const sp = document.createElementNS(NS, "tspan");
+        sp.setAttribute("fill", swatch);
+        sp.setAttribute("font-size", "13");   // ~9px square, up from the 6px rect
+        sp.textContent = "■ ";
+        host.insertBefore(sp, host.firstChild);
       }
       return t;
     }
