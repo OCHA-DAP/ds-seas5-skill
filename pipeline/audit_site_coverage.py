@@ -45,9 +45,6 @@ NO_CYCLE = {
                      " plans — its last subnational cycle is 2025",
     ("HND", "2026"): "as Guatemala — no 2026 workbook, not monitored",
     ("SLV", "2026"): "as Guatemala — no 2026 workbook, not monitored",
-    ("UKR", "2026"): "monitored, but on planning units (UA12_U20A, UA05_UALL —"
-                     " oblast x settlement size) that have no COD admin polygon,"
-                     " so none of its 48 rows can be placed on the map",
 }
 
 
@@ -82,10 +79,11 @@ def charts_in_ipc_mode(r):
 
 
 # Monitored units a country may lose between the mirror and the payload before it
-# counts as a finding. Some loss is structural and checked: Mali publishes its
-# monitoring on communes while the site draws cercles, Ukraine on planning units
-# with no admin polygon at all.
-LOSS_BUDGET = {"MLI": 0.70, "UKR": 1.00, "CAF": 0.25, "BFA": 0.15}
+# counts as a finding. Some of the gap is structural and checked, and some is not
+# loss at all: Ukraine plans on 48 front-line bands that sum onto 24 oblasts, so
+# a row count necessarily halves without a figure going missing. Mali is real
+# loss — it publishes on communes while the site draws cercles.
+LOSS_BUDGET = {"MLI": 0.70, "UKR": 0.55, "CAF": 0.25, "BFA": 0.15}
 DEFAULT_LOSS_BUDGET = 0.05
 
 
