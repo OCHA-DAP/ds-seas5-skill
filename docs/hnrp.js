@@ -54,7 +54,7 @@
   // Every control survives a reload (and makes links shareable with their
   // settings): state is carried in the URL query string.
   const CTLS = {
-    skill: "hnrp-skill", rp: "hnrp-rp", tri: "hnrp-tri",
+    tri: "hnrp-tri",
     sev: "hnrp-sev-type", lvl: "hnrp-sev-lvl", ipcp: "hnrp-ipc-period",
     country: "hnrp-country", yr: "hnrp-plan-yr",
   };
@@ -68,6 +68,12 @@
       else u.searchParams.delete(k); // deselected (e.g. country "") must clear too
     }
     u.searchParams.delete("dro"); // retired "show only drought signals" filter
+    // Retired with the Skill and Return-period selectors. Cleared rather than
+    // ignored so an old shared link stops advertising a setting that no longer
+    // exists — ?skill=high once meant a different map, and leaving it in the bar
+    // would imply it still does.
+    u.searchParams.delete("skill");
+    u.searchParams.delete("rp");
     u.hash = "hnrp";
     return u;
   }
@@ -89,8 +95,21 @@
     }
   }
 
-  const skillSel = document.getElementById("hnrp-skill");
-  const rpSel = document.getElementById("hnrp-rp");
+  // The Skill and Return-period selectors are gone. They set the thresholds a
+  // slot must clear to count as an alert, and the legend's forecast selectors do
+  // the job a reader actually wanted from them — showing or hiding categories —
+  // without re-cutting the categories underneath. Both now sit at what was their
+  // default, so the tab opens exactly as it did before.
+  //
+  // The consequence, deliberately accepted: "High only (r >= 0.50)" and the
+  // 10-year return period are no longer reachable from the UI. Restoring either
+  // means restoring a control, not just a constant — every category on screen is
+  // computed against these.
+  // Functions, not constants: T is reassigned when the index loads, so anything
+  // captured at setup time would freeze the built-in fallback thresholds instead
+  // of the ones the build actually published.
+  const rMin = () => T.r_mod;      // moderate or high skill
+  const rpMin = () => T.sev_rp;    // the "alert" return period (3 yr)
   const srcTypeSel = document.getElementById("hnrp-sev-type");
   const srcLvlSel = document.getElementById("hnrp-sev-lvl");
   const srcLvlWrap = document.getElementById("hnrp-sev-lvl-wrap");
@@ -412,15 +431,14 @@
   const inScope = (r) => !countrySel.value || r.country === countrySel.value;
   const fbSlot = (r) => (r.fb_pct == null ? null
     : { key: r.fb_tri, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r, rainy: !!r.fb_rainy });
-  // Worst qualifying drought among the unit's valid trimesters, under the CURRENT
-  // skill threshold (unlike the export's precomputed slot, which is r_mod-gated).
+  // Worst qualifying drought among the unit's valid trimesters, at the moderate
+  // skill floor — the same one the export's precomputed slot is gated on.
   function worstSlot(r, inclInSeason) {
-    const rMin = skillSel.value === "high" ? T.r_high : T.r_mod;
     let best = null;
     for (const [key, t] of Object.entries(r.tris ?? {})) {
       if (!inclInSeason && t.lead < 0) continue;
       if (t.pct == null || t.pct >= 50 || !t.rainy || t.rp == null) continue;
-      if (t.r == null || t.r < rMin) continue;
+      if (t.r == null || t.r < rMin()) continue;
       if (!best || t.rp > best.rp) best = { key, lead: t.lead, rp: t.rp, pct: t.pct, r: t.r, rainy: true };
     }
     return best;
@@ -438,8 +456,8 @@
   // Qualifying drought signal = drought side, rainy season, skill + RP thresholds.
   function isDrought(s) {
     return !!s && s.pct != null && s.pct < 50 && s.rainy
-      && s.r != null && s.r >= (skillSel.value === "high" ? T.r_high : T.r_mod)
-      && s.rp != null && s.rp >= +rpSel.value;
+      && s.r != null && s.r >= rMin()
+      && s.rp != null && s.rp >= rpMin();
   }
   // Display slot: the qualifying drought slot, else the same season's real
   // category — flood/normal/low-skill/off-season, like the Map tab. Narrowing
@@ -2482,7 +2500,7 @@
     aggCache.clear(); // its key covers the controls, but the payload can swap too
     renderMap(); renderBars(); renderSide();
   }
-  for (const el of [skillSel, rpSel, srcLvlSel, triSel, ipcPeriodSel, planYrSel]) {
+  for (const el of [srcLvlSel, triSel, ipcPeriodSel, planYrSel]) {
     el.addEventListener("change", renderAll);
   }
   // Changing the source changes the GEOMETRY, not just the colours: the plan view

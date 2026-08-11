@@ -146,23 +146,10 @@
     <div id="hnrp-controls">
       <div class="ctl-row">
         <span class="row-tag">Forecast</span>
-        <label class="ctl">Skill
-          <select id="hnrp-skill" class="map-select">
-            <option value="mod" selected>Moderate or high (r ≥ 0.30)</option>
-            <option value="high">High only (r ≥ 0.50)</option>
-          </select>
-        </label>
-        <label class="ctl">Return period ≥
-          <select id="hnrp-rp" class="map-select">
-            <option value="1">any</option>
-            <option value="3" selected>3 yr (alert)</option>
-            <option value="10">10 yr (severe alert)</option>
-          </select>
-        </label>
         <label class="ctl">Valid season
           <select id="hnrp-tri" class="map-select">
-            <option value="auto" selected>Worst drought — forecast seasons</option>
-            <option value="auto-in">Worst drought — incl. in-season</option>
+            <option value="auto">Worst drought — forecast seasons</option>
+            <option value="auto-in" selected>Worst drought — incl. in-season</option>
           </select>
         </label>
       </div>
@@ -233,14 +220,18 @@
       <h4>Forecast signal</h4>
       <p>
         For each area the single <strong>worst</strong> qualifying slot is shown: rainy-season
-        trimesters within the forecast horizon, drought side only (forecast percentile
-        &lt; 50), with at least moderate skill (r&nbsp;≥&nbsp;0.30). The
-        <strong>return period</strong> is directional: a 10-yr value means a forecast this
-        dry occurs about once a decade in the 1981–present hindcast for that area and season.
-        The <strong>Valid season</strong> selector defaults to the worst drought among
-        forecast seasons; "incl. in-season" also scans trimesters already in progress (the
-        worst signal is often a season underway), and picking a trimester (e.g. MJJ) shows
-        that season's forecast for every area. The trimester actually used is shown as its
+        trimesters, drought side only (forecast percentile &lt; 50), with at least moderate
+        skill (r&nbsp;≥&nbsp;0.30) and a return period of at least 3 years. Those two
+        thresholds are fixed — use the legend's forecast selectors to show or hide
+        categories. The <strong>return period</strong> is directional: a 10-yr value means a
+        forecast this dry occurs about once a decade in the 1981–present hindcast for that
+        area and season.
+        The <strong>Valid season</strong> selector defaults to the worst drought
+        <em>including seasons already in progress</em>, because the worst signal is often a
+        season underway — Ukraine's only drought signal this issuance is one, and the
+        forecast-seasons-only view showed the country as low-skill instead. Switching to
+        "forecast seasons" restricts it to trimesters that have not started. The
+        trimester actually used is shown as its
         compact code (e.g. MJJ) — centred on
         each area when a country is selected on the map, and bold in every tooltip.
         Areas below the skill floor carry no code: with no usable skill there is no
