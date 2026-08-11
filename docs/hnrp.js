@@ -1754,7 +1754,14 @@
     let [cmp, isText] = BAR_SORTS[barSort] ?? BAR_SORTS.value;
     const rows = country
       ? data.rows.filter((r) => r.country === country
-            && (pinMode() ? sevValOf(r) != null : sevTotOf(r) > 0 && segsOf(r))
+            && (pinMode()
+                  // A caseload OR any monitoring figure for the cycle. Venezuela
+                  // reports reach for 176 areas and no PiN anywhere — keying the
+                  // chart on PiN alone hid a country that plainly has response
+                  // data, which is the same mistake in miniature as reading a
+                  // missing figure as a zero.
+                  ? (sevValOf(r) != null || (monLive(r) ?? []).some((v) => v != null))
+                  : sevTotOf(r) > 0 && segsOf(r))
             && !isFilteredOut(catOf(r), clsOf(r), r))
           .sort(barSortFlip ? (a, b) => cmp(b, a) : cmp)
       : [];
