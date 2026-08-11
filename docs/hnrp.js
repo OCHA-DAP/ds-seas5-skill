@@ -502,16 +502,27 @@
   // Colours are the GHO monitoring dashboard's own, so our figures are
   // recognisable next to it: the first two are lifted from the published report
   // definition, the third is the tint it draws reach bars in.
-  // Four steps of one funnel — need, plan, priority, delivery — so the reds
-  // deepen as the caseload narrows. #d15353 stays on the PRIORITY target, which
-  // is the figure the dashboard puts its own headline red on ("People targeted
-  // (prioritized)"); the broader plan target takes the pale tone above it.
+  // Lifted from OCHA's own report definitions, so a reader coming from either
+  // dashboard finds the same colour on the same figure. The first three are the
+  // GHO country-plans report's headline KPIs; reach comes from the monitoring
+  // report, which is the only one that publishes it.
+  //   #009EDB  TOTAL PEOPLE IN NEED            country-plans
+  //   #F58220  TOTAL PEOPLE TARGETED           country-plans
+  //   #ED1845  PEOPLE URGENTLY PRIORITIZED     country-plans
+  //   #F98B8B  PEOPLE REACHED (PRIORITIZED)    monitoring
+  // Note the funnel does NOT darken monotonically — reach is paler than the
+  // priority target above it. That is OCHA's choice, not a slip, and matching it
+  // matters more than an internally tidy ramp.
   const MON = {
-    pin: "#009dda",       // People in need
-    tgt: "#f0a3a3",       // People targeted (the plan's overall target)
-    prio: "#d15353",      // People targeted, prioritized
-    rea: "#8c3232",       // People reached
+    pin: "#009EDB",
+    tgt: "#F58220",
+    prio: "#ED1845",
+    rea: "#F98B8B",
     track: "#eef1f1",
+    // Readable-as-type cousin of the reach salmon, for the axis caption only —
+    // #F98B8B is fine as a 4px bar and too pale for 11px text. The swatches and
+    // bars stay exact.
+    reaInk: "#D15353",
   };
   // [PiN, targeted, prioritized target, reached, prioritized reached] for the
   // monitored cycle. Any slot can be null — the source reports unevenly, and a
@@ -1546,11 +1557,16 @@
   let reachDenIsPrio = true;
   const reachDen = (r) => (reachDenIsPrio ? prioOf(r) : tgtOf(r));
   const reachShare = (r) => ratio(reaOf(r), reachDen(r));
-  // Deliberately NOT fmtPct, which caps at ">100%": over-delivery against a
-  // target is ordinary and interesting (partners report against their own
-  // caseloads), and rounding it away to a ceiling hides the very thing worth
-  // seeing. A population share over 100% is a data problem; this is not.
-  const fmtReachPct = (f) => (f == null ? "–" : `${Math.round(100 * f)}%`);
+  // Over-delivery against a caseload is ordinary — partners report against their
+  // own — so this prints past 100% where fmtPct would cap at ">100%". But past a
+  // few multiples the ratio has stopped describing the delivery and started
+  // describing the denominator: Sudan's Um Bada prioritizes 2k of a 386k target
+  // and reports 38k reached, which is a true 1,668% and tells you nothing except
+  // that the priority figure is tiny. Cap the printed value there and keep the
+  // exact one in the hover.
+  const REACH_PCT_CAP = 3;
+  const fmtReachPct = (f) => (f == null ? "–"
+    : f > REACH_PCT_CAP ? `>${100 * REACH_PCT_CAP}%` : `${Math.round(100 * f)}%`);
   const segsOf = (r) => (pinMode() ? null : (ipcComboOf(r)?.p ?? null));
   const barsWrap = document.getElementById("hnrp-bars-wrap");
   const barsHint = document.getElementById("hnrp-bars-hint");
@@ -1907,12 +1923,12 @@
     // per quantity it draws (headcount and share, caseload and targeted).
     const capt = g("text", { x: M.l, y: M.t - 10, "font-size": 11, fill: "#555" });
     if (pinMode()) {
-      // Each word in its bar's colour, so the caption is its own key. The pale
-      // reached pink needs a darker cousin to be readable as type — it names the
-      // bar rather than reproducing it, which the swatches above already do.
-      const parts = [["PiN", MON.pin], ["targeted", "#c96b6b"],
+      // Each word in its bar's colour, so the caption is its own key. Only reach
+      // is substituted, for legibility as type; it names the bar rather than
+      // reproducing it, which the swatches above already do exactly.
+      const parts = [["PiN", MON.pin], ["targeted", MON.tgt],
                      ...(showPrio ? [["prioritized", MON.prio]] : []),
-                     ...(showReached ? [["reached", MON.rea]] : [])];
+                     ...(showReached ? [["reached", MON.reaInk]] : [])];
       parts.forEach(([word, col], i) => {
         if (i) {
           const sep = document.createElementNS(NS, "tspan");
@@ -2109,8 +2125,13 @@
                             ` published to measure it against`)
                        : `${fmtN(rea)} reached of ${fmtN(reachDen(r))}` +
                          ` ${reachDenIsPrio ? "prioritized" : "targeted"}` +
-                         `${reachShare(r) > 1 ? " — more people reached than the"
-                           + " caseload, which partners do report" : ""}`],
+                         ` — ${Math.round(100 * reachShare(r))}%` +
+                         `${reachShare(r) > REACH_PCT_CAP
+                           ? ", so small a caseload that the ratio describes it"
+                             + " rather than the response"
+                           : reachShare(r) > 1
+                             ? ", more people than the caseload, which partners"
+                               + " do report" : ""}`],
       };
       NUM_COLS.map(([k]) => [...CELL[k], k]).forEach(([v, text, tip, key], i) => {
         // ">100%" is a flag, not a figure — mute it like a missing value.

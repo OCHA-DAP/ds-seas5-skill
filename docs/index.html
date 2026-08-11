@@ -305,7 +305,20 @@
         17.48M, Sudan 20.42M, Yemen 12.00M) — so the Targeted column is continuous
         across plan years; hover it to see which source answered.
         Hovering an area gives a <strong>ring chart</strong>: the full circle is
-        the area's PiN, with targeted and reached drawn as arcs of it.
+        the area's PiN, with the rest of the funnel drawn as arcs of it.
+        Colours are taken from OCHA's own report definitions so a reader arriving
+        from either dashboard finds the same colour on the same figure —
+        <span style="color:#009EDB;font-weight:700">in need</span>,
+        <span style="color:#F58220;font-weight:700">targeted</span> and
+        <span style="color:#ED1845;font-weight:700">prioritized</span> from the
+        <a href="https://humanitarianaction.info/document/global-humanitarian-overview-2026/article/gho-country-plans-interactive-dashboard"
+        target="_blank" rel="noopener">country plans dashboard</a>, and
+        <span style="color:#D15353;font-weight:700">reached</span> from the
+        monitoring one, which is the only place it is published.
+        A reach ratio past 300% is printed as <em>&gt;300%</em> with the exact
+        figure in the tooltip: 20 areas report a priority caseload so small
+        (Sudan's Um Bada prioritizes 2,000 of a 386,000 target) that the ratio
+        describes the denominator rather than the response.
         <strong>Three caveats travel with these figures.</strong>
         They carry a <em>per-country vintage</em>, not a common as-of date —
         Afghanistan last reported in March, DR Congo in May, Chad in June — so the
@@ -865,7 +878,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260810t"></script>
+  <script src="hnrp.js?v=20260810u"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
