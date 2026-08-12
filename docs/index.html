@@ -144,15 +144,10 @@
 
   <section id="tab-hnrp" class="tab-panel" hidden>
     <div id="hnrp-controls">
-      <div class="ctl-row">
-        <span class="row-tag">Forecast</span>
-        <label class="ctl">Valid season
-          <select id="hnrp-tri" class="map-select">
-            <option value="auto">Worst drought — forecast seasons</option>
-            <option value="auto-in" selected>Worst drought — incl. in-season</option>
-          </select>
-        </label>
-      </div>
+      <!-- Severity first: it decides which SOURCE the tab is drawn from, and the
+           plan-year / IPC-estimate controls beside it only make sense once that
+           is chosen. Country and forecast then share a row — one picks the
+           subject, the other the season, and neither needs a row of its own. -->
       <div class="ctl-row">
         <span class="row-tag">Severity</span>
         <label class="ctl">Source
@@ -176,6 +171,13 @@
         <span class="row-tag">Country</span>
         <label class="ctl">
           <select id="hnrp-country" class="map-select"><option value="">All</option></select>
+        </label>
+        <span class="row-tag inline">Forecast</span>
+        <label class="ctl">Valid season
+          <select id="hnrp-tri" class="map-select">
+            <option value="auto">Worst drought — forecast seasons</option>
+            <option value="auto-in" selected>Worst drought — incl. in-season</option>
+          </select>
         </label>
         <span id="hnrp-issued" class="lock-note"></span>
       </div>
