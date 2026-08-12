@@ -72,6 +72,23 @@
   }
   // Parent admin-1 name qualifies adm2 units (district names repeat across regions).
   const dispName = (r) => (r.parent ? `${r.name ?? r.pcode} (${r.parent})` : (r.name ?? r.pcode));
+  // "ASO" -> "Aug-Sep-Oct". The three-letter codes are only obvious once someone
+  // has told you the convention, and nothing on the page does.
+  //
+  // Generated from the month names rather than typed out, so the keys are the
+  // canonical twelve by construction and cannot drift from the codes the payload
+  // actually uses. (Deriving the months from an arbitrary code is NOT possible —
+  // "J" is January, June or July — which is why this goes the other way.)
+  const TRI_MONTHS = (() => {
+    const M = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const out = {};
+    for (let i = 0; i < 12; i++) {
+      const three = [0, 1, 2].map((k) => M[(i + k) % 12]);
+      out[three.map((m) => m[0]).join("")] = three.join("-");
+    }
+    return out;
+  })();
   // Every control survives a reload (and makes links shareable with their
   // settings): state is carried in the URL query string.
   const CTLS = {
@@ -783,7 +800,12 @@
       : `<div class="cat muted">No forecast for the selected season</div>`;
     rows += catLine;
     if (s && s.rp != null) {
-      rows += `<div><strong>${s.key}</strong>${s.lead < 0 ? " · in season" : ""}` +
+      // Both the country readout and the area readout come through here, so the
+      // months are spelled out in both.
+      const months = TRI_MONTHS[s.key];
+      rows += `<div><strong>${s.key}</strong>` +
+        (months ? ` <span class="muted">${months}</span>` : "") +
+        `${s.lead < 0 ? " · in season" : ""}` +
         ` — RP ${fmt(s.rp, 1)} yr, r ${fmt(s.r, 2)}</div>`;
     }
     if (agg) {
@@ -2665,7 +2687,8 @@
   // Valid-season selector options: auto + each valid trimester at this issuance.
   for (const t of data.trimesters ?? []) {
     const o = document.createElement("option");
-    o.value = t; o.textContent = t;
+    o.value = t;
+    o.textContent = TRI_MONTHS[t] ? `${t} — ${TRI_MONTHS[t]}` : t;
     triSel.appendChild(o);
   }
 
