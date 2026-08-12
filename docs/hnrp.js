@@ -72,6 +72,23 @@
   }
   // Parent admin-1 name qualifies adm2 units (district names repeat across regions).
   const dispName = (r) => (r.parent ? `${r.name ?? r.pcode} (${r.parent})` : (r.name ?? r.pcode));
+  // "ASO" -> "Aug-Sep-Oct". The three-letter codes are only obvious once someone
+  // has told you the convention, and nothing on the page does.
+  //
+  // Generated from the month names rather than typed out, so the keys are the
+  // canonical twelve by construction and cannot drift from the codes the payload
+  // actually uses. (Deriving the months from an arbitrary code is NOT possible —
+  // "J" is January, June or July — which is why this goes the other way.)
+  const TRI_MONTHS = (() => {
+    const M = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const out = {};
+    for (let i = 0; i < 12; i++) {
+      const three = [0, 1, 2].map((k) => M[(i + k) % 12]);
+      out[three.map((m) => m[0]).join("")] = three.join("-");
+    }
+    return out;
+  })();
   // Every control survives a reload (and makes links shareable with their
   // settings): state is carried in the URL query string.
   const CTLS = {
@@ -783,7 +800,12 @@
       : `<div class="cat muted">No forecast for the selected season</div>`;
     rows += catLine;
     if (s && s.rp != null) {
-      rows += `<div><strong>${s.key}</strong>${s.lead < 0 ? " · in season" : ""}` +
+      // Both the country readout and the area readout come through here, so the
+      // months are spelled out in both.
+      const months = TRI_MONTHS[s.key];
+      rows += `<div><strong>${s.key}</strong>` +
+        (months ? ` <span class="muted">${months}</span>` : "") +
+        `${s.lead < 0 ? " · in season" : ""}` +
         ` — RP ${fmt(s.rp, 1)} yr, r ${fmt(s.r, 2)}</div>`;
     }
     if (agg) {
@@ -1281,7 +1303,14 @@
       if (cp && l._path) cp.setAttribute("d", l._path.getAttribute("d") || "");
     });
   }
-  map.on("zoomend moveend", () => { syncClips(); });
+  // Labels are clustered by SCREEN distance, so a zoom changes which units share
+  // one — re-cluster when it settles. zoomend only: panning moves every unit by
+  // the same vector and cannot change what clusters with what, and rebuilding
+  // the markers mid-pan would just make the map stutter.
+  map.on("zoomend moveend", (e) => {
+    syncClips();
+    if (e.type === "zoomend") renderTriLabels();
+  });
   bordersLayer.bringToFront(); // country borders sit above the inset rings
 
   // ── Admin boundaries of the selected country ────────────────────────────────
@@ -1375,36 +1404,116 @@
   // printed next to the category that qualifies it ("off season · SON"), which
   // is the useful reading — which season the default slot was.
   const NO_TRI_LABEL = new Set(["low_skill", "off_season"]);
+  // One label per unit was unreadable wherever the units are small — hundreds of
+  // three-letter codes stacked on each other, and the answer they were giving
+  // ("when is this area's worst season?") is one a reader wants by region, not by
+  // district. Neighbouring units usually share a season anyway.
+  //
+  // So label CLUMPS, not units: group the units that would be labelled by
+  // trimester, cluster each group in SCREEN space, and print one code per
+  // cluster. Screen space rather than geographic, because the whole problem is
+  // pixels — the same clump that needs one label at country zoom can afford
+  // several when zoomed in, and a pixel threshold gives that for free.
+  // 80px, chosen against the payload rather than by eye: it puts a typical
+  // country at 10-25 labels (Afghanistan 74 units -> 10, Tanzania 96 -> 18,
+  // Sudan 186 -> 25) and the worst at 39, where 58px left Venezuela at 61 and
+  // Nigeria at 51 — still soup.
+  const LABEL_MIN_PX = 80;   // how close two labels of the same season may sit
+  const LABEL_CLEAR_PX = 34; // ...and of any season, once they are placed
+  const MAX_TRI_LABELS = 45; // past this the map is soup whatever the clustering
   function renderTriLabels() {
     triLabels.clearLayers();
     const sel = countrySel.value;
     if (!sel) return;
     if (!triSel.value.startsWith("auto")) return; // one explicit season — labels are noise
-    // At adm2 a country can have 1,000+ units (Colombia) — label soup. Cap it,
-    // counting only what would actually be drawn.
-    const nShown = data.rows.filter((r) => r.country === sel && slotOf(r)
-      && !NO_TRI_LABEL.has(catOf(r))).length;
-    if (nShown > 150) return;
+    // Every unit that would carry a label, with its centre in both spaces and
+    // its on-screen size — the size decides which unit gets to hold the label
+    // for its cluster.
+    const pts = [];
     layer.eachLayer((l) => {
       const r = byPcode.get(l.feature.properties.pcode);
       if (!r || r.country !== sel) return;
       const s = slotOf(r);
       if (!s) return;
       if (NO_TRI_LABEL.has(catOf(r))) return;
-      // Markers, not standalone tooltips: DivOverlay tooltips mis-anchor after
-      // interrupted/fractional zoom animations (labels drifting west, wedged
-      // zooms); markers track the view exactly.
       const lb = usableBounds(l);
       if (!lb) return;
-      const dimmed = isDimmed(catOf(r), ADM === "low" ? sevClassOf(r) : null, r);
-      triLabels.addLayer(L.marker(lb.getCenter(), {
+      const c = lb.getCenter();
+      const nw = map.latLngToLayerPoint(lb.getNorthWest());
+      const se = map.latLngToLayerPoint(lb.getSouthEast());
+      pts.push({
+        key: s.key, latlng: c, p: map.latLngToLayerPoint(c),
+        px: Math.abs(se.x - nw.x) * Math.abs(se.y - nw.y),
+        dimmed: isDimmed(catOf(r), ADM === "low" ? sevClassOf(r) : null, r),
+      });
+    });
+    if (!pts.length) return;
+    // Leader clustering, biggest unit first: each cluster is seeded by the
+    // largest unlabelled unit left, and every smaller unit of the same season
+    // within LABEL_MIN_PX of that seed joins it. The label then sits on the
+    // SEED's own centre, so it always lands inside a real area — a cluster
+    // centroid can fall in the sea, or in a neighbour with a different season,
+    // which is the one way this could actively mislead.
+    pts.sort((a, b) => b.px - a.px);
+    const clusterAt = (minPx) => {
+      const out = [];
+      for (const pt of pts) {
+        let best = null, bestD = Infinity;
+        for (const c of out) {
+          if (c.key !== pt.key) continue;
+          const d = c.seed.p.distanceTo(pt.p);
+          if (d < bestD) { bestD = d; best = c; }
+        }
+        if (best && bestD <= minPx) best.members.push(pt);
+        else out.push({ key: pt.key, seed: pt, members: [pt] });
+      }
+      return out;
+    };
+    // A country whose seasons interleave finely can still produce soup — the
+    // threshold only merges units of the SAME season, so a chequerboard of two
+    // seasons defeats it. Rather than the old behaviour (over the cap, draw
+    // nothing at all, which is how Afghanistan showed no labels for months),
+    // back off: widen the threshold until the map is readable. Whatever survives
+    // is still a fair sample of where each season falls.
+    let clusters = clusterAt(LABEL_MIN_PX);
+    for (let px = LABEL_MIN_PX * 2; clusters.length > MAX_TRI_LABELS && px <= 400; px *= 2) {
+      clusters = clusterAt(px);
+    }
+    // Clustering only merges units of the SAME season, so it cannot see two
+    // labels of DIFFERENT seasons landing on each other — and they do: Colombia
+    // had 16 pairs closer than 30px, one at 6px, against a label about 26px
+    // wide. Second pass, biggest clump first: keep a label only if it clears
+    // everything already placed.
+    //
+    // With one exception. The FIRST label of each season is kept regardless,
+    // so a season that occurs anywhere in the country is never decluttered off
+    // the map entirely — losing "there is an ASO clump here" is a different and
+    // worse thing than two codes sitting close. In practice it rarely forces
+    // anything, because the biggest clump of each season is placed early while
+    // the map is still empty.
+    clusters.sort((a, b) => b.seed.px - a.seed.px);
+    const placed = [], seasonShown = new Set();
+    for (const c of clusters) {
+      const first = !seasonShown.has(c.key);
+      if (!first && placed.some((p) => p.seed.p.distanceTo(c.seed.p) < LABEL_CLEAR_PX)) continue;
+      placed.push(c);
+      seasonShown.add(c.key);
+    }
+    for (const c of placed) {
+      // Dimmed only when the WHOLE clump is: one live area in a faded clump is
+      // still a live area, and fading its label would hide it.
+      const dimmed = c.members.every((m) => m.dimmed);
+      triLabels.addLayer(L.marker(c.seed.latlng, {
         interactive: false, keyboard: false, opacity: dimmed ? 0.15 : 1,
+        // Markers, not standalone tooltips: DivOverlay tooltips mis-anchor after
+        // interrupted/fractional zoom animations (labels drifting west, wedged
+        // zooms); markers track the view exactly.
         icon: L.divIcon({
           className: "tri-map-label-wrap", iconSize: null,
-          html: `<span class="tri-map-label">${s.key}</span>`,
+          html: `<span class="tri-map-label">${c.key}</span>`,
         }),
       }));
-    });
+    }
   }
   // The unit's severity class (lowest view only — the finest level is where the
   // one-class-per-unit classification is native), and where it came from:
@@ -2578,7 +2687,8 @@
   // Valid-season selector options: auto + each valid trimester at this issuance.
   for (const t of data.trimesters ?? []) {
     const o = document.createElement("option");
-    o.value = t; o.textContent = t;
+    o.value = t;
+    o.textContent = TRI_MONTHS[t] ? `${t} — ${TRI_MONTHS[t]}` : t;
     triSel.appendChild(o);
   }
 
