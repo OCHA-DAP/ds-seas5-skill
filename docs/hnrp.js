@@ -1360,6 +1360,21 @@
     return b;
   };
   const triLabels = L.layerGroup().addTo(map);
+  // Categories whose trimester code is not worth printing on the map.
+  //
+  // The map label floats alone over the area with no category text beside it, so
+  // a bare "SON" reads as "this is the season the alert is for". For these two it
+  // is not: low_skill has no usable skill so there is no alert at all, and
+  // off_season is the fallback slot rather than a worst season — in the "worst
+  // drought" modes worstSlot only ever considers RAINY trimesters, and when none
+  // of them qualifies the display drops to the default lead-1 trimester, which
+  // can sit outside the rainy season entirely. Labelling it announces a season
+  // the unit is not being watched in.
+  //
+  // The bar chart and the sidebar keep the code, deliberately: there it is
+  // printed next to the category that qualifies it ("off season · SON"), which
+  // is the useful reading — which season the default slot was.
+  const NO_TRI_LABEL = new Set(["low_skill", "off_season"]);
   function renderTriLabels() {
     triLabels.clearLayers();
     const sel = countrySel.value;
@@ -1368,15 +1383,14 @@
     // At adm2 a country can have 1,000+ units (Colombia) — label soup. Cap it,
     // counting only what would actually be drawn.
     const nShown = data.rows.filter((r) => r.country === sel && slotOf(r)
-      && catOf(r) !== "low_skill").length;
+      && !NO_TRI_LABEL.has(catOf(r))).length;
     if (nShown > 150) return;
     layer.eachLayer((l) => {
       const r = byPcode.get(l.feature.properties.pcode);
       if (!r || r.country !== sel) return;
       const s = slotOf(r);
       if (!s) return;
-      // No usable skill = no alert, so which season it would have been is noise.
-      if (catOf(r) === "low_skill") return;
+      if (NO_TRI_LABEL.has(catOf(r))) return;
       // Markers, not standalone tooltips: DivOverlay tooltips mis-anchor after
       // interrupted/fractional zoom animations (labels drifting west, wedged
       // zooms); markers track the view exactly.
