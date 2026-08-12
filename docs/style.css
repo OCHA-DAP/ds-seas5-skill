@@ -253,7 +253,7 @@ footer { color: var(--muted); font-size: 0.8rem; border-top: 1px solid var(--lin
 footer p { margin: 4px 0; }
 
 /* ── Forecast × HNRP tab ─────────────────────────────────────────────────── */
-#hnrp-controls { display: flex; flex-direction: column; gap: 9px; margin: 22px 0 14px;
+#hnrp-controls { display: flex; flex-direction: column; gap: 7px; margin: 16px 0 12px;
   /* Pinned while scrolling so filters stay reachable from any view. z-index must
      clear Leaflet's in-map controls (~1000). */
   position: sticky; top: 0; z-index: 1200; background: var(--hdx-neutral-0);
@@ -262,6 +262,11 @@ footer p { margin: 4px 0; }
 #hnrp-controls .ctl-row .toggle { white-space: nowrap; }
 #hnrp-controls .row-tag { min-width: 60px; font-size: 0.72rem; font-weight: 600;
   color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+/* A tag that starts a row is a gutter label and holds the 60px column so the
+   rows line up under each other. One that sits MID-row is a separator between
+   two groups of controls, so it drops the column width and takes a little air
+   on its left instead — otherwise it opens a 60px hole in the middle of a row. */
+#hnrp-controls .row-tag.inline { min-width: 0; margin-left: 6px; }
 #hnrp-controls #hnrp-issued { margin: 0 0 0 auto; }
 /* Chrome draws a focus ring (blue box) around a clicked SVG path / the map itself;
    selection feedback is the country outline + zoom, so the ring is just noise. */
