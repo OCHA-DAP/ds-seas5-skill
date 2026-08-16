@@ -9,7 +9,7 @@ below-/above-normal seasons where the forecast is skilful.
 ## Apps
 
 - **Full interactive app** (marimo — all controls, historical browsing, country detail):
-  https://chd-ds-seas5-viz-skill-ewcwhteggec2gege.eastus2-01.azurewebsites.net/
+  https://chd-ds-seas5-viz-development-gsf5fhhfakdubagv.eastus2-01.azurewebsites.net/
 - **Static map** (latest forecast, defaults only; Country/Pixel toggle, zoomable):
   https://ocha-dap.github.io/ds-seas5-skill/
 - **CMA CMME mirror** (same method on CMA's multi-model ensemble, country level only;
