@@ -468,7 +468,8 @@
   // of the tab — they show it, on a muted body that says "no severity here".
   const inScope = (r) => !countrySel.value || r.country === countrySel.value;
   const fbSlot = (r) => (r.fb_pct == null ? null
-    : { key: r.fb_tri, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r, rainy: !!r.fb_rainy });
+    : { key: r.fb_tri, lead: 1, rp: r.fb_rp, pct: r.fb_pct, r: r.fb_r, rainy: !!r.fb_rainy,
+        fc: r.fb_fc, nrm: r.fb_nrm });
   // Worst qualifying drought among the unit's valid trimesters, at the moderate
   // skill floor — the same one the export's precomputed slot is gated on.
   function worstSlot(r, inclInSeason) {
@@ -477,7 +478,8 @@
       if (!inclInSeason && t.lead < 0) continue;
       if (t.pct == null || t.pct >= 50 || !t.rainy || t.rp == null) continue;
       if (t.r == null || t.r < rMin()) continue;
-      if (!best || t.rp > best.rp) best = { key, lead: t.lead, rp: t.rp, pct: t.pct, r: t.r, rainy: true };
+      if (!best || t.rp > best.rp) best = { key, lead: t.lead, rp: t.rp, pct: t.pct, r: t.r, rainy: true,
+                                            fc: t.fc, nrm: t.nrm };
     }
     return best;
   }
@@ -489,7 +491,8 @@
     }
     const t = r.tris && r.tris[triSel.value];
     if (!t || t.pct == null) return null;
-    return { key: triSel.value, lead: t.lead, rp: t.rp, pct: t.pct, r: t.r, rainy: !!t.rainy };
+    return { key: triSel.value, lead: t.lead, rp: t.rp, pct: t.pct, r: t.r, rainy: !!t.rainy,
+             fc: t.fc, nrm: t.nrm };
   }
   // Qualifying drought signal = drought side, rainy season, skill + RP thresholds.
   function isDrought(s) {
@@ -807,6 +810,14 @@
         (months ? ` <span class="muted">${months}</span>` : "") +
         `${s.lead < 0 ? " · in season" : ""}` +
         ` — RP ${fmt(s.rp, 1)} yr, r ${fmt(s.r, 2)}</div>`;
+      // RP says how unusual, not how much water: pair it with the magnitude.
+      // % of normal is suppressed below 10 mm — in near-rainless seasons the
+      // ratio of two tiny totals reads as precision the data doesn't have.
+      if (s.fc != null && s.nrm != null) {
+        const pctN = s.nrm >= 10
+          ? ` (${Math.round(100 * s.fc / s.nrm)}% of normal)` : "";
+        rows += `<div class="muted">forecast ${s.fc} mm · normal ${s.nrm} mm${pctN}</div>`;
+      }
     }
     if (agg) {
       rows += `<div class="muted">Country-level forecast, not an average of its` +
@@ -2414,7 +2425,9 @@
       titled(sw, cat
         ? `${CAT_LABEL[catBase(cat)] || cat}` +
           (sl ? ` · ${sl.key}${sl.lead < 0 ? " (in season)" : ""} — RP ${fmt(sl.rp, 1)} yr, ` +
-                `percentile ${fmt(sl.pct, 1)}, skill r ${fmt(sl.r, 2)}` : "")
+                `percentile ${fmt(sl.pct, 1)}, skill r ${fmt(sl.r, 2)}` +
+                (sl.fc != null && sl.nrm != null
+                  ? `, forecast ${sl.fc} mm vs normal ${sl.nrm} mm` : "") : "")
         : "No forecast for the selected season");
       // Which season the category refers to, beside its swatch — omitted below
       // the skill floor, where there is no alert for a season to qualify.
