@@ -1,5 +1,5 @@
 {
- "generated": "2026-08-07",
+ "generated": "2026-08-18",
  "plans": {
   "PSE": {
    "plan_year": 2026,
@@ -15,12 +15,12 @@
    "target": 4343435,
    "pop": 14363363
   },
-  "VEN": {
+  "MMR": {
    "plan_year": 2026,
-   "plan_name": "Venezuela",
-   "pin": 7943720,
-   "target": 6200000,
-   "pop": 28500000
+   "plan_name": "Myanmar",
+   "pin": 16229050,
+   "target": 4868096,
+   "pop": 54900000
   },
   "CMR": {
    "plan_year": 2026,
@@ -29,12 +29,12 @@
    "target": 1880879,
    "pop": 29900000
   },
-  "MMR": {
+  "VEN": {
    "plan_year": 2026,
-   "plan_name": "Myanmar",
-   "pin": 16229050,
-   "target": 4868096,
-   "pop": 54900000
+   "plan_name": "Venezuela",
+   "pin": 7943720,
+   "target": 6200000,
+   "pop": 28500000
   },
   "CAF": {
    "plan_year": 2026,
@@ -43,19 +43,19 @@
    "target": 1265483,
    "pop": 6567382
   },
-  "SLV": {
-   "plan_year": 2025,
-   "plan_name": "El Salvador",
-   "pin": 818700,
-   "target": 407500,
-   "pop": 6400000
-  },
   "GTM": {
    "plan_year": 2025,
    "plan_name": "Guatemala",
    "pin": 2163953,
    "target": 1000000,
    "pop": 18400000
+  },
+  "SLV": {
+   "plan_year": 2025,
+   "plan_name": "El Salvador",
+   "pin": 818700,
+   "target": 407500,
+   "pop": 6400000
   },
   "HND": {
    "plan_year": 2025,
@@ -141,19 +141,19 @@
    "target": 1983640,
    "pop": 27900000
   },
-  "NGA": {
-   "plan_year": 2026,
-   "plan_name": "Nigeria",
-   "pin": 5929291,
-   "target": 2527178,
-   "pop": 237500000
-  },
   "MDG": {
    "plan_year": 2026,
    "plan_name": "Madagascar",
    "pin": 632461,
    "target": 454975,
    "pop": 33522052
+  },
+  "NGA": {
+   "plan_year": 2026,
+   "plan_name": "Nigeria",
+   "pin": 5929291,
+   "target": 2527178,
+   "pop": 237500000
   },
   "TCD": {
    "plan_year": 2026,
@@ -169,12 +169,12 @@
    "target": 12004155,
    "pop": 41800000
   },
-  "LBY": {
-   "plan_year": 2024,
-   "plan_name": "Libya",
-   "pin": 250000,
-   "target": 250000,
-   "pop": 6900000
+  "MLI": {
+   "plan_year": 2026,
+   "plan_name": "Mali",
+   "pin": 5083155,
+   "target": 3808385,
+   "pop": 25200000
   },
   "ETH": {
    "plan_year": 2024,
@@ -183,12 +183,12 @@
    "target": 15467955,
    "pop": 126500000
   },
-  "MLI": {
-   "plan_year": 2026,
-   "plan_name": "Mali",
-   "pin": 5083155,
-   "target": 3808385,
-   "pop": 25200000
+  "LBY": {
+   "plan_year": 2024,
+   "plan_name": "Libya",
+   "pin": 250000,
+   "target": 250000,
+   "pop": 6900000
   },
   "ZMB": {
    "plan_year": 2025,
@@ -211,19 +211,19 @@
    "target": 306000,
    "pop": 13600000
   },
-  "BGD": {
-   "plan_year": 2025,
-   "plan_name": "Bangladesh",
-   "pin": 1838513,
-   "target": 942413,
-   "pop": 174700000
-  },
   "GRD": {
    "plan_year": 2024,
    "plan_name": "Grenada",
    "pin": 34000,
    "target": 40644,
    "pop": 100000
+  },
+  "BGD": {
+   "plan_year": 2025,
+   "plan_name": "Bangladesh",
+   "pin": 1838513,
+   "target": 942413,
+   "pop": 174700000
   },
   "VCT": {
    "plan_year": 2024,
