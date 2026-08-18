@@ -107,6 +107,7 @@ Run:  uv run python pipeline/export_hnrp_drought.py [--level 2] [--rebuild-geome
 import argparse
 import calendar
 import json
+import math
 import re
 import subprocess
 import sys
@@ -1928,6 +1929,21 @@ def main() -> None:
         n_inh = len({c for c, p in inherit.items() if by_par.get(p)})
         print(f"  rainy season inherited from parents for {n_inh} unit(s)")
 
+    # RP says how UNUSUAL the forecast is, never how much water is missing — a
+    # 46-yr RP can be a few mm in a marginal season. These pair it with magnitude.
+    # Both values come from the SAME log1p space the skill pipeline works in
+    # (obs-normalized, detrended-recentered), so their difference is like-for-like;
+    # pairing the forecast with the RAW arithmetic climatology instead would bias
+    # every anomaly dry (the log-space mean sits below the mean for skewed rain).
+    def _mm_totals(r) -> tuple[int | None, int | None]:
+        """(forecast, climatological normal) seasonal totals, whole mm."""
+        days = sum(calendar.monthrange(2025, m)[1]  # any non-leap year
+                   for m in TRIMESTERS[r["trimester"]])
+        fc_log, nrm_log = r["current_forecast_mean"], r["era5_mean"]
+        fc = round(math.expm1(float(fc_log)) * days) if pd.notna(fc_log) else None
+        nrm = round(math.expm1(float(nrm_log)) * days) if pd.notna(nrm_log) else None
+        return fc, nrm
+
     # Per unit: the worst qualifying drought slot at the latest issuance.
     sub = skill[skill["issued_month"] == issued_month].copy()
     sub = sub[sub.apply(lambda r: _tri_valid(TRIMESTERS[r["trimester"]], issued_month), axis=1)]
@@ -1946,12 +1962,15 @@ def main() -> None:
             if pd.isna(rp):
                 continue
             if best is None or rp > best["rp"]:
+                fc_mm, nrm_mm = _mm_totals(r)
                 best = {
                     "tri": r["trimester"],
                     "lead": trimester_lead(issued_month, TRIMESTERS[r["trimester"]]),
                     "rp": float(rp),
                     "pct": float(pct),
                     "r": float(pr),
+                    "fc": fc_mm,
+                    "nrm": nrm_mm,
                 }
         row = {"pcode": pcode, "name": names.get(pcode)}
         if best:
@@ -1967,12 +1986,15 @@ def main() -> None:
             if pd.isna(pct):
                 continue
             drp = r["forecast_rp"] if pct < 50 else r["flood_rp"]
+            fc_mm, nrm_mm = _mm_totals(r)
             tris[r["trimester"]] = {
                 "lead": trimester_lead(issued_month, TRIMESTERS[r["trimester"]]),
                 "pct": round(float(pct), 1),
                 "r": round(float(pr), 3) if pd.notna(pr) else None,
                 "rp": round(float(drp), 1) if pd.notna(drp) else None,
                 "rainy": (pcode, r["trimester"]) in rainy_set,
+                "fc": fc_mm,
+                "nrm": nrm_mm,
             }
         if tris:
             row["tris"] = tris
@@ -1985,6 +2007,7 @@ def main() -> None:
         if fb is not None:
             fpct, fr = fb["forecast_percentile"], fb["pearson_r"]
             frp = fb["forecast_rp"] if pd.notna(fpct) and fpct < 50 else fb["flood_rp"]
+            fb_fc, fb_nrm = _mm_totals(fb)
             row |= {
                 "fb_tri": fb["trimester"],
                 "fb_label": _tri_label(TRIMESTERS[fb["trimester"]]),
@@ -1992,6 +2015,8 @@ def main() -> None:
                 "fb_r": round(float(fr), 3) if pd.notna(fr) else None,
                 "fb_rp": round(float(frp), 1) if pd.notna(frp) else None,
                 "fb_rainy": (pcode, fb["trimester"]) in rainy_set,
+                "fb_fc": fb_fc,
+                "fb_nrm": fb_nrm,
             }
         records.append(row)
 

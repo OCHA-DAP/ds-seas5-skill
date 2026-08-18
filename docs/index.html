@@ -227,7 +227,13 @@
         thresholds are fixed — use the legend's forecast selectors to show or hide
         categories. The <strong>return period</strong> is directional: a 10-yr value means a
         forecast this dry occurs about once a decade in the 1981–present hindcast for that
-        area and season.
+        area and season. Because a return period says how <em>unusual</em> a forecast is but
+        not how much water is at stake, the readout pairs it with the
+        <strong>forecast and normal seasonal totals in mm</strong> (bias-corrected against
+        ERA5, detrended): a rare-but-tiny deficit in a marginal season reads very differently
+        from the same return period where the season carries real rain. The "% of normal" is
+        omitted when the normal is under 10&nbsp;mm, where the ratio of two near-zero totals
+        would suggest precision the data doesn't have.
         The <strong>Valid season</strong> selector defaults to the worst drought
         <em>including seasons already in progress</em>, because the worst signal is often a
         season underway — Ukraine's only drought signal this issuance is one, and the
