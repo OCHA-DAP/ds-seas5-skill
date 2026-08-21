@@ -63,10 +63,21 @@ AREA_FLOOR_KM2 = 25000           # ... this much absolute in-season+skilled area
 #          fractional extent, OR absolute dry area can EACH escalate (OR -> escalation
 #          never suppresses a watch, so recall is preserved). Absolute area earns a
 #          role here without repeating the z-gate's recall cost.
+# Escalation thresholds are CALIBRATED as a precision lever by the per-year backtest
+# (backtest_verify.py section D -> verification_escalation.parquet). Within the fired
+# (watch) universe it scores each arm against OBSERVED severe drought (ERA5 dry RP>=5):
+# z<=-1.5 is the strongest lever (lift 1.42 over the base severe rate). The original
+# extent bars were far too loose -- dry_frac>=0.50 was nearly implied by firing (median
+# dry_frac among fired ~0.87) and area>=100k mostly just escalated large countries -- so
+# on a climatological average >50% of watches escalated (the inverted split). Tightening
+# the two extent arms to frac>=0.80 / area>=300k restores a watch-heavy ~2:1 split and
+# lifts alert precision, while z is left as-is (it was never the problem). NB: a broadly
+# dry forecast year (e.g. 2026) still fires many alerts -- that is the severity signal,
+# not a miscalibration; the split is calibrated on climatology, not tuned to one year.
 DROUGHT_WATCH_RP = 3.0           # fire: forecast dry RP >= 3 (below-normal)
 ESC_Z = -1.5                     # escalate to ALERT if z <= this, OR ...
-ESC_DRY_FRAC = 0.50              # ... >= this share of footprint forecast dry, OR ...
-ESC_DRY_AREA_KM2 = 100000        # ... this much absolute dry area. Provisional; tune via backtest.
+ESC_DRY_FRAC = 0.80              # ... >= this share of footprint forecast dry, OR ...
+ESC_DRY_AREA_KM2 = 300000        # ... this much absolute dry area. Backtest-calibrated.
 FLOOD_WATCH_RP = 3.0             # wet-tail analogue — UNVALIDATED weak proxy (see book chapter)
 
 # Areal-extent metric: a pixel counts as "in drought" if its standardized

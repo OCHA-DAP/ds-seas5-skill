@@ -63,8 +63,13 @@ integrating (left untouched here to avoid clobbering the lockfile).
 
 ## Open next steps (carried over)
 
-- **Per-year dry-area backtest** to calibrate the alert escalation thresholds (the
-  watch/alert split is currently inverted because the absolute-area bar is too low).
+- ~~Per-year dry-area backtest to calibrate the alert escalation thresholds.~~ **Done**
+  — `backtest_verify.py` §D scores each escalation arm as a precision lever against
+  observed severe drought (ERA5 dry RP ≥ 5) over the fired universe. The extent arms
+  were too loose (`dry_frac ≥ 0.50` was ~implied by firing; `dry_area ≥ 100k` mostly
+  escalated large countries), inverting the split. Retuned to `dry_frac ≥ 0.80` /
+  `dry_area ≥ 300k` (`z ≤ −1.5` unchanged — the strongest arm), restoring a watch-heavy
+  ~2:1 climatological split. Input bands: `backtest_datagen.py --dry`.
 - Test skill cutoffs **below 0.20** and a **regional** (not global) gate.
 - **adm1** return-period choropleth (geometry already exported).
 - **Continuous skill-weighting** instead of a hard skill gate.

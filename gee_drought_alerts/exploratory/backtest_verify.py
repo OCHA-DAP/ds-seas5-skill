@@ -24,7 +24,14 @@ EVENT_RPS = [3, 5, 7]
 INSEASON_MIN, EVALUABLE_MIN = 0.10, 0.25
 AREA_FLOOR_KM2 = 25000                  # OR-gate: enough trusted ground by area (see pipeline)
 SCORE_YEARS = list(range(1993, 2026))   # ERA5 obs available through 2025
-SCEN = sorted(glob.glob('data/backtest/adm1_r*.parquet'))
+SCEN = sorted(glob.glob('data/backtest/adm1_r[0-9]*.parquet'))  # aggregates only (not adm1_dry_*)
+
+# ── escalation calibration (section D) ────────────────────────────────────────
+# The watch->alert escalation is calibrated at the fixed production skill gate.
+DRY_PATH = 'data/backtest/adm1_dry_r20.parquet'   # per-year SEAS5 dry fractions (r20)
+R20_PATH = 'data/backtest/adm1_r20.parquet'
+WATCH_RP = 3          # a WATCH fires on the SEAS5 dry_rp>=3 below-normal event
+SEVERE_RP = 5         # an ALERT should predict the OBSERVED severe drought (ERA5 dry_rp>=5)
 
 
 def tag_to_r(path):
@@ -175,6 +182,130 @@ def scores(a, b, c, d):
     return dict(POD=pod, FAR=far, bias=bias, HSS=hss, PSS=pss)
 
 
+# ── section D: escalation-threshold calibration ───────────────────────────────
+def rollup_adm0_dry(agg_df, dry_df):
+    """adm1 -> adm0 at the r20 gate, adding the per-year DRY-EXTENT rollup.
+
+    Merges the per-year SEAS5 dry fractions (sdry{y} = share of the adm1 unit that
+    the forecast places in per-pixel drought) onto the r20 aggregates, then for each
+    (adm0, season) returns the SEAS5/ERA5 aggregate series plus, per year:
+      dry_area[y]  = sum_adm1 sdry_y * area_m2       (m^2 forecast in drought)
+      dry_frac[y]  = dry_area / combined_area        (share of the frozen footprint)
+    the exact adm0 extent metrics the pipeline reports for 2026, for every year."""
+    dcols = [c for c in dry_df.columns if c.startswith('sdry')]
+    merged = agg_df.merge(dry_df[['asap1_id', 'season'] + dcols],
+                          on=['asap1_id', 'season'], how='left')
+    base = rollup_adm0(merged)              # reuse the series/coverage rollup
+    for (name0, season), g in merged.groupby(['name0', 'season']):
+        A = g['area_m2'].fillna(0).to_numpy()
+        w = g['cov_combined'].fillna(0).to_numpy() * A         # combined masked area (m^2)
+        Wm2 = w.sum()
+        dry_area, dry_frac = {}, {}
+        for c in dcols:
+            y = int(c[len('sdry'):])
+            da = float((g[c].fillna(0).to_numpy() * A).sum())  # forecast dry area (m^2)
+            dry_area[y] = da / 1e6                              # km^2
+            dry_frac[y] = (da / Wm2) if Wm2 > 0 else None
+        base[(name0, season)].update(dry_area=dry_area, dry_frac=dry_frac)
+    return base
+
+
+def escalation_cases(rolled):
+    """The alert-decision universe: one record per (unit, season, year) where the
+    forecast FIRES a watch (SEAS5 dry_rp>=WATCH_RP) in an evaluable unit. Carries the
+    escalation predictors (z, dry_frac, dry_area) and the observed severe-drought
+    label (ERA5 dry_rp>=SEVERE_RP). Escalation is conditional on a watch, so scoring
+    lives entirely inside this fired universe."""
+    cases = []
+    for (name0, season), u in rolled.items():
+        if not evaluable(u):
+            continue
+        for y in SCORE_YEARS:
+            if not is_dry(u['seas5'], y, WATCH_RP):     # watch must fire (True, not None)
+                continue
+            z = z_of(u['seas5'], y)
+            sev = is_dry(u['era5'], y, SEVERE_RP)       # observed severe truth
+            if z is None or sev is None:
+                continue
+            df = u['dry_frac'].get(y)
+            da = u['dry_area'].get(y)
+            if df is None or da is None:
+                continue
+            cases.append(dict(name0=name0, season=season, year=y, z=z,
+                              dry_frac=df, dry_area=da, severe=bool(sev)))
+    return cases
+
+
+def score_escalation(cases, esc):
+    """Score one escalation rule `esc(case)->bool` as a PRECISION LEVER within the
+    fired universe: does escalating select the forecasts that verify as severe?
+      PPV_alert = P(severe | alert)   vs   PPV_watch = P(severe | watch)
+      base      = P(severe | fired)   lift = PPV_alert / base
+      alert_share must drop below 0.5 to end the watch/alert inversion."""
+    n = len(cases)
+    alert = [c for c in cases if esc(c)]
+    watch = [c for c in cases if not esc(c)]
+    sev = [c for c in cases if c['severe']]
+    sa = sum(c['severe'] for c in alert)
+    sw = sum(c['severe'] for c in watch)
+    ppv_a = sa / len(alert) if alert else float('nan')
+    ppv_w = sw / len(watch) if watch else float('nan')
+    base = len(sev) / n if n else float('nan')
+    return dict(n_fired=n, n_alert=len(alert), n_watch=len(watch),
+                alert_share=round(len(alert) / n, 3) if n else float('nan'),
+                PPV_alert=round(ppv_a, 3), PPV_watch=round(ppv_w, 3),
+                base_rate=round(base, 3),
+                lift=round(ppv_a / base, 2) if base else float('nan'),
+                recall_sev=round(sa / len(sev), 3) if sev else float('nan'))
+
+
+def escalation_report():
+    """Sweep each escalation lever (z, dry_frac, dry_area) and report the split and
+    precision lift, so the watch->alert thresholds can be chosen defensibly."""
+    if not (os.path.exists(DRY_PATH) and os.path.exists(R20_PATH)):
+        print('\n(section D skipped: run `backtest_datagen.py --dry` to build %s)' % DRY_PATH)
+        return
+    rolled = rollup_adm0_dry(pd.read_parquet(R20_PATH), pd.read_parquet(DRY_PATH))
+    cases = escalation_cases(rolled)
+
+    rows = []
+    def add(label, esc):
+        rows.append(dict(rule=label, **score_escalation(cases, esc)))
+    for t in (-1.0, -1.25, -1.5, -1.75, -2.0):
+        add('z<=%.2f' % t, lambda c, t=t: c['z'] <= t)
+    for t in (0.5, 0.6, 0.7, 0.8, 0.9):
+        add('dry_frac>=%.2f' % t, lambda c, t=t: c['dry_frac'] >= t)
+    for t in (100, 200, 300, 500, 750):
+        add('dry_area>=%dk' % t, lambda c, t=t: c['dry_area'] >= t * 1000)
+
+    # Candidate OR-combos (escalation stays an OR so it never suppresses a watch's
+    # recall). OR-ing LOOSE levers dilutes precision, so the combos tighten every arm.
+    add('--- combos ---', lambda c: False)
+    add('z<=-1.5 (z only)', lambda c: c['z'] <= -1.5)
+    add('z<=-1.5 | frac>=.8', lambda c: c['z'] <= -1.5 or c['dry_frac'] >= 0.8)
+    add('z<=-1.5 | frac>=.8 | area>=300k',
+        lambda c: c['z'] <= -1.5 or c['dry_frac'] >= 0.8 or c['dry_area'] >= 300000)
+    add('z<=-1.25 | frac>=.7 | area>=300k   (recall-leaning)',
+        lambda c: c['z'] <= -1.25 or c['dry_frac'] >= 0.7 or c['dry_area'] >= 300000)
+    add('z<=-1.75 | frac>=.9 | area>=500k   (precision-leaning)',
+        lambda c: c['z'] <= -1.75 or c['dry_frac'] >= 0.9 or c['dry_area'] >= 500000)
+    # the current production OR-rule, for reference
+    add('CURRENT z<=-1.5|frac>=.5|area>=100k',
+        lambda c: c['z'] <= -1.5 or c['dry_frac'] >= 0.5 or c['dry_area'] >= 100000)
+
+    df = pd.DataFrame(rows)
+    pd.set_option('display.width', 200)
+    print('\n── (D) ESCALATION as a precision lever: fired universe (SEAS5 dry_rp>=%d),'
+          ' n=%d (unit x year) ──' % (WATCH_RP, len(cases)))
+    print('   truth = OBSERVED severe drought (ERA5 dry_rp>=%d). base P(severe|fired)=%.3f'
+          % (SEVERE_RP, len(cases) and sum(c['severe'] for c in cases) / len(cases)))
+    print('   Want: alert_share<0.5 (fixes the inversion) AND lift>1 / PPV_alert>PPV_watch.')
+    print(df.to_string(index=False))
+    df.to_parquet('data/backtest/verification_escalation.parquet', index=False)
+    print('\nwrote data/backtest/verification_escalation.parquet')
+    return df
+
+
 def main():
     if not SCEN:
         print('no backtest parquets yet in data/backtest/'); return
@@ -215,6 +346,8 @@ def main():
     syst_df.to_parquet('data/backtest/verification_system.parquet', index=False)
     alrt_df.to_parquet('data/backtest/verification_alert.parquet', index=False)
     print('\nwrote data/backtest/verification_{conditional,system,alert}.parquet')
+
+    escalation_report()   # section D: escalation-threshold calibration (needs adm1_dry_r20)
 
 
 if __name__ == '__main__':

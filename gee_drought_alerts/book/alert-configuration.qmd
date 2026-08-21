@@ -25,7 +25,7 @@ absolute area**, so large countries aren't withheld for a modest percentage:
   Recall-optimized.
 - **ALERT** — escalates a watch when severe/widespread; **any** of these triggers
   it (OR — escalation never suppresses a watch):
-  `z ≤ −1.5` **OR** `dry_frac_footprint ≥ 0.5` **OR** `dry_area_km2 ≥ 100,000`.
+  `z ≤ −1.5` **OR** `dry_frac_footprint ≥ 0.80` **OR** `dry_area_km2 ≥ 300,000`.
 
 ```{python}
 #| label: tbl-counts
@@ -46,13 +46,25 @@ pd.DataFrame({
    .head(20).reset_index(drop=True))
 ```
 
-::: {.callout-warning}
-## Escalation thresholds are uncalibrated
-The watch/alert split is currently *inverted* (more alerts than watches) because the
-escalation bars — especially `dry_area_km2 ≥ 100,000`, which most large countries
-clear — are too easy. They are **provisional**; calibrating them is the job of the
-per-year dry-area backtest (the immediate next step). The WATCH rule (recall) is the
-backtested part; the ALERT escalation is structure-first, tuning-later.
+::: {.callout-note}
+## Escalation thresholds are backtest-calibrated
+The escalation arms are calibrated as a **precision lever** by a per-year backtest
+(`backtest_verify.py` §D): within the fired (watch) universe — 6,787 unit×year cases —
+each arm is scored against the **observed** severe drought (ERA5 dry RP ≥ 5). The base
+severe rate among watches is 0.33.
+
+- `z ≤ −1.5` is the strongest arm (alert precision 0.46, **lift 1.42** over base).
+- The original extent bars were far too loose: `dry_frac ≥ 0.50` was nearly implied by
+  firing (median `dry_frac` among fired ≈ 0.87) and `dry_area ≥ 100,000` mostly just
+  escalated large countries. Together they escalated **>50%** of watches on a
+  climatological average — the inverted split.
+- Tightening them to `dry_frac ≥ 0.80` / `dry_area ≥ 300,000` restores a watch-heavy
+  ~**2:1** split (alert share 0.51 → 0.32) and raises alert precision (lift 1.17 → 1.26),
+  with `z` left unchanged (it was never the problem).
+
+A broadly dry *forecast year* like 2026 still fires many alerts — that is the severity
+signal, not a miscalibration. The split is calibrated on climatology, not tuned to make
+any single year watch-heavy.
 :::
 
 ## A continuous product: return period per unit (no threshold)
