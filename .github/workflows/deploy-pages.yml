@@ -1,0 +1,62 @@
+name: Deploy pages site to GitHub Pages
+
+# Publishes the landing page (pages/) with the SEAS5 alerts app (docs/) assembled under /app/.
+#
+# Template: OCHA-DAP/ds-geospatial-impact-estimates (see also the manifest-driven variant in
+# OCHA-DAP/ds-storm-impact-harmonisation PR #12 — deliberately not used here: two cards do not
+# need a manifest). No build step, no Python environment, no credentials.
+#
+# Two triggers beyond push, and the second one is load-bearing:
+#   - workflow_dispatch: manual redeploy.
+#   - workflow_run on "Monthly data refresh": that workflow merges its data PR into main with
+#     GITHUB_TOKEN, and pushes made with GITHUB_TOKEN do NOT fire push-triggered workflows —
+#     without this trigger the app's monthly data would silently stop reaching the site.
+#
+# This repo's Pages previously served main:/docs directly (legacy build). configure-pages with
+# enablement: true switches the site to workflow builds on first run.
+
+on:
+  push:
+    branches: [main]
+    paths: ["pages/**", "docs/**", ".github/workflows/deploy-pages.yml"]
+  workflow_run:
+    workflows: ["Monthly data refresh"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # For workflow_run, deploy only after a successful refresh (a failed refresh leaves main
+    # unchanged, so there is nothing new to publish).
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Assemble site (landing at /, app at /app/)
+        run: |
+          mkdir -p site
+          rsync -a pages/ site/
+          rsync -a docs/ site/app/
+          test -f site/index.html && test -f site/app/index.html && test -f site/uganda/index.html
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
