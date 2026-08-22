@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SEAS5 Precipitation Alerts — OCHA Centre for Humanitarian Data</title>
+<meta name="description" content="Global drought and flood alerts from ECMWF SEAS5 seasonal precipitation forecasts, skill-gated and expressed as return periods, plus country-specific analyses.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <canvas id="bg" aria-hidden="true"></canvas>
+    <div class="inner">
+      <p class="eyebrow">OCHA Centre for Humanitarian Data</p>
+      <h1>SEAS5 Precipitation Alerts</h1>
+      <p>Every month ECMWF issues SEAS5, a seasonal rainfall forecast for the six months
+         ahead. This work turns it into drought and flood alerts a response can act on:
+         skill-gated, expressed as return periods, and joined against humanitarian
+         caseloads.</p>
+    </div>
+  </header>
+
+  <main>
+    <p class="label">Apps &amp; analysis</p>
+    <div class="grid">
+
+      <a class="k" href="app/">
+        <h2>ECMWF SEAS5 precipitation alerts</h2>
+        <p>The alerts app: the latest issuance's drought and flood signals by country and
+           admin unit — return periods, forecast skill, history, and the Forecast × HNRP
+           overlay joining the forecast to response-plan caseloads.</p>
+        <span class="foot"><em>/app/</em></span>
+      </a>
+
+      <a class="k" href="uganda/">
+        <h2>Uganda — drought forecast × humanitarian caseload</h2>
+        <p>Bespoke analysis for the Uganda country team: the August 2026 record-dry
+           Jun–Sep signal at district level, joined to JIAF 2.0 Light severity and PiN,
+           response targeting and reach, and ASAP cropping seasons.</p>
+        <span class="foot"><em>/uganda/</em></span>
+      </a>
+
+    </div>
+  </main>
+
+  <div class="note">
+    <p><strong>Access.</strong> Everything on this site is public — no sign-in, no
+       passphrase.</p>
+    <p><strong>Adding a page?</strong> Create a directory under <code>pages/</code> with an
+       <code>index.html</code> and add a card above. The app itself lives in
+       <code>docs/</code> and is assembled to <code>/app/</code> at deploy time. See
+       <a href="https://github.com/OCHA-DAP/ds-seas5-skill/blob/main/pages/README.md">pages/README.md</a>.</p>
+  </div>
+
+</div>
+
+<script src="assets/hero.js" defer></script>
+</body>
+</html>
