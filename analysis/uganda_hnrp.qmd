@@ -533,6 +533,163 @@ plt.tight_layout()
 plt.show()
 ```
 
+## Priorities: where first, what kind, when
+
+Everything above establishes three facts per district: how deep the forecast
+deficit is, how many people were already in need before the season failed, and
+whether a response footprint exists there. This section reads those three
+dimensions together. It adds no new data or model; the grouping is the
+agro-ecological grouping from the cropping-seasons section, and every number
+comes from the tables above.
+
+```{python}
+#| code-summary: "priority groups"
+pri = comb[comb["joint_pin"].notna() & comb["pct_normal"].notna()].copy()
+pri = pri.merge(dz[["pcode", "zone"]].drop_duplicates("pcode"), on="pcode", how="left")
+pri["group"] = np.select(
+    [pri["zone"] == "Karamoja", pri["zone"] == "West Nile"],
+    ["Karamoja", "West Nile corridor"], "Bimodal south / west")
+pri["coverage"] = pri["targeted"] / pri["joint_pin"]
+
+gs = (pri.groupby("group")
+        .agg(districts=("district", "count"), joint_pin=("joint_pin", "sum"),
+             targeted=("targeted", "sum"), reached=("reached", "sum"),
+             deficit_min=("pct_normal", "min"), deficit_max=("pct_normal", "max"))
+        .reindex(["Karamoja", "West Nile corridor", "Bimodal south / west"]))
+gs["deficit range"] = gs.apply(lambda r: f"{r['deficit_min']:.0f}-{r['deficit_max']:.0f}% of normal", axis=1)
+gs["targeted / PiN"] = gs["targeted"] / gs["joint_pin"]
+out_gs = gs[["districts", "joint_pin", "targeted", "reached", "deficit range", "targeted / PiN"]]
+out_gs.columns = ["Districts", "Joint PiN", "Targeted", "Reached", "Forecast deficit", "Targeted / PiN"]
+(out_gs.style.format({"Joint PiN": "{:,.0f}", "Targeted": "{:,.0f}", "Reached": "{:,.0f}",
+                      "Targeted / PiN": "{:.0%}"}, na_rep="none reported"))
+```
+
+The reading, group by group:
+
+- **Karamoja first.** It has the deepest deficits in the country in its only
+  season, in a pastoral zone where the failed Jun-Aug rains are a pasture,
+  water and livestock crisis, and it is the group where the response
+  footprint is thinnest: six of the nine districts have no reported targeted
+  or reached figures at all, and where figures exist (Kotido, Kaabong,
+  Moroto) they target roughly a tenth of the group's PiN. Whatever explains
+  that gap (reporting scope or actual absence), it is the first thing to
+  resolve, because the dry season from October gives no pasture regrowth
+  until the next rains around April.
+- **West Nile corridor: a harvest already lost.** The refugee-hosting
+  districts sit at 55-79% of normal in a zone with no second season, so the
+  food gap runs until the March 2027 planting. A response exists here but
+  targets well under the JIAF caseload; the question is depth and duration of
+  assistance, not whether to start.
+- **Bimodal south / west: a decision window, not yet a verdict.** Second-season
+  planting (Aug-Oct) is at risk of poor establishment in the record-dry
+  Aug-Sep, but the strongly wet Oct-Dec favors whatever does get established.
+  These districts need a check at establishment time rather than an immediate
+  scale-up.
+
+```{python}
+#| code-summary: "priority board"
+#| fig-cap: "One row per JIAF district, grouped by situation and sorted driest-first. Left: the forecast deficit (darker = less of the normal season's rain). Right: people in need (blue), with targeted (orange tick) and reached (red tick) from the monitoring workbooks; 'none reported' marks districts absent from those workbooks."
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize as MplNorm
+
+order = ["Karamoja", "West Nile corridor", "Bimodal south / west"]
+blocks = [pri[pri["group"] == g].sort_values("pct_normal") for g in order]
+gap = 1.6
+ys, rows_flat = [], []
+y = 0.0
+for blk in blocks:
+    start = y
+    for _, r in blk.iterrows():
+        rows_flat.append((y, r)); y += 1
+    ys.append((start, y)); y += gap
+total_h = y
+
+fig, (axL, axR) = plt.subplots(
+    1, 2, figsize=(9.5, 0.42 * total_h + 1.4), sharey=True,
+    gridspec_kw={"width_ratios": [1, 1.35], "wspace": 0.04})
+cmap, nrm = cm.get_cmap("YlOrBr_r"), MplNorm(0, 100)
+for yy, r in rows_flat:
+    axL.barh(yy, r["pct_normal"], color=cmap(nrm(r["pct_normal"])), height=0.72)
+    axL.text(r["pct_normal"] + 1.5, yy, f"{r['pct_normal']:.0f}%",
+             va="center", ha="right", fontsize=8, color="#3f4748")
+    axR.barh(yy, r["joint_pin"], color=C_PIN, height=0.72, alpha=0.85)
+    if pd.notna(r["targeted"]):
+        axR.plot([r["targeted"]] * 2, [yy - 0.36, yy + 0.36], color=C_TGT, lw=2.4)
+    if pd.notna(r["reached"]):
+        axR.plot([r["reached"]] * 2, [yy - 0.36, yy + 0.36], color=C_REA, lw=2.4)
+    if pd.isna(r["targeted"]) and pd.isna(r["reached"]):
+        axR.text(r["joint_pin"] + 8000, yy, "none reported", va="center",
+                 fontsize=7.2, color="#b8272d")
+axL.set_yticks([yy for yy, _ in rows_flat], [r["district"] for _, r in rows_flat], fontsize=8.5)
+for (start, end), g in zip(ys, order):
+    axL.text(99, start - 0.75, g.upper(), ha="left", va="center",
+             fontsize=8.5, fontweight="bold", color="#18614c")
+axL.set_xlim(0, 100); axL.invert_xaxis(); axL.invert_yaxis()
+axL.set_xlabel("forecast, % of normal season", fontsize=9)
+axR.set_xlabel("people", fontsize=9)
+axR.xaxis.set_major_formatter(lambda v, _: f"{v/1e3:,.0f}k")
+for ax in (axL, axR):
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.grid(axis="x", color="#eef1f1", zorder=0)
+axR.legend(handles=[Patch(color=C_PIN, label="people in need"),
+                    plt.Line2D([], [], color=C_TGT, lw=2.4, label="targeted"),
+                    plt.Line2D([], [], color=C_REA, lw=2.4, label="reached")],
+           loc="lower right", frameon=False, fontsize=8.5)
+fig.suptitle("Priority board: deficit, caseload, and response footprint", y=0.995)
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| code-summary: "when-to-act timeline"
+#| fig-cap: "What happens when, from the crop calendars, the ERA5 climatology and the SEAS5 issuance cycle. Diamonds are decision or verification points."
+MONTHS = ["Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr"]
+X = {m: i for i, m in enumerate(MONTHS)}
+
+rows = [
+    ("Karamoja", [
+        (X["Aug"], X["Oct"] + 1, "#7f5619", 0.30, "failed rains: pasture, water, livestock stress"),
+        (X["Nov"], X["Mar"] + 1, "#9db1b3", 0.30, "dry season: no regrowth until the ~Apr rains"),
+    ], [(X["Apr"] + 0.5, "next rains\n(climatology)")]),
+    ("West Nile corridor", [
+        (X["Aug"], X["Mar"] + 1, "#e69f00", 0.30, "food gap after the failed Jun-Jul harvest"),
+    ], [(X["Mar"] + 0.2, "next planting\n(Mar 2027)")]),
+    ("Bimodal south / west", [
+        (X["Aug"], X["Oct"] + 1, "#56b4e9", 0.35, "second-season planting: establishment at risk"),
+        (X["Oct"], X["Jan"] + 1, "#2a7e43", 0.25, "wet Oct-Dec supports what got established"),
+    ], [(X["Oct"] + 0.5, "establishment\ncheck"), (X["Jan"] + 0.5, "second harvest")]),
+    ("Monitoring", [], [
+        (X["Sep"] + 0.2, "SEAS5\nissuance"), (X["Oct"] + 0.2, "SEAS5 + ERA5\nconfirm Aug-Sep"),
+        (X["Nov"] + 0.2, "SEAS5\nissuance"),
+    ]),
+]
+
+fig, ax = plt.subplots(figsize=(9.5, 4.2))
+for i, (name, bands, marks) in enumerate(rows):
+    yy = len(rows) - 1 - i
+    for k, (x0, x1, c, a, lab) in enumerate(bands):
+        ax.barh(yy, x1 - x0, left=x0, height=0.52, color=c, alpha=a)
+        dy = 0.24 if (len(bands) > 1 and k == 0) else (-0.24 if len(bands) > 1 else 0.02)
+        ax.text((x0 + x1) / 2, yy + dy, lab, ha="center", va="center", fontsize=8, color="#1f2324")
+    for x, lab in marks:
+        ax.plot(x, yy, marker="D", ms=7, color="#18614c")
+        ax.annotate(lab, (x, yy), xytext=(0, -30), textcoords="offset points",
+                    ha="center", fontsize=7.3, color="#18614c")
+ax.set_yticks(range(len(rows)), [r[0] for r in rows][::-1], fontsize=9.5)
+ax.set_xticks(range(len(MONTHS)), [f"{m}\n'26" if i < 5 else f"{m}\n'27" for i, m in enumerate(MONTHS)], fontsize=8.5)
+ax.set_xlim(-0.3, len(MONTHS) + 0.4); ax.set_ylim(-0.8, len(rows) - 0.3)
+ax.spines[["top", "right", "left"]].set_visible(False)
+ax.set_title("When it bites, and when to look again")
+plt.tight_layout()
+plt.show()
+```
+
+The monitoring row is the workload plan for this analysis itself: SEAS5
+issues around the 5th of each month, so the September and October issuances
+(and the ERA5 observations that confirm how Aug-Sep actually landed) are the
+natural points to re-run this document and re-check the bimodal establishment
+window. The pipeline is parameterized, so a re-run is a render, not a rebuild.
+
 ## Method notes & caveats
 
 - Forecast selection is the app's rule verbatim (code imported from
