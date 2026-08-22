@@ -1,0 +1,45 @@
+/* HDX v2 tokens lifted from pages/assets/site.css (same system as the landing page and the
+ * team's other Pages sites; source of truth: ds-knowledge-base-internal/style-reference).
+ * Colors and type only — no hero, no animation. */
+@import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@700&family=Roboto:wght@400;500;700&display=swap');
+
+:root {
+  --b5:#269777; --b6:#1e795f; --b7:#18614c; --b05:#e9f5f1; --b1:#d4eae4;
+  --n9:#1f2324; --n8:#3f4748; --n7:#5e6a6b; --n05:#f5f7f7;
+}
+
+body {
+  font-family:'Roboto',system-ui,-apple-system,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+  color:var(--n9);
+}
+h1, h2, h3, h4, .quarto-title-block .title {
+  font-family:'Merriweather',Georgia,'Times New Roman',serif;
+  font-weight:700;
+}
+h2 { color:var(--b6); border-bottom:1px solid var(--b1); }
+h3 { color:var(--b7); }
+
+a { color:var(--b6); }
+a:hover { color:var(--b7); }
+
+/* Title banner text (banner background is set in the Quarto front matter). */
+#title-block-header.quarto-title-block.default .quarto-title .title { color:#fff; }
+#title-block-header .subtitle, #title-block-header .date { color:rgba(255,255,255,.88); }
+
+/* TOC */
+#toc-title { font-family:'Roboto',sans-serif; font-size:11px; letter-spacing:.11em;
+             text-transform:uppercase; color:var(--n7); }
+.sidebar nav[role="doc-toc"] ul > li > a.active { color:var(--b6); border-left:1px solid var(--b5); }
+.sidebar nav[role="doc-toc"] ul > li > a:hover { color:var(--b7); }
+
+/* Tables */
+table thead th { background:var(--b05); color:var(--b7); border-bottom:2px solid var(--b5); }
+table tbody tr:hover { background:var(--n05); }
+
+/* Code-fold summaries read as quiet controls, not content. */
+details > summary { color:var(--n7); font-size:.85em; }
+
+/* Callouts pick up the brand accent for the neutral kinds; warning/important keep
+ * their semantic colors. */
+div.callout-note.callout { border-left-color:var(--b5); }
+div.callout-note .callout-header { background:var(--b05); color:var(--b7); }
