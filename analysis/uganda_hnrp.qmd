@@ -300,8 +300,10 @@ plt.show()
 Cropping seasons come from the JRC ASAP sub-national crop calendars (planting,
 growth and harvest windows per agro-ecological zone, in 10-day dekads), with
 each CODAB district assigned to its zone
-(`pipeline/build_uga_crop_calendar.py`). The zones fall into three different
-situations:
+(`pipeline/build_uga_crop_calendar.py`). ASAP calendars only maize, beans and
+millet: Uganda's root and perennial crops (cassava, banana) and Karamoja's
+sorghum are not calendared, and perennials buffer a rainfall shock differently
+from cereals. The zones fall into three different situations:
 
 - **Karamoja is pastoral, not a cropping zone.** ASAP publishes no crop
   calendar for it: 91% of the zone is rangeland and only 4% cropland. The
@@ -330,7 +332,7 @@ situations:
 
 ```{python}
 #| code-summary: "seasonal calendar figure"
-#| fig-cap: "Maize seasons per ASAP agro-ecological zone (representative of beans/millet, which differ by a dekad or two at most). Brown band: the record-dry Jun-Sep window; green band: the wetter-than-normal Oct-Dec forecast. Karamoja has no ASAP crop calendar; it is 91% rangeland."
+#| fig-cap: "Maize seasons per ASAP agro-ecological zone. ASAP calendars Uganda for maize, beans and millet; beans and millet share maize's windows everywhere except Eastern, where millet's harvest runs about a month longer. Eastern's long-cycle northern maize is the middle bar. Brown band: the record-dry Jun-Sep window; green band: the wetter-than-normal Oct-Dec forecast. Karamoja has no ASAP crop calendar; it is 91% rangeland."
 cal = stratus.load_parquet_from_blob(f"{UGA_DIR}/asap_crop_calendar.parquet", stage="dev")
 dz = stratus.load_parquet_from_blob(f"{UGA_DIR}/asap_district_zones.parquet", stage="dev")
 
@@ -338,7 +340,9 @@ def dk(d):  # dekad (1-36) -> month-axis position (1.0 = Jan 1, 13.0 = Dec 31)
     return 1 + (d - 1) / 3
 
 maize = cal[cal["crop_name"].str.contains("Maize", na=False)].copy()
-maize["season"] = np.where(maize["crop_name"].str.contains("Second"), "second", "main")
+maize["season"] = np.select(
+    [maize["crop_name"].str.contains("Second"), maize["crop_name"].str.contains("North")],
+    ["second", "north"], "main")
 zones = ["Karamoja", "West Nile", "Mid Northen", "Eastern", "Lake Albert Crescent",
          "Western Highlands", "Southern Drylands", "Lake Victoria Crescent",
          "South Eastern", "Southern Highlands"]
@@ -353,7 +357,7 @@ for i, z in enumerate(zones):
                 va="center", fontsize=8.5, color="#5b6b6d", style="italic")
         continue
     for _, r in rows.iterrows():
-        off = -0.18 if r["season"] == "second" else 0.18
+        off = {"main": 0.22, "north": 0.0, "second": -0.22}[r["season"]]
         segs = [(dk(r["sos_s"]), dk(r["sos_e"]), C_PLANT),
                 (dk(r["sos_e"]), dk(r["eos_s"]) if r["eos_s"] > r["sos_e"] else 13, C_GROW)]
         if r["eos_s"] > r["sos_e"]:                     # same calendar year
@@ -361,7 +365,7 @@ for i, z in enumerate(zones):
         else:                                           # wraps into January
             segs += [(1, dk(r["eos_s"]), C_GROW), (dk(r["eos_s"]), dk(r["eos_e"]), C_HARV)]
         for x0, x1, c in segs:
-            ax.barh(y + off, x1 - x0, left=x0, height=0.3, color=c, edgecolor="none")
+            ax.barh(y + off, x1 - x0, left=x0, height=0.24, color=c, edgecolor="none")
 ax.axvspan(6, 10, color="#7f5619", alpha=0.14, zorder=0)
 ax.axvspan(10, 13, color="#2a7e43", alpha=0.10, zorder=0)
 ax.text(8.0, len(zones) - 0.35, "record dry\nJun-Sep", ha="center", fontsize=8.5, color="#7f5619")
@@ -373,7 +377,7 @@ ax.legend(handles=[Patch(color=C_PLANT, label="planting"), Patch(color=C_GROW, l
                    Patch(color=C_HARV, label="harvest")],
           loc="upper center", bbox_to_anchor=(0.5, -0.09), ncol=3, frameon=False)
 ax.spines[["top", "right"]].set_visible(False)
-ax.set_title("Maize seasons by zone (upper bar: main season; lower: second season)")
+ax.set_title("Maize seasons by zone (top: main; middle: northern long-cycle; bottom: second season)")
 plt.tight_layout()
 plt.show()
 ```
@@ -387,7 +391,7 @@ rainfall percentile per month, by zone. Planting (March) was wet everywhere;
 April was below median everywhere; June collapsed to the driest on record
 everywhere; July recovered in the west but not in the north or east. Read
 against the calendar above, that means the growth-stage failure is real in
-**Karamoja** (June-July is the core of its season) and for the **Eastern
+**Karamoja** (June-July is the core of its single wet season) and for the **Eastern
 zone's long-cycle maize** (grain-fill through June-July at the 0th-4th
 percentile), while **West Nile's** crop mostly grew under near-normal rain and
 met the record dry at harvest, which damages less. The forward-looking risk
