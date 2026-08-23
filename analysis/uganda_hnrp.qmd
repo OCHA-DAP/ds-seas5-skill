@@ -306,15 +306,20 @@ situations:
 - **Karamoja is pastoral, not a cropping zone.** ASAP publishes no crop
   calendar for it: 91% of the zone is rangeland and only 4% cropland. The
   record-dry Jun-Aug, its rainfall peak, is first a pasture, water and
-  livestock crisis, hitting the sparse sorghum patches on top. The wet Oct-Dec
-  can recharge water and pasture, but Karamoja's rains normally *end* around
-  October. An unusually wet OND is recovery for herds, not for a harvest.
+  livestock crisis, hitting the sparse sorghum patches on top. An unusually
+  wet Oct-Dec can recharge water points and regrow pasture for herds; for the
+  cropped patches it comes after the zone's single season has already failed,
+  and nothing replanted grows before the next rains around April.
 - **West Nile is unimodal in ASAP** (no second-season crops): planting March
-  to April, harvest June to July. The record-dry Jun-Sep lands on grain-fill
-  and harvest of the *only* season, and there is no second planting until
-  March 2027. The wet OND forecast offers no cropping recovery in exactly the
-  districts hosting the refugee response (Yumbe, Adjumani, Madi-Okollo &
-  Terego, Obongi, Koboko, Arua/Terego, Moyo).
+  to April, harvest June to July. Stage timing matters here: planting rains
+  were wet (March at the 91st percentile) and growth was mixed (April 22nd,
+  May 47th), so the record-dry June hit *maturation and harvest* rather than
+  grain-fill. That points to a reduced season, not an outright failure. What
+  makes it a priority anyway is what comes after: there is no second planting
+  until March 2027, so whatever the season yielded has to carry the
+  refugee-hosting districts (Yumbe, Adjumani, Madi-Okollo & Terego, Obongi,
+  Koboko, Arua/Terego, Moyo) through the whole dry stretch, and the wet OND
+  forecast offers no cropping recovery there.
 - **The bimodal zones** (Mid Northern incl. Lamwo; Lake Albert Crescent incl.
   Kiryandongo/Kikuube; Western Highlands incl. Kamwenge/Kyegegwa; Southern
   Drylands incl. Isingiro; Lake Victoria Crescent incl. Kampala): the dry
@@ -371,6 +376,43 @@ ax.spines[["top", "right"]].set_visible(False)
 ax.set_title("Maize seasons by zone (upper bar: main season; lower: second season)")
 plt.tight_layout()
 plt.show()
+```
+
+### Did the drought hit when it matters for crops?
+
+Most zones harvest from June or July, so much of the main season's growth
+happened under different rain than the record-dry window this document
+headlines. The table below puts the two side by side: the observed 2026
+rainfall percentile per month, by zone. Planting (March) was wet everywhere;
+April was below median everywhere; June collapsed to the driest on record
+everywhere; July recovered in the west but not in the north or east. Read
+against the calendar above, that means the growth-stage failure is real in
+**Karamoja** (June-July is the core of its season) and for the **Eastern
+zone's long-cycle maize** (grain-fill through June-July at the 0th-4th
+percentile), while **West Nile's** crop mostly grew under near-normal rain and
+met the record dry at harvest, which damages less. The forward-looking risk
+(the Aug-Sep forecast) falls on second-season establishment in the bimodal
+zones and on Karamoja's season tail.
+
+```{python}
+#| code-summary: "observed 2026 monthly percentile by zone"
+e2z = era5_2.merge(dz[["pcode", "zone"]], on="pcode")
+zm = (e2z.groupby(["zone", e2z["valid_date"].dt.year.rename("yr"),
+                   e2z["valid_date"].dt.month.rename("mo")])["mean"]
+          .mean().reset_index())
+obs_rows = []
+for zone, gg in zm.groupby("zone"):
+    row = {"zone": zone}
+    for mo in range(1, 8):
+        cur = gg[(gg["yr"] == 2026) & (gg["mo"] == mo)]["mean"]
+        hist = gg[(gg["yr"] < 2026) & (gg["mo"] == mo)]["mean"]
+        row[calendar.month_abbr[mo]] = 100 * (hist < cur.iloc[0]).mean()
+    obs_rows.append(row)
+obs = pd.DataFrame(obs_rows).set_index("zone").sort_index()
+(obs.style.format("{:.0f}")
+    .background_gradient(cmap="BrBG", vmin=0, vmax=100, axis=None)
+    .set_caption("Observed 2026 monthly rainfall percentile vs 1981-2025 "
+                 "(ERA5, zone mean of district series; brown = dry, green = wet)"))
 ```
 
 ```{python}
@@ -575,11 +617,12 @@ The reading, group by group:
   that gap (reporting scope or actual absence), it is the first thing to
   resolve, because the dry season from October gives no pasture regrowth
   until the next rains around April.
-- **West Nile corridor: a harvest already lost.** The refugee-hosting
-  districts sit at 55-79% of normal in a zone with no second season, so the
-  food gap runs until the March 2027 planting. A response exists here but
-  targets well under the JIAF caseload; the question is depth and duration of
-  assistance, not whether to start.
+- **West Nile corridor: a squeezed season with no second chance.** The
+  record-dry June hit at harvest, after near-normal planting and growth
+  rains, so the main season is reduced rather than lost; but this zone has no
+  second season, so that reduced harvest must last until the March 2027
+  planting. A response exists here but targets well under the JIAF caseload;
+  the question is depth and duration of assistance, not whether to start.
 - **Bimodal south / west: a decision window, not yet a verdict.** Second-season
   planting (Aug-Oct) is at risk of poor establishment in the record-dry
   Aug-Sep, but the strongly wet Oct-Dec favors whatever does get established.
@@ -652,7 +695,7 @@ rows = [
         (X["Nov"], X["Mar"] + 1, "#9db1b3", 0.30, "dry season: no regrowth until the ~Apr rains"),
     ], [(X["Apr"] + 0.5, "next rains\n(climatology)")]),
     ("West Nile corridor", [
-        (X["Aug"], X["Mar"] + 1, "#e69f00", 0.30, "food gap after the failed Jun-Jul harvest"),
+        (X["Aug"], X["Mar"] + 1, "#e69f00", 0.30, "reduced harvest must last until Mar 2027 planting"),
     ], [(X["Mar"] + 0.2, "next planting\n(Mar 2027)")]),
     ("Bimodal south / west", [
         (X["Aug"], X["Oct"] + 1, "#56b4e9", 0.35, "second-season planting: establishment at risk"),
