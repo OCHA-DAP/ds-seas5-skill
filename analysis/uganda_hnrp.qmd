@@ -39,6 +39,10 @@ the country team:
   registry), with exactextract over the same COGs; the method reproduces the
   DB's region means within about 1%, and the results run through the repo's
   unchanged skill and return-period code.
+
+It reads in four steps: where the season stands (observed), where it is
+heading (the forecast), what that timing means for crops and pasture, and who
+is exposed, ending in a priority readout.
 :::
 
 ```{python}
@@ -168,7 +172,105 @@ print(f"Latest issuance: {calendar.month_name[issued]} "
       f"{len(fc2)} districts, {len(fc1)} regions")
 ```
 
-## Forecast: where is a bad rainy season expected?
+## Where the season stands
+
+The place to start is what has actually fallen. The curves below accumulate
+rainfall over each zone's own crop-calendar window (planting start to harvest
+end, from the JRC ASAP calendars introduced in the seasonal-relevance section;
+Karamoja's Apr-Sep wet season from the ERA5 climatology) and compare 2026
+against every year since 1981. Two different stories emerge. **Karamoja has received
+41-54% of its normal season-to-date rain**, the driest or near-driest
+Apr-Jul on record in its districts, with the remaining season forecast at
+the 0th-2nd percentile. **West Nile has received 84-99% of normal**: the wet
+March banked most of the season's water early, so in accumulation terms its
+main season is close to normal and the record-dry June-July is a
+harvest-timing concern rather than a water-quantity failure. (Do not confuse
+this observed season-to-date figure with the forecast deficit map in the next
+section, which is the *forecast* for the worst upcoming slot.) The bimodal
+zones sit in between at roughly 65-99%.
+
+```{python}
+#| code-summary: "cumulative season curves by zone"
+#| fig-cap: "Cumulative rainfall over each zone's main-season window, zone mean of district series. Gray: every year 1981-2025; dashed: median year; brown: 2026 through July (the ERA5 record's edge). The percentage is 2026 season-to-date as a share of the normal season-to-date."
+cal = stratus.load_parquet_from_blob(f"{UGA_DIR}/asap_crop_calendar.parquet", stage="dev")
+dz = stratus.load_parquet_from_blob(f"{UGA_DIR}/asap_district_zones.parquet", stage="dev")
+zones = ["Karamoja", "West Nile", "Mid Northen", "Eastern", "Lake Albert Crescent",
+         "Western Highlands", "Southern Drylands", "Lake Victoria Crescent",
+         "South Eastern", "Southern Highlands"]
+jiaf_pcodes = set(uct.load_jiaf_pin()["pcode"])
+
+dk2mo = lambda d: int(np.ceil(d / 3))
+main_cal = cal[cal["crop_name"].fillna("").str.contains("Maize")
+               & ~cal["crop_name"].fillna("").str.contains("Second|North")]
+season_win = {r["zone"]: (dk2mo(r["sos_s"]), dk2mo(r["eos_e"])) for _, r in main_cal.iterrows()}
+season_win["Karamoja"] = (4, 9)   # wet season from ERA5 climatology; no ASAP calendar
+
+e_all = era5_2.merge(dz[["pcode", "zone", "district"]], on="pcode")
+e_all["yr"], e_all["mo"] = e_all["valid_date"].dt.year, e_all["valid_date"].dt.month
+e_all["mm"] = e_all["mean"] * e_all["mo"].map(lambda m: calendar.monthrange(2025, m)[1])
+LATEST_OBS = int(e_all.loc[e_all['yr'] == 2026, 'mo'].max())
+
+fig, axes = plt.subplots(2, 5, figsize=(9.5, 4.8))
+for ax, zone in zip(axes.flat, zones):
+    m0, m1 = season_win[zone]
+    mos = list(range(m0, m1 + 1))
+    zm2 = (e_all[(e_all["zone"] == zone) & (e_all["mo"].isin(mos))]
+           .groupby(["yr", "mo"])["mm"].mean().unstack().reindex(columns=mos))
+    cum = zm2.cumsum(axis=1)
+    hist = cum.loc[cum.index < 2026]
+    for _, row in hist.iterrows():
+        ax.plot(mos, row.values, color="#c4d0d1", lw=0.6, alpha=0.6)
+    ax.plot(mos, hist.median(), color="#3f4748", lw=1.4, ls="--")
+    upto = [m for m in mos if m <= LATEST_OBS]
+    if 2026 in cum.index and upto:
+        ax.plot(upto, cum.loc[2026, upto], color="#7f5619", lw=2.2)
+        pct = 100 * cum.loc[2026, upto[-1]] / hist[upto[-1]].median()
+        ax.set_title(f"{zone}\n{pct:.0f}% of normal to date", fontsize=8)
+    ax.set_xticks([mos[0], mos[-1]], [calendar.month_abbr[mos[0]], calendar.month_abbr[mos[-1]]], fontsize=7)
+    ax.tick_params(axis='y', labelsize=7)
+    ax.spines[["top", "right"]].set_visible(False)
+fig.suptitle("Cumulative main-season rainfall (mm): 2026 against 1981-2025", y=1.0)
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| code-summary: "JIAF districts: season-to-date ranking"
+#| fig-cap: "Observed season-to-date rainfall as % of the normal season-to-date, per JIAF district over its zone's calendar window. Filled markers are districts having their driest season-to-date since 1981."
+std_rows = []
+for (pc, dist, zone), gg in e_all[e_all["pcode"].isin(jiaf_pcodes)].groupby(["pcode", "district", "zone"]):
+    m0, m1 = season_win[zone]
+    mos = [m for m in range(m0, min(m1, LATEST_OBS) + 1)]
+    std = gg[gg["mo"].isin(mos)].groupby("yr")["mm"].sum()
+    hist = std[std.index < 2026]
+    std_rows.append({"district": dist, "zone": zone, "pct": 100 * std[2026] / hist.mean(),
+                     "driest": bool((hist < std[2026]).sum() == 0)})
+sd = pd.DataFrame(std_rows)
+sd["group"] = np.select([sd["zone"] == "Karamoja", sd["zone"] == "West Nile"],
+                        ["Karamoja", "West Nile corridor"], "Bimodal south / west")
+GC = {"Karamoja": "#7f5619", "West Nile corridor": "#e69f00", "Bimodal south / west": "#56b4e9"}
+sd = sd.sort_values("pct").reset_index(drop=True)
+fig, ax = plt.subplots(figsize=(9, 0.32 * len(sd) + 1.2))
+for i, r in sd.iterrows():
+    ax.plot(r["pct"], i, marker="o", ms=9, color=GC[r["group"]],
+            markerfacecolor=GC[r["group"]] if r["driest"] else "white", markeredgewidth=1.6)
+ax.set_yticks(range(len(sd)), sd["district"], fontsize=8.5)
+ax.axvline(100, color="#9db1b3", lw=1, ls="--")
+ax.text(100, len(sd) - 0.2, " normal", fontsize=8, color="#5e6a6b")
+ax.set_xlabel("observed season-to-date rainfall, % of normal")
+ax.xaxis.set_major_formatter(lambda v, _: f"{v:.0f}%")
+ax.legend(handles=[plt.Line2D([], [], marker="o", ls="", color=c, label=g) for g, c in GC.items()]
+                  + [plt.Line2D([], [], marker="o", ls="", color="#5e6a6b", markerfacecolor="white", label="open = not record-driest")],
+          loc="lower right", frameon=False, fontsize=8)
+ax.grid(axis="x", color="#eef1f1", zorder=0)
+ax.spines[["top", "right"]].set_visible(False)
+ax.set_title("Season-to-date rainfall, JIAF districts")
+plt.tight_layout()
+plt.show()
+```
+
+
+## Where it is heading: the forecast
 
 The table and map below show, per unit, the worst qualifying drought slot at
 the latest SEAS5 issuance, using the app's rule: valid trimesters (lead −2…4),
@@ -243,7 +345,7 @@ reports its own $r$.
 **Crop relevance:** the Jun-Aug window carries 38-44% of total annual rainfall
 in every Karamoja district (ERA5 climatology, this analysis). What that means
 for production differs by agro-ecological zone; see
-[Cropping seasons](#cropping-seasons-what-is-affected-when-and-where) below,
+[Seasonal relevance](#seasonal-relevance-crops-pasture-and-timing) below,
 built from the JRC ASAP crop calendars.
 :::
 
@@ -295,7 +397,7 @@ plt.tight_layout()
 plt.show()
 ```
 
-## Cropping seasons: what is affected, when and where
+## Seasonal relevance: crops, pasture, and timing
 
 Cropping seasons come from the JRC ASAP sub-national crop calendars (planting,
 growth and harvest windows per agro-ecological zone, in 10-day dekads), with
@@ -317,7 +419,7 @@ from cereals. The zones fall into three different situations:
   were wet (March at the 91st percentile) and growth was mixed (April 22nd,
   May 47th), so the record-dry June hit *maturation and harvest* rather than
   grain-fill, and the season-to-date accumulation is 84-99% of normal (see
-  below). That points to a season close to normal in water terms, with the
+  "Where the season stands" above). That points to a season close to normal in water terms, with the
   risk concentrated in harvest conditions and late-planted fields. What
   makes it a priority anyway is what comes after: there is no second planting
   until March 2027, so whatever the season yielded has to carry the
@@ -335,9 +437,6 @@ from cereals. The zones fall into three different situations:
 ```{python}
 #| code-summary: "seasonal calendar figure"
 #| fig-cap: "Maize seasons per ASAP agro-ecological zone. ASAP calendars Uganda for maize, beans and millet; beans and millet share maize's windows everywhere except Eastern, where millet's harvest runs about a month longer. Eastern's long-cycle northern maize is the middle bar. Brown band: the record-dry Jun-Sep window; green band: the wetter-than-normal Oct-Dec forecast. Karamoja has no ASAP crop calendar; it is 91% rangeland."
-cal = stratus.load_parquet_from_blob(f"{UGA_DIR}/asap_crop_calendar.parquet", stage="dev")
-dz = stratus.load_parquet_from_blob(f"{UGA_DIR}/asap_district_zones.parquet", stage="dev")
-
 def dk(d):  # dekad (1-36) -> month-axis position (1.0 = Jan 1, 13.0 = Dec 31)
     return 1 + (d - 1) / 3
 
@@ -345,9 +444,6 @@ maize = cal[cal["crop_name"].str.contains("Maize", na=False)].copy()
 maize["season"] = np.select(
     [maize["crop_name"].str.contains("Second"), maize["crop_name"].str.contains("North")],
     ["second", "north"], "main")
-zones = ["Karamoja", "West Nile", "Mid Northen", "Eastern", "Lake Albert Crescent",
-         "Western Highlands", "Southern Drylands", "Lake Victoria Crescent",
-         "South Eastern", "Southern Highlands"]
 
 C_PLANT, C_GROW, C_HARV = "#9ecae1", "#a1d99b", "#e6b34c"
 fig, ax = plt.subplots(figsize=(9, 5.5))
@@ -421,96 +517,6 @@ obs = pd.DataFrame(obs_rows).set_index("zone").sort_index()
                  "(ERA5, zone mean of district series; brown = dry, green = wet)"))
 ```
 
-### Season-to-date: has the season's water actually arrived?
-
-Monthly percentiles say when it was dry; they do not say how much of the
-season's total water has arrived. The curves below accumulate rainfall over
-each zone's own calendar window (planting start to harvest end; Karamoja's
-Apr-Sep wet season from the ERA5 climatology) and compare 2026 against every
-year since 1981. Two different stories emerge. **Karamoja has received
-41-54% of its normal season-to-date rain**, the driest or near-driest
-Apr-Jul on record in its districts, with the remaining season forecast at
-the 0th-2nd percentile. **West Nile has received 84-99% of normal**: the wet
-March banked most of the season's water early, so in accumulation terms its
-main season is close to normal and the record-dry June-July is a
-harvest-timing concern rather than a water-quantity failure. (Do not confuse
-this observed season-to-date figure with the deficit map above, which is the
-*forecast* for the worst upcoming slot.) The bimodal zones sit in between at
-roughly 65-99%.
-
-```{python}
-#| code-summary: "cumulative season curves by zone"
-#| fig-cap: "Cumulative rainfall over each zone's main-season window, zone mean of district series. Gray: every year 1981-2025; dashed: median year; brown: 2026 through July (the ERA5 record's edge). The percentage is 2026 season-to-date as a share of the normal season-to-date."
-dk2mo = lambda d: int(np.ceil(d / 3))
-main_cal = cal[cal["crop_name"].fillna("").str.contains("Maize")
-               & ~cal["crop_name"].fillna("").str.contains("Second|North")]
-season_win = {r["zone"]: (dk2mo(r["sos_s"]), dk2mo(r["eos_e"])) for _, r in main_cal.iterrows()}
-season_win["Karamoja"] = (4, 9)   # wet season from ERA5 climatology; no ASAP calendar
-
-e_all = era5_2.merge(dz[["pcode", "zone", "district"]], on="pcode")
-e_all["yr"], e_all["mo"] = e_all["valid_date"].dt.year, e_all["valid_date"].dt.month
-e_all["mm"] = e_all["mean"] * e_all["mo"].map(lambda m: calendar.monthrange(2025, m)[1])
-LATEST_OBS = int(e_all.loc[e_all['yr'] == 2026, 'mo'].max())
-
-fig, axes = plt.subplots(2, 5, figsize=(9.5, 4.8))
-for ax, zone in zip(axes.flat, zones):
-    m0, m1 = season_win[zone]
-    mos = list(range(m0, m1 + 1))
-    zm2 = (e_all[(e_all["zone"] == zone) & (e_all["mo"].isin(mos))]
-           .groupby(["yr", "mo"])["mm"].mean().unstack().reindex(columns=mos))
-    cum = zm2.cumsum(axis=1)
-    hist = cum.loc[cum.index < 2026]
-    for _, row in hist.iterrows():
-        ax.plot(mos, row.values, color="#c4d0d1", lw=0.6, alpha=0.6)
-    ax.plot(mos, hist.median(), color="#3f4748", lw=1.4, ls="--")
-    upto = [m for m in mos if m <= LATEST_OBS]
-    if 2026 in cum.index and upto:
-        ax.plot(upto, cum.loc[2026, upto], color="#7f5619", lw=2.2)
-        pct = 100 * cum.loc[2026, upto[-1]] / hist[upto[-1]].median()
-        ax.set_title(f"{zone}\n{pct:.0f}% of normal to date", fontsize=8)
-    ax.set_xticks([mos[0], mos[-1]], [calendar.month_abbr[mos[0]], calendar.month_abbr[mos[-1]]], fontsize=7)
-    ax.tick_params(axis='y', labelsize=7)
-    ax.spines[["top", "right"]].set_visible(False)
-fig.suptitle("Cumulative main-season rainfall (mm): 2026 against 1981-2025", y=1.0)
-plt.tight_layout()
-plt.show()
-```
-
-```{python}
-#| code-summary: "JIAF districts: season-to-date ranking"
-#| fig-cap: "Observed season-to-date rainfall as % of the normal season-to-date, per JIAF district over its zone's calendar window. Filled markers are districts having their driest season-to-date since 1981."
-std_rows = []
-for (pc, dist, zone), gg in e_all[e_all["pcode"].isin(jiaf_pcodes)].groupby(["pcode", "district", "zone"]):
-    m0, m1 = season_win[zone]
-    mos = [m for m in range(m0, min(m1, LATEST_OBS) + 1)]
-    std = gg[gg["mo"].isin(mos)].groupby("yr")["mm"].sum()
-    hist = std[std.index < 2026]
-    std_rows.append({"district": dist, "zone": zone, "pct": 100 * std[2026] / hist.mean(),
-                     "driest": bool((hist < std[2026]).sum() == 0)})
-sd = pd.DataFrame(std_rows)
-sd["group"] = np.select([sd["zone"] == "Karamoja", sd["zone"] == "West Nile"],
-                        ["Karamoja", "West Nile corridor"], "Bimodal south / west")
-GC = {"Karamoja": "#7f5619", "West Nile corridor": "#e69f00", "Bimodal south / west": "#56b4e9"}
-sd = sd.sort_values("pct").reset_index(drop=True)
-fig, ax = plt.subplots(figsize=(9, 0.32 * len(sd) + 1.2))
-for i, r in sd.iterrows():
-    ax.plot(r["pct"], i, marker="o", ms=9, color=GC[r["group"]],
-            markerfacecolor=GC[r["group"]] if r["driest"] else "white", markeredgewidth=1.6)
-ax.set_yticks(range(len(sd)), sd["district"], fontsize=8.5)
-ax.axvline(100, color="#9db1b3", lw=1, ls="--")
-ax.text(100, len(sd) - 0.2, " normal", fontsize=8, color="#5e6a6b")
-ax.set_xlabel("observed season-to-date rainfall, % of normal")
-ax.xaxis.set_major_formatter(lambda v, _: f"{v:.0f}%")
-ax.legend(handles=[plt.Line2D([], [], marker="o", ls="", color=c, label=g) for g, c in GC.items()]
-                  + [plt.Line2D([], [], marker="o", ls="", color="#5e6a6b", markerfacecolor="white", label="open = not record-driest")],
-          loc="lower right", frameon=False, fontsize=8)
-ax.grid(axis="x", color="#eef1f1", zorder=0)
-ax.spines[["top", "right"]].set_visible(False)
-ax.set_title("Season-to-date rainfall, JIAF districts")
-plt.tight_layout()
-plt.show()
-```
-
 ```{python}
 #| code-summary: "JIAF districts by agro-ecological zone"
 jiaf_pin = uct.load_jiaf_pin()
@@ -524,7 +530,7 @@ ztbl.columns = ["ASAP zone", "JIAF districts", "Joint PiN"]
 ztbl.style.hide(axis="index").format({"Joint PiN": "{:,.0f}"})
 ```
 
-## Humanitarian caseload: JIAF 2.0 Light
+## Why it matters: people already in need
 
 JIAF classifies **areas**; PiN counts **people**. The joint PiN per district ×
 population group is the highest sectoral PiN (JIAF 2.0 mosaic rule); the
@@ -792,7 +798,7 @@ rows = [
         (X["Nov"], X["Mar"] + 1, "#9db1b3", 0.30, "dry season: no regrowth until the ~Apr rains"),
     ], [(X["Apr"] + 0.5, "next rains\n(climatology)")]),
     ("West Nile corridor", [
-        (X["Aug"], X["Mar"] + 1, "#e69f00", 0.30, "reduced harvest must last until Mar 2027 planting"),
+        (X["Aug"], X["Mar"] + 1, "#e69f00", 0.30, "this harvest must last until Mar 2027 planting"),
     ], [(X["Mar"] + 0.2, "next planting\n(Mar 2027)")]),
     ("Bimodal south / west", [
         (X["Aug"], X["Oct"] + 1, "#56b4e9", 0.35, "second-season planting: establishment at risk"),
