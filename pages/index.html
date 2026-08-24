@@ -9,6 +9,25 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/site.css">
+<script>
+// The repo root USED to be the app itself, so links people saved point here:
+// /#hnrp, /?country=Sudan(the)#hnrp, /index.html#skillmap. After the restructure
+// those land on this page with the hash silently ignored — the reader gets a
+// landing page instead of the view they bookmarked, and nothing says why.
+//
+// Forward them. Deliberately narrow: only a recognised tab hash or one of the
+// app's own query parameters triggers it, so a plain visit to "/" still shows
+// this page. Runs before render (blocking, in <head>) so there is no flash, and
+// replace() keeps the hop out of the back button.
+(function () {
+  var TABS = ["map", "skillmap", "skill", "alerts", "hnrp", "methods"];
+  var hash = location.hash.replace(/^#/, "");
+  var appParam = /[?&](country|adm|sev|lvl|ipcp|yr|tri|skill|rp)=/.test(location.search);
+  if (TABS.indexOf(hash) >= 0 || appParam) {
+    location.replace("app/" + location.search + location.hash);
+  }
+})();
+</script>
 </head>
 <body>
 <div class="wrap">
@@ -26,16 +45,38 @@
   </header>
 
   <main>
-    <p class="label">Apps &amp; analysis</p>
-    <div class="grid">
+    <!-- The app gets a row to itself, with a picture of it. Most people arriving
+         here typed the address of the APP: it was at / until the restructure, and
+         a text card in a two-up grid gave them nothing to recognise. The
+         screenshot is the fastest way for someone who knows the tool to see they
+         are one click from it. -->
+    <p class="label">The app</p>
+    <div class="grid grid-one">
 
-      <a class="k" href="app/">
-        <h2>ECMWF SEAS5 precipitation alerts</h2>
-        <p>The alerts app: the latest issuance's drought and flood signals by country and
-           admin unit — return periods, forecast skill, history, and the Forecast × HNRP
-           overlay joining the forecast to response-plan caseloads.</p>
-        <span class="foot"><em>/app/</em></span>
+      <a class="k k-feature" href="app/">
+        <span class="body">
+          <h2>ECMWF SEAS5 precipitation alerts</h2>
+          <p>The latest issuance's drought and flood signals by country and admin unit —
+             return periods, forecast skill, history, and the Forecast × HNRP overlay
+             joining the forecast to response-plan caseloads.</p>
+          <!-- The views by name. Someone who bookmarked the app was usually after one
+               view in particular, and naming them is the quickest way for that person
+               to confirm this is the right door. -->
+          <span class="views">Map · Skill map · Skill by country · Forecast × HNRP ·
+             Methodology</span>
+          <span class="foot"><em>/app/</em><span>Moved here from /</span></span>
+        </span>
+        <span class="shot">
+          <!-- Decorative: the card's own heading and text already say what this is,
+               so alt="" keeps a screen reader from reading the interface twice. -->
+          <img src="assets/app-preview.png" alt="" width="880" height="563" loading="lazy">
+        </span>
       </a>
+
+    </div>
+
+    <p class="label label-2">Country analyses</p>
+    <div class="grid">
 
       <a class="k" href="uganda/">
         <h2>Uganda — drought forecast × humanitarian caseload</h2>
@@ -49,7 +90,11 @@
   </main>
 
   <div class="note">
-    <p><strong>Access.</strong> Everything on this site is public — no sign-in, no
+    <!-- "listed here", not "on this site": there is one unlisted, passphrase-gated
+         page under /app/, shared by direct link only. Saying "everything is public"
+         was a claim this page cannot make; naming the exception would defeat the
+         point of it being unlisted. -->
+    <p><strong>Access.</strong> Everything listed here is public — no sign-in, no
        passphrase.</p>
     <p><strong>Adding a page?</strong> Create a directory under <code>pages/</code> with an
        <code>index.html</code> and add a card above. The app itself lives in
