@@ -180,7 +180,8 @@ The place to start is what has actually fallen. The curves below accumulate
 rainfall over each zone's own crop-calendar window (planting start to harvest
 end, from the JRC ASAP calendars introduced in the seasonal-relevance section;
 Karamoja's Apr-Sep wet season from the ERA5 climatology) and compare 2026
-against every year since 1981. Two different stories emerge. **Karamoja has received
+against every year since 1981. Karamoja and West Nile sit at opposite ends
+of the range. **Karamoja has received
 41-54% of its normal season-to-date rain**, the driest or near-driest
 Apr-Jul on record in its districts, with the remaining season forecast at
 the 0th-2nd percentile. **West Nile has received 84-99% of normal**: the wet
@@ -847,7 +848,8 @@ The monitoring row is the workload plan for this analysis itself: SEAS5
 issues around the 5th of each month, so the September and October issuances
 (and the ERA5 observations that confirm how Aug-Sep actually landed) are the
 natural points to re-run this document and re-check the bimodal establishment
-window. The pipeline is parameterized, so a re-run is a render, not a rebuild.
+window. The pipeline is parameterized, so re-running just means re-rendering
+the document.
 
 ## Flood outlook: the OND wet season
 
@@ -855,8 +857,8 @@ window. The pipeline is parameterized, so a re-run is a render, not a rebuild.
 
 The same issuance that forecasts the drought puts October, November and
 December at the 91st-98th wet percentile, so the flood question is part of
-the outlook. One honesty note before the map: **Oct-Dec is not Uganda's main
-flood season everywhere**. In the FloodScan record (daily SFED, 1998-2026)
+the outlook. Worth knowing before the map: Oct-Dec is not Uganda's main
+flood season everywhere. In the FloodScan record (daily SFED, 1998-2026)
 the national annual flood peak falls in April or May in 19 of 29 years,
 driven by the Northern (April peak) and Eastern (May peak) regions; November
 is a genuine secondary peak in the Central and Western regions. The map
@@ -1064,7 +1066,8 @@ footprint east and centre. The right panel shows the other half of the
 story from EM-DAT (2001-2024): *recorded impacts* concentrate not in the
 wetland core but in flash-flood and landslide terrain, Kasese under the
 Rwenzoris and the Mount Elgon corridor, hazards a 9 km flood-extent product
-structurally under-sees. Extent risk and impact risk are two different maps.
+structurally under-sees. The two maps disagree because they measure
+different hazards, and both belong in the watch.
 
 ```{python}
 #| code-summary: "amplification map + EM-DAT impact geography"
@@ -1107,34 +1110,44 @@ plt.show()
 ```
 
 ```{python}
-#| code-summary: "district flood RPs, normal vs wet ONDs"
+#| code-summary: "district flooded area, normal vs wet ONDs"
+# No binary "flood event" definition survives the wetland districts (some part
+# of Kumi/Katakwi/Soroti shows water every OND), so the district table reports
+# the continuous quantity instead: the share of district area flooded.
 from exactextract import exact_extract
 from exactextract.raster import NumPyRasterSource
-srcs_amp = [NumPyRasterSource(b, xmin=yext[0], ymin=yext[2], xmax=yext[1], ymax=yext[3], name=nm, srs_wkt=cod2.crs.to_wkt())
-            for b, nm in [(p_wet.astype('float64'), 'pwet'), (p_oth.astype('float64'), 'poth')]]
-drp = exact_extract(srcs_amp, cod2, ["mean"], include_cols=["ADM2_PCODE", "ADM2_EN"], output="pandas")
-drp = drp.rename(columns={"pwet_mean": "p_wet", "poth_mean": "p_oth"})
-drp = drp.merge(fl[["pcode", "recurrence_any"]], left_on="ADM2_PCODE", right_on="pcode")
-drp["rp_all"] = 1 / drp["recurrence_any"].clip(lower=1e-9)
-drp["rp_wet"] = 1 / drp["p_wet"].clip(lower=1e-9)
-drp["rp_oth"] = 1 / drp["p_oth"].clip(lower=1e-9)
-tt = drp.nsmallest(12, "rp_all")[["ADM2_EN", "rp_oth", "rp_wet"]]
-tt.columns = ["District", "RP, normal ONDs", "RP, wettest-quintile ONDs"]
+yr_srcs = [NumPyRasterSource((ystack[i] >= 0.05).astype("float64"),
+                             xmin=yext[0], ymin=yext[2], xmax=yext[1], ymax=yext[3],
+                             name=f"y{y}", srs_wkt=cod2.crs.to_wkt())
+           for i, y in enumerate(yyears)]
+frac = exact_extract(yr_srcs, cod2, ["mean"], include_cols=["ADM2_PCODE", "ADM2_EN"], output="pandas")
+fmat = frac.set_index(["ADM2_PCODE", "ADM2_EN"])
+fmat.columns = [int(c.split("_")[0][1:]) for c in fmat.columns]
+wet_cols = [y for y in fmat.columns if y in wet6]
+oth_cols = [y for y in fmat.columns if y not in wet6]
+res = pd.DataFrame({
+    "typical": 100 * fmat[oth_cols].median(axis=1),
+    "wetq": 100 * fmat[wet_cols].median(axis=1),
+    "worst": 100 * fmat.max(axis=1),
+}).reset_index()
+tt = res.nlargest(12, "typical")[["ADM2_EN", "typical", "wetq", "worst"]]
+tt.columns = ["District", "Median area flooded, normal ONDs",
+              "Median, wettest-quintile ONDs", "Worst season on record"]
 (tt.style.hide(axis="index")
-   .format({"RP, normal ONDs": "{:.1f}", "RP, wettest-quintile ONDs": "{:.1f}"})
-   .set_caption("HISTORICAL flood frequency, not the 2026 outlook: the average number of "
-                "OND seasons between floods in each district (district mean of pixel flood "
-                "probability, inverted; Oct-Dec seasonal maxima only, 1998-2025). Lower = "
-                "floods more often. The 2026 relevance is indirect: with a record-wet OND "
-                "forecast, the wettest-quintile column is the operative climatology. None "
-                "of these districts is in the JIAF set."))
+   .format({"Median area flooded, normal ONDs": "{:.0f}%",
+            "Median, wettest-quintile ONDs": "{:.0f}%", "Worst season on record": "{:.0f}%"})
+   .set_caption("HISTORICAL flooding, not the 2026 outlook: share of each district's area "
+                "with OND seasonal-max SFED >= 0.05, 1998-2025. These wetland districts show "
+                "some water every season, so a binary flood/no-flood count is meaningless "
+                "here; the question is how much of the district floods. With a near-record "
+                "wet OND forecast, the wettest-quintile column is the operative climatology. "
+                "None of these districts is in the JIAF set."))
 ```
 
 ### The worst events on record, and what FloodScan saw
 
-Statistics summarize; events persuade. The four case studies below are the
-worst flood and landslide events in Uganda's EM-DAT record, chosen to span
-the two regimes. For each: the FloodScan flood extent over the event window
+The four case studies below are the worst flood and landslide events in
+Uganda's EM-DAT record, chosen to span the two regimes. For each: the FloodScan flood extent over the event window
 (left) with the districts named in the event record outlined, and the daily
 flood-extent series for the event's region (right) with that year against
 every other year, and 2026 so far for context. The two wetland-extent events
@@ -1206,7 +1219,7 @@ plt.show()
 
 What follows is interpretation built on the pieces above: an outlook, not a
 statistical result. Both levers point the same way this year. The ocean drivers are aligned:
-a strong El Niño **with** a positive IOD crossing its threshold in August
+a strong El Niño *with* a positive IOD crossing its threshold in August
 and forecast positive through December, the 2015/2023 configuration, which
 is what the 91st-98th percentile wet OND forecast in the section above is
 expressing. And the system's memory is loaded: 2023, 2024 and 2025 are the
@@ -1217,18 +1230,19 @@ supported, and the memory effect is suggestive at best. But the historically
 informative conditions are simultaneously present.
 
 The closest analogues sharpen the point. Ranking every August-issued SEAS5
-OND forecast within its own history, **2026 sits at the 93rd percentile, the
-wettest August-issued OND outlook in the record**. The three prior years
-issued at the 83rd percentile or above all flooded above the median: 2006
-(91st; Teso floods, EM-DAT: Kumi/Butaleja among eight districts affected),
+OND forecast in the 1981-2026 hindcast (46 issuances), **2026 is the fourth
+wettest, the 93rd percentile**. The only wetter ones are 1997 (the strongest
+El Niño + IOD combination on record) and 1994 (a major positive-IOD year),
+both before FloodScan coverage begins, and 2015. Within the FloodScan era,
+all four years issued at the 83rd percentile or above flooded above the
+median season: 2015 (96th), 2006 (91st; Teso floods, with Kumi and Butaleja
+among eight districts affected in EM-DAT), 2023 (89th; the largest
+El Niño-year extent, though EM-DAT records no OND event that season), and
 2019 (83rd; the deadliest OND in the record, with 104 deaths across the
-Rwenzori and Elgon events), and 2023 (89th; the largest El Niño-year extent,
-though EM-DAT records no OND event that season: extent and recorded impact
-are different things). The counterexamples run the other way: 2018 (33rd)
+Rwenzori and Elgon events). The counterexamples run the other way: 2018 (33rd)
 and 2025 (30th) were *not* forecast wet and flooded anyway, through a
-landslide and through system memory respectively. A wet August forecast has
-so far been sufficient-ish for a wet flood season; it has never been
-necessary. Practically: treat the
+landslide and through system memory respectively. In this record a wet August forecast has usually been followed by a wet
+flood season, but plenty of flooding has happened without one. Practically: treat the
 amplification map's Teso/Kyoga core and its expansion fringe as the
 flood-watch zone for Oct-Dec, watch Kasese and the Elgon corridor for the
 flash-flood and landslide impacts EM-DAT says actually kill, and re-check at
