@@ -42,7 +42,9 @@ the country team:
 
 It reads in four steps: where the season stands (observed), where it is
 heading (the forecast), what that timing means for crops and pasture, and who
-is exposed, ending in a priority readout.
+is exposed, ending in a priority readout. Flooding runs on different timing
+from the drought, so the flood outlook for the wet Oct-Dec season has its own
+section at the end.
 :::
 
 ```{python}
@@ -397,266 +399,9 @@ plt.tight_layout()
 plt.show()
 ```
 
-### The wet season's other face: where OND water becomes flooding
-
-The same issuance that forecasts the drought puts October, November and
-December at the 91st-98th wet percentile, so the flood question is part of
-the outlook. One honesty note before the map: **Oct-Dec is not Uganda's main
-flood season everywhere**. In the FloodScan record (daily SFED, 1998-2026)
-the national annual flood peak falls in April or May in 19 of 29 years,
-driven by the Northern (April peak) and Eastern (May peak) regions; November
-is a genuine secondary peak in the Central and Western regions. The map
-below shows OND because that is the window the current forecast puts wet,
-not because it is the only season that floods.
-
-```{python}
-#| code-summary: "monthly flood cycle by region"
-#| fig-cap: "Seasonal cycle of flooding: monthly mean FloodScan SFED per region, 1998-2026, scaled to each region's peak month. April-May dominates the north and east; November is the Central/Western secondary peak."
-fs1 = pd.read_sql("SELECT pcode, valid_date, mean FROM public.floodscan "
-                  "WHERE iso3='UGA' AND adm_level=1 AND band='SFED'",
-                  engine, parse_dates=["valid_date"])
-cyc = (fs1.assign(mo=fs1["valid_date"].dt.month)
-          .groupby(["pcode", "mo"])["mean"].mean().unstack())
-cyc = 100 * cyc.div(cyc.max(axis=1), axis=0)
-names1 = dict(zip(cod1["ADM1_PCODE"], cod1["ADM1_EN"]))
-fig, ax = plt.subplots(figsize=(9, 3.4))
-RC = {"UG1": "#1f69b3", "UG2": "#e69f00", "UG3": "#7f5619", "UG4": "#2a7e43"}
-for pc, row in cyc.iterrows():
-    ax.plot(row.index, row.values, color=RC[pc], lw=2, label=names1[pc])
-    pk = row.idxmax()
-    ax.plot(pk, row[pk], marker="o", ms=6, color=RC[pc])
-ax.axvspan(10, 12, color="#2a7e43", alpha=0.08)
-ax.text(11, 8, "OND", ha="center", fontsize=9, color="#2a7e43")
-ax.set_xticks(range(1, 13), [calendar.month_abbr[m] for m in range(1, 13)])
-ax.set_ylabel("% of region's peak month")
-ax.legend(frameon=False, fontsize=8.5, ncol=4, loc="lower center", bbox_to_anchor=(0.5, -0.38))
-ax.grid(color="#eef1f1", zorder=0)
-ax.spines[["top", "right"]].set_visible(False)
-ax.set_title("When Uganda floods: monthly mean SFED by region")
-plt.tight_layout()
-plt.show()
-```
-
-```{python}
-#| code-summary: "OND flood recurrence map"
-#| fig-cap: "Share of Oct-Dec seasons 1998-2025 with any meaningful flooding (seasonal max SFED >= 0.05, the team's noise floor), per ~9 km FloodScan pixel. Black outline: JIAF districts. Persistent wetland systems (Lake Kyoga fringes in Teso) recur most; this is historical recurrence, not a forecast."
-import rasterio as rio
-from rasterio.io import MemoryFile
-tif = stratus.load_blob_data(f"{UGA_DIR}/flood_ond_recurrence.tif", stage="dev")
-from rasterio.features import geometry_mask
-with MemoryFile(tif) as mf, mf.open() as ds:
-    rec = ds.read(1)
-    ext = [ds.bounds.left, ds.bounds.right, ds.bounds.bottom, ds.bounds.top]
-    inside = geometry_mask(cod1.geometry, out_shape=rec.shape,
-                           transform=ds.transform, invert=True, all_touched=True)
-fig, ax = plt.subplots(figsize=(9, 8))
-masked = np.ma.masked_where(~inside | (rec < 0.02), rec)
-im = ax.imshow(masked, extent=ext, cmap="Blues", vmin=0, vmax=0.6, zorder=2)
-cod2.boundary.plot(ax=ax, color=C_EDGE, linewidth=0.4, zorder=3)
-cod1.boundary.plot(ax=ax, color="#9db1b3", linewidth=1.1, zorder=3)
-cod2[cod2["ADM2_PCODE"].isin(jiaf_pcodes)].boundary.plot(ax=ax, color="#1d2021", linewidth=1.0, zorder=4)
-ax.set_xlim(29.4, 35.1); ax.set_ylim(-1.6, 4.4)
-cb = plt.colorbar(im, ax=ax, shrink=0.6)
-cb.set_label("share of OND seasons with flooding (SFED >= 0.05)")
-cb.ax.yaxis.set_major_formatter(lambda v, _: f"{100*v:.0f}%")
-ax.set_axis_off()
-ax.set_title("OND flood recurrence, 1998-2025 (FloodScan)")
-plt.tight_layout()
-plt.show()
-```
-
-```{python}
-#| code-summary: "highest-recurrence districts"
-fl = stratus.load_parquet_from_blob(f"{UGA_DIR}/flood_ond_adm2.parquet", stage="dev")
-fl = fl.merge(cod2[["ADM2_PCODE", "ADM2_EN"]], left_on="pcode", right_on="ADM2_PCODE")
-fl["jiaf"] = np.where(fl["pcode"].isin(jiaf_pcodes), "yes", "")
-top = fl.nlargest(12, "recurrence_any")[["ADM2_EN", "recurrence_any", "recurrence_substantial", "jiaf"]]
-top.columns = ["District", "Any flooding (share of OND seasons)", "Substantial (SFED >= 0.2)", "JIAF district"]
-(top.style.hide(axis="index")
-    .format({"Any flooding (share of OND seasons)": "{:.0%}", "Substantial (SFED >= 0.2)": "{:.0%}"}))
-```
-
-The recurrence concentrates in the **Teso / Lake Kyoga wetland systems**
-(Ngora 57%, Pallisa, Kumi, Katakwi, Soroti) and along the Butaleja lowlands,
-none of which are JIAF districts, but Katakwi and Soroti border Karamoja: a
-wet OND that recharges Karamoja's water points can simultaneously flood the
-districts just downstream of it. District-level FloodScan statistics below
-region level do not exist in the rasterstats DB for Uganda; these were
-computed from the daily COGs (`pipeline/compute_uga_flood_recurrence.py`).
-
-### Extreme seasons: the El Niño / IOD lens
-
-The 2026 OND season arrives with a strong El Niño and a positive Indian
-Ocean Dipole crossing its event threshold (weekly DMI +0.41 in early August,
-forecast to stay positive through December; [BOM](https://www.bom.gov.au/climate/iod/),
-[WMO](https://wmo.int/resources/publication-series/global-seasonal-climate-update/gscu-aso2026)).
-What did past seasons like that look like? The panels below show every
-El Niño OND in the FloodScan record plus 2025, each labeled with its
-observed OND-mean ONI (ENSO) and DMI (IOD) from NOAA
-(`pipeline/fetch_climate_indices.py`), its flooded area, and that area's
-empirical return period.
-
-```{python}
-#| code-summary: "extreme-year facet maps"
-#| fig-cap: "OND seasonal-max SFED in every El Niño OND of the record plus 2025, against the same color scale. Panel labels give the observed OND-mean ENSO (ONI) and IOD (DMI) indices, the flooded share of pixels (SFED >= 0.05), and its rank-based return period among the 28 seasons."
-from scipy.stats import spearmanr
-ytif = stratus.load_blob_data(f"{UGA_DIR}/flood_ond_yearly_max.tif", stage="dev")
-with MemoryFile(ytif) as mf, mf.open() as yds:
-    yyears = [int(d) for d in yds.descriptions]
-    ystack = yds.read()
-    yext = [yds.bounds.left, yds.bounds.right, yds.bounds.bottom, yds.bounds.top]
-    yin = geometry_mask(cod1.geometry, out_shape=ystack.shape[1:], transform=yds.transform, invert=True, all_touched=True)
-idxs = stratus.load_parquet_from_blob(f"{PROJECT_PREFIX}/raw/climate_indices/ond_indices.parquet", stage="dev").set_index("year")
-area_pct = pd.Series({y: 100 * np.nanmean((ystack[i] >= 0.05)[yin]) for i, y in enumerate(yyears)})
-area_rank = area_pct.rank(ascending=False)
-area_rp = (len(area_pct) + 1) / area_rank
-
-FACET_YEARS = [2002, 2006, 2009, 2015, 2018, 2019, 2023, 2025]
-fig, axes = plt.subplots(2, 4, figsize=(13, 8.2))
-for ax, yr in zip(axes.flat, FACET_YEARS):
-    arr = ystack[yyears.index(yr)]
-    m = np.ma.masked_where(~yin | (arr < 0.05), arr)
-    ax.imshow(np.where(yin, 0, np.nan), extent=yext, cmap="Greys", vmin=-1, vmax=3)
-    im = ax.imshow(m, extent=yext, cmap="Blues", vmin=0, vmax=0.6)
-    cod1.boundary.plot(ax=ax, color="#9db1b3", linewidth=0.6)
-    ax.set_xlim(29.4, 35.1); ax.set_ylim(-1.6, 4.4); ax.set_axis_off()
-    ax.set_title(f"{yr} | ONI {idxs.loc[yr,'oni_ond']:+.1f}  DMI {idxs.loc[yr,'dmi_ond']:+.1f}\n"
-                 f"flooded {area_pct[yr]:.1f}% (RP {area_rp[yr]:.0f} yr)", fontsize=9)
-fig.colorbar(im, ax=axes, shrink=0.5, label="OND seasonal max SFED")
-fig.suptitle("El Niño ONDs and 2025, on one scale", fontsize=12)
-plt.tight_layout()
-plt.show()
-```
-
-Read with the indices, the record splits cleanly. El Niño **with** a
-positive IOD (2006, 2018, 2019, 2023) or with extreme strength (2015)
-floods well above the median season; El Niño **without** the IOD (2002,
-2009) barely doubles a normal year. And the biggest flood of all, 2025,
-had *negative* indices: it rode the wet antecedent state left by 2023-24
-(high Kyoga and Victoria stands, saturated wetlands). Quantitatively, over
-the 28 seasons: the ocean drivers strongly set the season's *rainfall*
-(Spearman r of OND rain with DMI +0.63, with ONI +0.55), but rainfall alone
-only weakly sets the *flooded area* (r +0.28), and last season's flooded
-area is nearly as informative (lag-1 r +0.38). Flood extent in Uganda is
-rainfall plus memory: what the lakes and wetlands are already holding.
-
-```{python}
-#| code-summary: "rainfall vs flooded area, with drivers"
-#| fig-cap: "Each point is one OND season: national mean OND rainfall (x) against flooded area (y, log scale). Fill color: the observed IOD (DMI). Ringed points followed a top-5 flood season, the memory effect. Small-sample honesty: n=28, and only the rain-driver link is statistically firm."
-ond_rain = (e_all[e_all["mo"].isin([10, 11, 12])]
-            .groupby(["yr", "pcode"])["mm"].sum().groupby("yr").mean().loc[1998:2025])
-drv = pd.DataFrame({"rain": ond_rain, "area": area_pct, "dmi": idxs["dmi_ond"], "oni": idxs["oni_ond"]}).dropna()
-top5 = set(area_pct.nlargest(5).index)
-fig, ax = plt.subplots(figsize=(9, 5.6))
-sc = ax.scatter(drv["rain"], drv["area"], c=drv["dmi"], cmap="BrBG", vmin=-0.9, vmax=0.9,
-                s=110, edgecolor="#5b6b6d", linewidth=0.8, zorder=3)
-for yr, r in drv.iterrows():
-    if (yr - 1) in top5:
-        ax.scatter(r["rain"], r["area"], s=230, facecolor="none", edgecolor="#b8272d", linewidth=1.6, zorder=2)
-    ax.annotate(str(yr), (r["rain"], r["area"]), xytext=(5, 4), textcoords="offset points", fontsize=8)
-ax.set_yscale("log")
-ax.set_xlabel("OND rainfall, national mean of district totals (mm)")
-ax.set_ylabel("flooded area, % of pixels (log)")
-ax.yaxis.set_major_formatter(lambda v, _: f"{v:g}%")
-cb = plt.colorbar(sc, ax=ax); cb.set_label("OND-mean DMI (IOD)")
-ax.grid(color="#eef1f1", zorder=0)
-ax.spines[["top", "right"]].set_visible(False)
-ax.set_title("Wet drivers set the rain; the rain and the system's memory set the flood")
-plt.tight_layout()
-plt.show()
-```
-
-### Where flooding amplifies in wet seasons, and where impacts land
-
-Conditioning on the six wettest ONDs of the record (2002, 2006, 2011, 2015,
-2019, 2023) shows *where* a wet season changes the map, in return-period
-terms: in the Teso / Kyoga core the flood RP tightens from about one year in
-1.7 to one in 1.3, and a set of pixels that rarely flood otherwise gain more
-than 30 percentage points of flood probability, expanding the flooded
-footprint east and centre. The right panel shows the other half of the
-story from EM-DAT (2001-2024): *recorded impacts* concentrate not in the
-wetland core but in flash-flood and landslide terrain, Kasese under the
-Rwenzoris and the Mount Elgon corridor, hazards a 9 km flood-extent product
-structurally under-sees. Extent risk and impact risk are two different maps.
-
-```{python}
-#| code-summary: "amplification map + EM-DAT impact geography"
-#| fig-cap: "Left: extra probability of flooding (percentage points) in the six wettest ONDs versus all other seasons; the Teso/Kyoga core intensifies and the footprint spreads. Right: EM-DAT flood and wet mass-movement events 2001-2024 by district named in the event record (all months; 42 of 47 events could be located). JIAF districts outlined in black on both."
-wet6 = set(ond_rain.nlargest(6).index)
-wmask = np.array([y in wet6 for y in yyears])
-p_wet = np.nanmean(ystack[wmask] >= 0.05, axis=0)
-p_oth = np.nanmean(ystack[~wmask] >= 0.05, axis=0)
-amp = 100 * (p_wet - p_oth)
-
-from ocha_stratus import emdat
-em = emdat.load_emdat_from_blob(iso3="UGA")
-emf = em[em["Disaster Type"].isin(["Flood", "Mass movement (wet)"])].copy()
-_names = sorted(cod2["ADM2_EN"].tolist(), key=len, reverse=True)
-emf["districts"] = emf["Location"].map(
-    lambda L: [n for n in _names if isinstance(L, str) and n.lower() in L.lower()])
-mentions = (emf.explode("districts").dropna(subset=["districts"])
-            .groupby("districts").size().rename("events"))
-emap = cod2.merge(mentions, left_on="ADM2_EN", right_index=True, how="left")
-
-fig, (axA, axB) = plt.subplots(1, 2, figsize=(13, 6.8))
-mamp = np.ma.masked_where(~yin | (np.abs(amp) < 5), amp)
-axA.imshow(np.where(yin, 0, np.nan), extent=yext, cmap="Greys", vmin=-1, vmax=3)
-imA = axA.imshow(mamp, extent=yext, cmap="PuBu", vmin=0, vmax=60, zorder=2)
-cod1.boundary.plot(ax=axA, color="#9db1b3", linewidth=0.8, zorder=3)
-cod2[cod2["ADM2_PCODE"].isin(jiaf_pcodes)].boundary.plot(ax=axA, color="#1d2021", linewidth=0.8, zorder=4)
-axA.set_xlim(29.4, 35.1); axA.set_ylim(-1.6, 4.4); axA.set_axis_off()
-plt.colorbar(imA, ax=axA, shrink=0.55, label="extra flood probability in wet ONDs (pp)")
-axA.set_title("Amplification: wettest-quintile ONDs vs the rest", fontsize=11)
-
-emap.plot(ax=axB, column="events", cmap="OrRd", edgecolor=C_EDGE, linewidth=0.4,
-          missing_kwds={"color": "#f5f7f7"}, legend=True,
-          legend_kwds={"label": "EM-DAT flood / landslide events, 2001-2024", "shrink": 0.55})
-cod1.boundary.plot(ax=axB, color="#9db1b3", linewidth=0.8)
-cod2[cod2["ADM2_PCODE"].isin(jiaf_pcodes)].boundary.plot(ax=axB, color="#1d2021", linewidth=0.8)
-axB.set_xlim(29.4, 35.1); axB.set_ylim(-1.6, 4.4); axB.set_axis_off()
-axB.set_title("Recorded impacts: EM-DAT event mentions by district", fontsize=11)
-plt.tight_layout()
-plt.show()
-```
-
-```{python}
-#| code-summary: "district flood RPs, normal vs wet ONDs"
-from exactextract import exact_extract
-from exactextract.raster import NumPyRasterSource
-srcs_amp = [NumPyRasterSource(b, xmin=yext[0], ymin=yext[2], xmax=yext[1], ymax=yext[3], name=nm, srs_wkt=cod2.crs.to_wkt())
-            for b, nm in [(p_wet.astype('float64'), 'pwet'), (p_oth.astype('float64'), 'poth')]]
-drp = exact_extract(srcs_amp, cod2, ["mean"], include_cols=["ADM2_PCODE", "ADM2_EN"], output="pandas")
-drp = drp.rename(columns={"pwet_mean": "p_wet", "poth_mean": "p_oth"})
-drp = drp.merge(fl[["pcode", "recurrence_any"]], left_on="ADM2_PCODE", right_on="pcode")
-drp["rp_all"] = 1 / drp["recurrence_any"].clip(lower=1e-9)
-drp["rp_wet"] = 1 / drp["p_wet"].clip(lower=1e-9)
-drp["rp_oth"] = 1 / drp["p_oth"].clip(lower=1e-9)
-drp["jiaf"] = np.where(drp["ADM2_PCODE"].isin(jiaf_pcodes), "yes", "")
-tt = drp.nsmallest(12, "rp_all")[["ADM2_EN", "rp_all", "rp_oth", "rp_wet", "jiaf"]]
-tt.columns = ["District", "Flood RP, all years", "RP in normal ONDs", "RP in wettest-quintile ONDs", "JIAF"]
-(tt.style.hide(axis="index")
-   .format({"Flood RP, all years": "{:.1f} yr", "RP in normal ONDs": "{:.1f} yr",
-            "RP in wettest-quintile ONDs": "{:.1f} yr"})
-   .set_caption("District-mean flood return periods (district mean of pixel flood probability, inverted). "
-                "A wet-quintile OND roughly shifts the whole distribution one class wetter."))
-```
-
-### Reading 2026
-
-Both levers point the same way this year. The ocean drivers are aligned:
-a strong El Niño **with** a positive IOD crossing its threshold in August
-and forecast positive through December, the 2015/2023 configuration, which
-is what the 91st-98th percentile wet OND forecast in the section above is
-expressing. And the system's memory is loaded: 2023, 2024 and 2025 are the
-three largest flood ONDs of the 28-year record, so the wetlands and lakes
-enter this season high. Neither guarantees a flood year (n=28, and the
-rain-to-flood link is the weak step in the chain), but the historically
-informative conditions are simultaneously present. Practically: treat the
-amplification map's Teso/Kyoga core and its expansion fringe as the
-flood-watch zone for Oct-Dec, watch Kasese and the Elgon corridor for the
-flash-flood and landslide impacts EM-DAT says actually kill, and re-check at
-the September and October SEAS5 issuances alongside FloodScan itself once
-the rains start.
+The same issuance also forecasts a strongly wet Oct-Dec; the flood side of
+that story has [its own section](#flood-outlook-the-ond-wet-season) at the
+end of this document, so the drought reading here stays in one piece.
 
 ## Seasonal relevance: crops, pasture, and timing
 
@@ -1099,6 +844,286 @@ issues around the 5th of each month, so the September and October issuances
 (and the ERA5 observations that confirm how Aug-Sep actually landed) are the
 natural points to re-run this document and re-check the bimodal establishment
 window. The pipeline is parameterized, so a re-run is a render, not a rebuild.
+
+## Flood outlook: the OND wet season
+
+### When and where OND flooding recurs
+
+The same issuance that forecasts the drought puts October, November and
+December at the 91st-98th wet percentile, so the flood question is part of
+the outlook. One honesty note before the map: **Oct-Dec is not Uganda's main
+flood season everywhere**. In the FloodScan record (daily SFED, 1998-2026)
+the national annual flood peak falls in April or May in 19 of 29 years,
+driven by the Northern (April peak) and Eastern (May peak) regions; November
+is a genuine secondary peak in the Central and Western regions. The map
+below shows OND because that is the window the current forecast puts wet,
+not because it is the only season that floods.
+
+```{python}
+#| code-summary: "monthly flood cycle by region"
+#| fig-cap: "Seasonal cycle of flooding: monthly mean FloodScan SFED per region, 1998-2026, scaled to each region's peak month. April-May dominates the north and east; November is the Central/Western secondary peak."
+fs1 = pd.read_sql("SELECT pcode, valid_date, mean FROM public.floodscan "
+                  "WHERE iso3='UGA' AND adm_level=1 AND band='SFED'",
+                  engine, parse_dates=["valid_date"])
+cyc = (fs1.assign(mo=fs1["valid_date"].dt.month)
+          .groupby(["pcode", "mo"])["mean"].mean().unstack())
+cyc = 100 * cyc.div(cyc.max(axis=1), axis=0)
+names1 = dict(zip(cod1["ADM1_PCODE"], cod1["ADM1_EN"]))
+fig, ax = plt.subplots(figsize=(9, 3.4))
+RC = {"UG1": "#1f69b3", "UG2": "#e69f00", "UG3": "#7f5619", "UG4": "#2a7e43"}
+for pc, row in cyc.iterrows():
+    ax.plot(row.index, row.values, color=RC[pc], lw=2, label=names1[pc])
+    pk = row.idxmax()
+    ax.plot(pk, row[pk], marker="o", ms=6, color=RC[pc])
+ax.axvspan(10, 12, color="#2a7e43", alpha=0.08)
+ax.text(11, 8, "OND", ha="center", fontsize=9, color="#2a7e43")
+ax.set_xticks(range(1, 13), [calendar.month_abbr[m] for m in range(1, 13)])
+ax.set_ylabel("% of region's peak month")
+ax.legend(frameon=False, fontsize=8.5, ncol=4, loc="lower center", bbox_to_anchor=(0.5, -0.38))
+ax.grid(color="#eef1f1", zorder=0)
+ax.spines[["top", "right"]].set_visible(False)
+ax.set_title("When Uganda floods: monthly mean SFED by region")
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| code-summary: "OND flood recurrence map"
+#| fig-cap: "Share of Oct-Dec seasons 1998-2025 with any meaningful flooding (seasonal max SFED >= 0.05, the team's noise floor), per ~9 km FloodScan pixel. Black outline: JIAF districts. Persistent wetland systems (Lake Kyoga fringes in Teso) recur most; this is historical recurrence, not a forecast."
+import rasterio as rio
+from rasterio.io import MemoryFile
+tif = stratus.load_blob_data(f"{UGA_DIR}/flood_ond_recurrence.tif", stage="dev")
+from rasterio.features import geometry_mask
+with MemoryFile(tif) as mf, mf.open() as ds:
+    rec = ds.read(1)
+    ext = [ds.bounds.left, ds.bounds.right, ds.bounds.bottom, ds.bounds.top]
+    inside = geometry_mask(cod1.geometry, out_shape=rec.shape,
+                           transform=ds.transform, invert=True, all_touched=True)
+fig, ax = plt.subplots(figsize=(9, 8))
+masked = np.ma.masked_where(~inside | (rec < 0.02), rec)
+im = ax.imshow(masked, extent=ext, cmap="Blues", vmin=0, vmax=0.6, zorder=2)
+cod2.boundary.plot(ax=ax, color=C_EDGE, linewidth=0.4, zorder=3)
+cod1.boundary.plot(ax=ax, color="#9db1b3", linewidth=1.1, zorder=3)
+cod2[cod2["ADM2_PCODE"].isin(jiaf_pcodes)].boundary.plot(ax=ax, color="#1d2021", linewidth=1.0, zorder=4)
+ax.set_xlim(29.4, 35.1); ax.set_ylim(-1.6, 4.4)
+cb = plt.colorbar(im, ax=ax, shrink=0.6)
+cb.set_label("share of OND seasons with flooding (SFED >= 0.05)")
+cb.ax.yaxis.set_major_formatter(lambda v, _: f"{100*v:.0f}%")
+ax.set_axis_off()
+ax.set_title("OND flood recurrence, 1998-2025 (FloodScan)")
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| code-summary: "highest-recurrence districts"
+fl = stratus.load_parquet_from_blob(f"{UGA_DIR}/flood_ond_adm2.parquet", stage="dev")
+fl = fl.merge(cod2[["ADM2_PCODE", "ADM2_EN"]], left_on="pcode", right_on="ADM2_PCODE")
+fl["jiaf"] = np.where(fl["pcode"].isin(jiaf_pcodes), "yes", "")
+top = fl.nlargest(12, "recurrence_any")[["ADM2_EN", "recurrence_any", "recurrence_substantial", "jiaf"]]
+top.columns = ["District", "Any flooding (share of OND seasons)", "Substantial (SFED >= 0.2)", "JIAF district"]
+(top.style.hide(axis="index")
+    .format({"Any flooding (share of OND seasons)": "{:.0%}", "Substantial (SFED >= 0.2)": "{:.0%}"}))
+```
+
+The recurrence concentrates in the **Teso / Lake Kyoga wetland systems**
+(Ngora 57%, Pallisa, Kumi, Katakwi, Soroti) and along the Butaleja lowlands,
+none of which are JIAF districts, but Katakwi and Soroti border Karamoja: a
+wet OND that recharges Karamoja's water points can simultaneously flood the
+districts just downstream of it. District-level FloodScan statistics below
+region level do not exist in the rasterstats DB for Uganda; these were
+computed from the daily COGs (`pipeline/compute_uga_flood_recurrence.py`).
+
+### Extreme seasons: the El Niño / IOD lens
+
+The 2026 OND season arrives with a strong El Niño and a positive Indian
+Ocean Dipole crossing its event threshold (weekly DMI +0.41 in early August,
+forecast to stay positive through December; [BOM](https://www.bom.gov.au/climate/iod/),
+[WMO](https://wmo.int/resources/publication-series/global-seasonal-climate-update/gscu-aso2026)).
+What did past seasons like that look like? The panels below show every
+El Niño OND in the FloodScan record plus 2025, each labeled with its
+observed OND-mean ONI (ENSO) and DMI (IOD) from NOAA
+(`pipeline/fetch_climate_indices.py`), its flooded area, and that area's
+empirical return period.
+
+```{python}
+#| code-summary: "extreme-year facet maps"
+#| fig-cap: "OND seasonal-max SFED in every El Niño OND of the record plus 2025, against the same color scale. Panel labels give the observed OND-mean ENSO (ONI) and IOD (DMI) indices, the flooded share of pixels (SFED >= 0.05), and its rank-based return period among the 28 seasons."
+from scipy.stats import spearmanr
+ytif = stratus.load_blob_data(f"{UGA_DIR}/flood_ond_yearly_max.tif", stage="dev")
+with MemoryFile(ytif) as mf, mf.open() as yds:
+    yyears = [int(d) for d in yds.descriptions]
+    ystack = yds.read()
+    yext = [yds.bounds.left, yds.bounds.right, yds.bounds.bottom, yds.bounds.top]
+    yin = geometry_mask(cod1.geometry, out_shape=ystack.shape[1:], transform=yds.transform, invert=True, all_touched=True)
+idxs = stratus.load_parquet_from_blob(f"{PROJECT_PREFIX}/raw/climate_indices/ond_indices.parquet", stage="dev").set_index("year")
+area_pct = pd.Series({y: 100 * np.nanmean((ystack[i] >= 0.05)[yin]) for i, y in enumerate(yyears)})
+area_rank = area_pct.rank(ascending=False)
+area_rp = (len(area_pct) + 1) / area_rank
+
+FACET_YEARS = [2002, 2006, 2009, 2015, 2018, 2019, 2023, 2025]
+fig, axes = plt.subplots(2, 4, figsize=(13, 8.2))
+for ax, yr in zip(axes.flat, FACET_YEARS):
+    arr = ystack[yyears.index(yr)]
+    m = np.ma.masked_where(~yin | (arr < 0.05), arr)
+    ax.imshow(np.where(yin, 0, np.nan), extent=yext, cmap="Greys", vmin=-1, vmax=3)
+    im = ax.imshow(m, extent=yext, cmap="Blues", vmin=0, vmax=0.6)
+    cod1.boundary.plot(ax=ax, color="#9db1b3", linewidth=0.6)
+    ax.set_xlim(29.4, 35.1); ax.set_ylim(-1.6, 4.4); ax.set_axis_off()
+    ax.set_title(f"{yr} | ONI {idxs.loc[yr,'oni_ond']:+.1f}  DMI {idxs.loc[yr,'dmi_ond']:+.1f}\n"
+                 f"flooded {area_pct[yr]:.1f}% (RP {area_rp[yr]:.0f} yr)", fontsize=9)
+fig.colorbar(im, ax=axes, shrink=0.5, label="OND seasonal max SFED")
+fig.suptitle("El Niño ONDs and 2025, on one scale", fontsize=12)
+plt.tight_layout()
+plt.show()
+```
+
+::: {.callout-note}
+## What the statistics support, and what is our interpretation
+
+With 28 seasons, be explicit about which links are demonstrated and which are
+a reading of the record.
+
+**Statistically supported** (Spearman unless noted): the ocean drivers set
+the season's *rainfall* — OND rain vs DMI r = +0.63 (p < 0.001), vs ONI
+r = +0.55 (p = 0.002) — and the wettest-quintile ONDs have larger flooded
+areas than the rest (Mann-Whitney one-sided p = 0.018).
+
+**Suggestive but not established**: the continuous rain-to-flooded-area
+relationship (r = +0.28, p = 0.14) and season-to-season persistence of
+flooded area (lag-1 r = +0.38, p = 0.053).
+
+**Not supported as direct links**: neither index predicts flooded area
+directly (area vs DMI r = +0.17, p = 0.40; vs ONI r = +0.31, p = 0.11). The
+chain runs through rainfall or not at all.
+
+**Interpretation, not tested**: the pattern that El Niño years flood more
+when a positive IOD co-occurs (2006, 2018, 2019, 2023) than without one
+(2002, 2009) — too few events to test; and the reading that 2025's record
+flood, with *negative* indices, reflects antecedent wetness from 2023-24
+(we used no lake-level data — that mechanism is inferred, not measured).
+:::
+
+```{python}
+#| code-summary: "rainfall vs flooded area, with drivers"
+#| fig-cap: "Each point is one OND season: national mean OND rainfall (x) against flooded area (y, log scale). Fill color: the observed IOD (DMI). Ringed points followed a top-5 flood season. n=28; the callout above says which of these relationships are statistically supported and which are interpretation."
+ond_rain = (e_all[e_all["mo"].isin([10, 11, 12])]
+            .groupby(["yr", "pcode"])["mm"].sum().groupby("yr").mean().loc[1998:2025])
+drv = pd.DataFrame({"rain": ond_rain, "area": area_pct, "dmi": idxs["dmi_ond"], "oni": idxs["oni_ond"]}).dropna()
+top5 = set(area_pct.nlargest(5).index)
+fig, ax = plt.subplots(figsize=(9, 5.6))
+sc = ax.scatter(drv["rain"], drv["area"], c=drv["dmi"], cmap="BrBG", vmin=-0.9, vmax=0.9,
+                s=110, edgecolor="#5b6b6d", linewidth=0.8, zorder=3)
+for yr, r in drv.iterrows():
+    if (yr - 1) in top5:
+        ax.scatter(r["rain"], r["area"], s=230, facecolor="none", edgecolor="#b8272d", linewidth=1.6, zorder=2)
+    ax.annotate(str(yr), (r["rain"], r["area"]), xytext=(5, 4), textcoords="offset points", fontsize=8)
+ax.set_yscale("log")
+ax.set_xlabel("OND rainfall, national mean of district totals (mm)")
+ax.set_ylabel("flooded area, % of pixels (log)")
+ax.yaxis.set_major_formatter(lambda v, _: f"{v:g}%")
+cb = plt.colorbar(sc, ax=ax); cb.set_label("OND-mean DMI (IOD)")
+ax.grid(color="#eef1f1", zorder=0)
+ax.spines[["top", "right"]].set_visible(False)
+ax.set_title("Wet drivers set the rain; the rain and the system's memory set the flood")
+plt.tight_layout()
+plt.show()
+```
+
+### Where flooding amplifies in wet seasons, and where impacts land
+
+Conditioning on the six wettest ONDs of the record (2002, 2006, 2011, 2015,
+2019, 2023) — a split with statistical support (the callout above) — shows
+*where* a wet season changes the map, in return-period terms: in the Teso / Kyoga core the flood RP tightens from about one year in
+1.7 to one in 1.3, and a set of pixels that rarely flood otherwise gain more
+than 30 percentage points of flood probability, expanding the flooded
+footprint east and centre. The right panel shows the other half of the
+story from EM-DAT (2001-2024): *recorded impacts* concentrate not in the
+wetland core but in flash-flood and landslide terrain, Kasese under the
+Rwenzoris and the Mount Elgon corridor, hazards a 9 km flood-extent product
+structurally under-sees. Extent risk and impact risk are two different maps.
+
+```{python}
+#| code-summary: "amplification map + EM-DAT impact geography"
+#| fig-cap: "Left: extra probability of flooding (percentage points) in the six wettest ONDs versus all other seasons; the Teso/Kyoga core intensifies and the footprint spreads. Right: EM-DAT flood and wet mass-movement events 2001-2024 by district named in the event record (all months; 42 of 47 events could be located). JIAF districts outlined in black on both."
+wet6 = set(ond_rain.nlargest(6).index)
+wmask = np.array([y in wet6 for y in yyears])
+p_wet = np.nanmean(ystack[wmask] >= 0.05, axis=0)
+p_oth = np.nanmean(ystack[~wmask] >= 0.05, axis=0)
+amp = 100 * (p_wet - p_oth)
+
+from ocha_stratus import emdat
+em = emdat.load_emdat_from_blob(iso3="UGA")
+emf = em[em["Disaster Type"].isin(["Flood", "Mass movement (wet)"])].copy()
+_names = sorted(cod2["ADM2_EN"].tolist(), key=len, reverse=True)
+emf["districts"] = emf["Location"].map(
+    lambda L: [n for n in _names if isinstance(L, str) and n.lower() in L.lower()])
+mentions = (emf.explode("districts").dropna(subset=["districts"])
+            .groupby("districts").size().rename("events"))
+emap = cod2.merge(mentions, left_on="ADM2_EN", right_index=True, how="left")
+
+fig, (axA, axB) = plt.subplots(1, 2, figsize=(13, 6.8))
+mamp = np.ma.masked_where(~yin | (np.abs(amp) < 5), amp)
+axA.imshow(np.where(yin, 0, np.nan), extent=yext, cmap="Greys", vmin=-1, vmax=3)
+imA = axA.imshow(mamp, extent=yext, cmap="PuBu", vmin=0, vmax=60, zorder=2)
+cod1.boundary.plot(ax=axA, color="#9db1b3", linewidth=0.8, zorder=3)
+cod2[cod2["ADM2_PCODE"].isin(jiaf_pcodes)].boundary.plot(ax=axA, color="#1d2021", linewidth=0.8, zorder=4)
+axA.set_xlim(29.4, 35.1); axA.set_ylim(-1.6, 4.4); axA.set_axis_off()
+plt.colorbar(imA, ax=axA, shrink=0.55, label="extra flood probability in wet ONDs (pp)")
+axA.set_title("Amplification: wettest-quintile ONDs vs the rest", fontsize=11)
+
+emap.plot(ax=axB, column="events", cmap="OrRd", edgecolor=C_EDGE, linewidth=0.4,
+          missing_kwds={"color": "#f5f7f7"}, legend=True,
+          legend_kwds={"label": "EM-DAT flood / landslide events, 2001-2024", "shrink": 0.55})
+cod1.boundary.plot(ax=axB, color="#9db1b3", linewidth=0.8)
+cod2[cod2["ADM2_PCODE"].isin(jiaf_pcodes)].boundary.plot(ax=axB, color="#1d2021", linewidth=0.8)
+axB.set_xlim(29.4, 35.1); axB.set_ylim(-1.6, 4.4); axB.set_axis_off()
+axB.set_title("Recorded impacts: EM-DAT event mentions by district", fontsize=11)
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| code-summary: "district flood RPs, normal vs wet ONDs"
+from exactextract import exact_extract
+from exactextract.raster import NumPyRasterSource
+srcs_amp = [NumPyRasterSource(b, xmin=yext[0], ymin=yext[2], xmax=yext[1], ymax=yext[3], name=nm, srs_wkt=cod2.crs.to_wkt())
+            for b, nm in [(p_wet.astype('float64'), 'pwet'), (p_oth.astype('float64'), 'poth')]]
+drp = exact_extract(srcs_amp, cod2, ["mean"], include_cols=["ADM2_PCODE", "ADM2_EN"], output="pandas")
+drp = drp.rename(columns={"pwet_mean": "p_wet", "poth_mean": "p_oth"})
+drp = drp.merge(fl[["pcode", "recurrence_any"]], left_on="ADM2_PCODE", right_on="pcode")
+drp["rp_all"] = 1 / drp["recurrence_any"].clip(lower=1e-9)
+drp["rp_wet"] = 1 / drp["p_wet"].clip(lower=1e-9)
+drp["rp_oth"] = 1 / drp["p_oth"].clip(lower=1e-9)
+drp["jiaf"] = np.where(drp["ADM2_PCODE"].isin(jiaf_pcodes), "yes", "")
+tt = drp.nsmallest(12, "rp_all")[["ADM2_EN", "rp_all", "rp_oth", "rp_wet", "jiaf"]]
+tt.columns = ["District", "Flood RP, all years", "RP in normal ONDs", "RP in wettest-quintile ONDs", "JIAF"]
+(tt.style.hide(axis="index")
+   .format({"Flood RP, all years": "{:.1f} yr", "RP in normal ONDs": "{:.1f} yr",
+            "RP in wettest-quintile ONDs": "{:.1f} yr"})
+   .set_caption("District-mean flood return periods (district mean of pixel flood probability, inverted). "
+                "A wet-quintile OND roughly shifts the whole distribution one class wetter."))
+```
+
+### Reading the 2026 flood season
+
+What follows is interpretation built on the pieces above — an outlook, not a
+statistical result. Both levers point the same way this year. The ocean drivers are aligned:
+a strong El Niño **with** a positive IOD crossing its threshold in August
+and forecast positive through December, the 2015/2023 configuration, which
+is what the 91st-98th percentile wet OND forecast in the section above is
+expressing. And the system's memory is loaded: 2023, 2024 and 2025 are the
+three largest flood ONDs of the 28-year record, so the wetlands and lakes
+enter this season high. Neither guarantees a flood year: the driver-to-rain
+step is statistically solid, the rain-to-flood step is only categorically
+supported, and the memory effect is suggestive at best. But the historically
+informative conditions are simultaneously present. Practically: treat the
+amplification map's Teso/Kyoga core and its expansion fringe as the
+flood-watch zone for Oct-Dec, watch Kasese and the Elgon corridor for the
+flash-flood and landslide impacts EM-DAT says actually kill, and re-check at
+the September and October SEAS5 issuances alongside FloodScan itself once
+the rains start.
+
 
 ## Method notes & caveats
 
