@@ -498,7 +498,11 @@ against the calendar above, that means the growth-stage failure is real in
 **Karamoja** (June-July is the core of its single wet season) and for the **Eastern
 zone's long-cycle maize** (grain-fill through June-July at the 0th-4th
 percentile), while **West Nile's** crop mostly grew under near-normal rain and
-met the record dry at harvest, which damages less. The forward-looking risk
+met the record dry at harvest, which damages less. Note also the shape of the
+Karamoja collapse: a very wet February-March (89th-98th percentile) would have
+encouraged early planting and an early pasture flush before April slid below
+median and June-July failed outright, a false-start season, which tends to
+cost farmers and herders more than one that is poor from the beginning. The forward-looking risk
 (the Aug-Sep forecast) falls on second-season establishment in the bimodal
 zones and on Karamoja's season tail.
 
@@ -985,8 +989,8 @@ With 28 seasons, be explicit about which links are demonstrated and which are
 a reading of the record.
 
 **Statistically supported** (Spearman unless noted): the ocean drivers set
-the season's *rainfall* — OND rain vs DMI r = +0.63 (p < 0.001), vs ONI
-r = +0.55 (p = 0.002) — and the wettest-quintile ONDs have larger flooded
+the season's *rainfall* (OND rain vs DMI r = +0.63, p < 0.001; vs ONI
+r = +0.55, p = 0.002), and the wettest-quintile ONDs have larger flooded
 areas than the rest (Mann-Whitney one-sided p = 0.018).
 
 **Suggestive but not established**: the continuous rain-to-flooded-area
@@ -1002,11 +1006,11 @@ index-to-flood pathway beyond rainfall.
 **Interpretation, not tested**: the pattern that El Niño years flood more
 when a positive IOD co-occurs. Descriptively, the four El Niño + IOD seasons
 (2006, 2018, 2019, 2023) averaged 4.9% flooded (median 3.8%) against 3.2%
-(median 2.9%) in the five El Niño-only seasons — but the split is not clean:
+(median 2.9%) in the five El Niño-only seasons. The split is not clean:
 the El Niño-only group contains 2015 (5.9%), and the biggest floods of all
 (2024, 2025) sit in the neither-driver group. Read it as a lean, not a rule.
 
-**Also interpretation — why 2025 flooded on little rain**: two candidate
+**Also interpretation, on why 2025 flooded on little rain**: two candidate
 mechanisms, neither measured here. *Antecedent wetness*: 2023-24 were the
 second- and third-largest flood ONDs, so the system entered 2025 wet.
 *Regulation and channel state*: Lake Victoria's only outlet is the managed
@@ -1016,7 +1020,7 @@ years, and papyrus "floating islands" have blocked the Kyoga outlet before
 ([Monitor](https://www.monitor.co.ug/uganda/news/national/floods-blamed-on-uganda-s-policy-on-releasing-l-victoria-water-1891212),
 [EACCR](http://www.eaccr.org/rising-water-levels-lake-victoria-and-nile-system-uganda)).
 One spatial clue from our own data: only 18% of 2025's flooded pixels lie in
-the recurrent Kyoga/wetland core (2019: 40%) — the 2023-25 floods spread far
+the recurrent Kyoga/wetland core (2019: 40%). The 2023-25 floods spread far
 beyond the lake system, which fits broad antecedent wetness better than a
 purely lake-stage or dam-release story, without excluding either as a
 contributor. Settling this needs lake-level and discharge data we have not
@@ -1052,7 +1056,7 @@ plt.show()
 ### Where flooding amplifies in wet seasons, and where impacts land
 
 Conditioning on the six wettest ONDs of the record (2002, 2006, 2011, 2015,
-2019, 2023) — a split with statistical support (the callout above) — shows
+2019, 2023), a split with statistical support (the callout above), shows
 *where* a wet season changes the map, in return-period terms: in the Teso / Kyoga core the flood RP tightens from about one year in
 1.7 to one in 1.3, and a set of pixels that rarely flood otherwise gain more
 than 30 percentage points of flood probability, expanding the flooded
@@ -1127,7 +1131,7 @@ tt.columns = ["District", "Flood RP in normal ONDs", "Flood RP in wettest-quinti
 
 ### Reading the 2026 flood season
 
-What follows is interpretation built on the pieces above — an outlook, not a
+What follows is interpretation built on the pieces above: an outlook, not a
 statistical result. Both levers point the same way this year. The ocean drivers are aligned:
 a strong El Niño **with** a positive IOD crossing its threshold in August
 and forecast positive through December, the 2015/2023 configuration, which
@@ -1140,13 +1144,13 @@ supported, and the memory effect is suggestive at best. But the historically
 informative conditions are simultaneously present.
 
 The closest analogues sharpen the point. Ranking every August-issued SEAS5
-OND forecast within its own history, **2026 sits at the 93rd percentile — the
+OND forecast within its own history, **2026 sits at the 93rd percentile, the
 wettest August-issued OND outlook in the record**. The three prior years
 issued at the 83rd percentile or above all flooded above the median: 2006
 (91st; Teso floods, EM-DAT: Kumi/Butaleja among eight districts affected),
-2019 (83rd; the deadliest OND in the record — 104 deaths across the
+2019 (83rd; the deadliest OND in the record, with 104 deaths across the
 Rwenzori and Elgon events), and 2023 (89th; the largest El Niño-year extent,
-though EM-DAT records no OND event that season — extent and recorded impact
+though EM-DAT records no OND event that season: extent and recorded impact
 are different things). The counterexamples run the other way: 2018 (33rd)
 and 2025 (30th) were *not* forecast wet and flooded anyway, through a
 landslide and through system memory respectively. A wet August forecast has
