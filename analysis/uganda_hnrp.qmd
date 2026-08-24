@@ -1408,7 +1408,7 @@ forecast has usually been followed by a wet flood season, but plenty of
 flooding has happened without one. Practically: treat the
 amplification map's Teso/Kyoga core and its expansion fringe as the
 flood-watch zone for Oct-Dec, watch Kasese and the Elgon corridor for the
-flash-flood and landslide impacts EM-DAT says actually kill, and re-check at
+flash-flood and landslide impacts EM-DAT says cause fatalities, and re-check at
 the September and October SEAS5 issuances alongside FloodScan itself once
 the rains start.
 
