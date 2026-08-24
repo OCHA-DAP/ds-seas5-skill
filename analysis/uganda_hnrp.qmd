@@ -397,6 +397,93 @@ plt.tight_layout()
 plt.show()
 ```
 
+### The wet season's other face: where OND water becomes flooding
+
+The same issuance that forecasts the drought puts October, November and
+December at the 91st-98th wet percentile, so the flood question is part of
+the outlook. One honesty note before the map: **Oct-Dec is not Uganda's main
+flood season everywhere**. In the FloodScan record (daily SFED, 1998-2026)
+the national annual flood peak falls in April or May in 19 of 29 years,
+driven by the Northern (April peak) and Eastern (May peak) regions; November
+is a genuine secondary peak in the Central and Western regions. The map
+below shows OND because that is the window the current forecast puts wet,
+not because it is the only season that floods.
+
+```{python}
+#| code-summary: "monthly flood cycle by region"
+#| fig-cap: "Seasonal cycle of flooding: monthly mean FloodScan SFED per region, 1998-2026, scaled to each region's peak month. April-May dominates the north and east; November is the Central/Western secondary peak."
+fs1 = pd.read_sql("SELECT pcode, valid_date, mean FROM public.floodscan "
+                  "WHERE iso3='UGA' AND adm_level=1 AND band='SFED'",
+                  engine, parse_dates=["valid_date"])
+cyc = (fs1.assign(mo=fs1["valid_date"].dt.month)
+          .groupby(["pcode", "mo"])["mean"].mean().unstack())
+cyc = 100 * cyc.div(cyc.max(axis=1), axis=0)
+names1 = dict(zip(cod1["ADM1_PCODE"], cod1["ADM1_EN"]))
+fig, ax = plt.subplots(figsize=(9, 3.4))
+RC = {"UG1": "#1f69b3", "UG2": "#e69f00", "UG3": "#7f5619", "UG4": "#2a7e43"}
+for pc, row in cyc.iterrows():
+    ax.plot(row.index, row.values, color=RC[pc], lw=2, label=names1[pc])
+    pk = row.idxmax()
+    ax.plot(pk, row[pk], marker="o", ms=6, color=RC[pc])
+ax.axvspan(10, 12, color="#2a7e43", alpha=0.08)
+ax.text(11, 8, "OND", ha="center", fontsize=9, color="#2a7e43")
+ax.set_xticks(range(1, 13), [calendar.month_abbr[m] for m in range(1, 13)])
+ax.set_ylabel("% of region's peak month")
+ax.legend(frameon=False, fontsize=8.5, ncol=4, loc="lower center", bbox_to_anchor=(0.5, -0.38))
+ax.grid(color="#eef1f1", zorder=0)
+ax.spines[["top", "right"]].set_visible(False)
+ax.set_title("When Uganda floods: monthly mean SFED by region")
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| code-summary: "OND flood recurrence map"
+#| fig-cap: "Share of Oct-Dec seasons 1998-2025 with any meaningful flooding (seasonal max SFED >= 0.05, the team's noise floor), per ~9 km FloodScan pixel. Black outline: JIAF districts. Persistent wetland systems (Lake Kyoga fringes in Teso) recur most; this is historical recurrence, not a forecast."
+import rasterio as rio
+from rasterio.io import MemoryFile
+tif = stratus.load_blob_data(f"{UGA_DIR}/flood_ond_recurrence.tif", stage="dev")
+from rasterio.features import geometry_mask
+with MemoryFile(tif) as mf, mf.open() as ds:
+    rec = ds.read(1)
+    ext = [ds.bounds.left, ds.bounds.right, ds.bounds.bottom, ds.bounds.top]
+    inside = geometry_mask(cod1.geometry, out_shape=rec.shape,
+                           transform=ds.transform, invert=True, all_touched=True)
+fig, ax = plt.subplots(figsize=(9, 8))
+masked = np.ma.masked_where(~inside | (rec < 0.02), rec)
+im = ax.imshow(masked, extent=ext, cmap="Blues", vmin=0, vmax=0.6, zorder=2)
+cod2.boundary.plot(ax=ax, color=C_EDGE, linewidth=0.4, zorder=3)
+cod1.boundary.plot(ax=ax, color="#9db1b3", linewidth=1.1, zorder=3)
+cod2[cod2["ADM2_PCODE"].isin(jiaf_pcodes)].boundary.plot(ax=ax, color="#1d2021", linewidth=1.0, zorder=4)
+ax.set_xlim(29.4, 35.1); ax.set_ylim(-1.6, 4.4)
+cb = plt.colorbar(im, ax=ax, shrink=0.6)
+cb.set_label("share of OND seasons with flooding (SFED >= 0.05)")
+cb.ax.yaxis.set_major_formatter(lambda v, _: f"{100*v:.0f}%")
+ax.set_axis_off()
+ax.set_title("OND flood recurrence, 1998-2025 (FloodScan)")
+plt.tight_layout()
+plt.show()
+```
+
+```{python}
+#| code-summary: "highest-recurrence districts"
+fl = stratus.load_parquet_from_blob(f"{UGA_DIR}/flood_ond_adm2.parquet", stage="dev")
+fl = fl.merge(cod2[["ADM2_PCODE", "ADM2_EN"]], left_on="pcode", right_on="ADM2_PCODE")
+fl["jiaf"] = np.where(fl["pcode"].isin(jiaf_pcodes), "yes", "")
+top = fl.nlargest(12, "recurrence_any")[["ADM2_EN", "recurrence_any", "recurrence_substantial", "jiaf"]]
+top.columns = ["District", "Any flooding (share of OND seasons)", "Substantial (SFED >= 0.2)", "JIAF district"]
+(top.style.hide(axis="index")
+    .format({"Any flooding (share of OND seasons)": "{:.0%}", "Substantial (SFED >= 0.2)": "{:.0%}"}))
+```
+
+The recurrence concentrates in the **Teso / Lake Kyoga wetland systems**
+(Ngora 57%, Pallisa, Kumi, Katakwi, Soroti) and along the Butaleja lowlands,
+none of which are JIAF districts, but Katakwi and Soroti border Karamoja: a
+wet OND that recharges Karamoja's water points can simultaneously flood the
+districts just downstream of it. District-level FloodScan statistics below
+region level do not exist in the rasterstats DB for Uganda; these were
+computed from the daily COGs (`pipeline/compute_uga_flood_recurrence.py`).
+
 ## Seasonal relevance: crops, pasture, and timing
 
 Cropping seasons come from the JRC ASAP sub-national crop calendars (planting,
