@@ -928,11 +928,12 @@ plt.show()
 #| code-summary: "highest-recurrence districts"
 fl = stratus.load_parquet_from_blob(f"{UGA_DIR}/flood_ond_adm2.parquet", stage="dev")
 fl = fl.merge(cod2[["ADM2_PCODE", "ADM2_EN"]], left_on="pcode", right_on="ADM2_PCODE")
-fl["jiaf"] = np.where(fl["pcode"].isin(jiaf_pcodes), "yes", "")
-top = fl.nlargest(12, "recurrence_any")[["ADM2_EN", "recurrence_any", "recurrence_substantial", "jiaf"]]
-top.columns = ["District", "Any flooding (share of OND seasons)", "Substantial (SFED >= 0.2)", "JIAF district"]
+top = fl.nlargest(12, "recurrence_any")[["ADM2_EN", "recurrence_any", "recurrence_substantial"]]
+top.columns = ["District", "Any flooding (share of OND seasons)", "Substantial (SFED >= 0.2)"]
 (top.style.hide(axis="index")
-    .format({"Any flooding (share of OND seasons)": "{:.0%}", "Substantial (SFED >= 0.2)": "{:.0%}"}))
+    .format({"Any flooding (share of OND seasons)": "{:.0%}", "Substantial (SFED >= 0.2)": "{:.0%}"})
+    .set_caption("Pixel-mean OND flood recurrence by district, 1998-2025. None of these "
+                 "districts is in the JIAF set (see the note below the map)."))
 ```
 
 The recurrence concentrates in the **Teso / Lake Kyoga wetland systems**
@@ -971,7 +972,7 @@ area_rank = area_pct.rank(ascending=False)
 area_rp = (len(area_pct) + 1) / area_rank
 
 FACET_YEARS = [2002, 2006, 2009, 2015, 2018, 2019, 2023, 2025]
-fig, axes = plt.subplots(2, 4, figsize=(13, 8.2))
+fig, axes = plt.subplots(2, 4, figsize=(13, 8.2), layout="constrained")
 for ax, yr in zip(axes.flat, FACET_YEARS):
     arr = ystack[yyears.index(yr)]
     m = np.ma.masked_where(~yin | (arr < 0.05), arr)
@@ -983,7 +984,6 @@ for ax, yr in zip(axes.flat, FACET_YEARS):
                  f"flooded {area_pct[yr]:.1f}% (RP {area_rp[yr]:.0f} yr)", fontsize=9)
 fig.colorbar(im, ax=axes, shrink=0.5, label="OND seasonal max SFED")
 fig.suptitle("El Niño ONDs and 2025, on one scale", fontsize=12)
-plt.tight_layout()
 plt.show()
 ```
 
@@ -1067,14 +1067,22 @@ Conditioning on the six wettest ONDs of the record (2002, 2006, 2011, 2015,
 than 30 percentage points of flood probability, expanding the flooded
 footprint east and centre. The right panel shows the other half of the
 story from EM-DAT (2001-2024): *recorded impacts* concentrate not in the
-wetland core but in flash-flood and landslide terrain, Kasese under the
-Rwenzoris and the Mount Elgon corridor, hazards a 9 km flood-extent product
-structurally under-sees. The two maps disagree because they measure
-different hazards, and both belong in the watch.
+wetland core but in flash-flood and landslide terrain. Splitting the two
+types makes the geography sharper. Flood events (36 of 47) cluster on
+Kasese under the Rwenzoris (12 of its 13 events) and the towns of the Elgon
+foothills; landslide events (11 of 47) sit almost entirely on the Mount
+Elgon slopes (Bududa, Sironko, Mbale, Bulambuli) yet carry **765 of the
+1,266 recorded deaths, 60% of the total from a quarter of the events**.
+Neither shows up well in a 9 km flood-extent product. And a further reason
+extent and recorded impact diverge is exposure, not hazard: high rainfall
+that floods sparsely populated wetland generates extent but no impact
+record, which is exactly what 2023 looks like (the largest El Niño-year
+extent, no EM-DAT event). The two maps disagree because they measure
+different things, and both belong in the watch.
 
 ```{python}
 #| code-summary: "amplification map + EM-DAT impact geography"
-#| fig-cap: "Left: extra probability of flooding (percentage points) in the six wettest ONDs versus all other seasons; the Teso/Kyoga core intensifies and the footprint spreads. Right: EM-DAT flood and wet mass-movement events 2001-2024 by district named in the event record (all months; 42 of 47 events could be located). JIAF districts outlined in black on both."
+#| fig-cap: "Left: extra probability of flooding (percentage points) in the six wettest ONDs versus all other seasons; the Teso/Kyoga core intensifies and the footprint spreads. Right: EM-DAT recorded impacts 2001-2024 by district named in the event record (all months; 42 of 47 events located), split by type: flood events as the fill, wet mass-movement (landslide) events as triangles sized by count. JIAF districts outlined in black on both."
 wet6 = set(ond_rain.nlargest(6).index)
 wmask = np.array([y in wet6 for y in yyears])
 p_wet = np.nanmean(ystack[wmask] >= 0.05, axis=0)
@@ -1087,9 +1095,11 @@ emf = em[em["Disaster Type"].isin(["Flood", "Mass movement (wet)"])].copy()
 _names = sorted(cod2["ADM2_EN"].tolist(), key=len, reverse=True)
 emf["districts"] = emf["Location"].map(
     lambda L: [n for n in _names if isinstance(L, str) and n.lower() in L.lower()])
-mentions = (emf.explode("districts").dropna(subset=["districts"])
-            .groupby("districts").size().rename("events"))
-emap = cod2.merge(mentions, left_on="ADM2_EN", right_index=True, how="left")
+_x = emf.explode("districts").dropna(subset=["districts"])
+m_flood = _x[_x["Disaster Type"] == "Flood"].groupby("districts").size().rename("floods")
+m_slide = _x[_x["Disaster Type"] == "Mass movement (wet)"].groupby("districts").size().rename("slides")
+emap = (cod2.merge(m_flood, left_on="ADM2_EN", right_index=True, how="left")
+             .merge(m_slide, left_on="ADM2_EN", right_index=True, how="left"))
 
 fig, (axA, axB) = plt.subplots(1, 2, figsize=(13, 6.8))
 mamp = np.ma.masked_where(~yin | (np.abs(amp) < 5), amp)
@@ -1101,13 +1111,20 @@ axA.set_xlim(29.4, 35.1); axA.set_ylim(-1.6, 4.4); axA.set_axis_off()
 plt.colorbar(imA, ax=axA, shrink=0.55, label="extra flood probability in wet ONDs (pp)")
 axA.set_title("Amplification: wettest-quintile ONDs vs the rest", fontsize=11)
 
-emap.plot(ax=axB, column="events", cmap="OrRd", edgecolor=C_EDGE, linewidth=0.4,
+emap.plot(ax=axB, column="floods", cmap="OrRd", edgecolor=C_EDGE, linewidth=0.4,
           missing_kwds={"color": "#f5f7f7"}, legend=True,
-          legend_kwds={"label": "EM-DAT flood / landslide events, 2001-2024", "shrink": 0.55})
+          legend_kwds={"label": "EM-DAT flood events, 2001-2024", "shrink": 0.55})
 cod1.boundary.plot(ax=axB, color="#9db1b3", linewidth=0.8)
 cod2[cod2["ADM2_PCODE"].isin(jiaf_pcodes)].boundary.plot(ax=axB, color="#1d2021", linewidth=0.8)
+sl = emap[emap["slides"].notna()].copy()
+sl["pt"] = sl.representative_point()
+axB.scatter([g.x for g in sl["pt"]], [g.y for g in sl["pt"]],
+            s=28 * sl["slides"], marker="^", facecolor="#1f2324",
+            edgecolor="white", linewidth=0.7, zorder=5,
+            label="landslide events (size = count)")
+axB.legend(loc="lower left", frameon=False, fontsize=8.5)
 axB.set_xlim(29.4, 35.1); axB.set_ylim(-1.6, 4.4); axB.set_axis_off()
-axB.set_title("Recorded impacts: EM-DAT event mentions by district", fontsize=11)
+axB.set_title("Recorded impacts: floods (fill) vs landslides (triangles)", fontsize=11)
 plt.tight_layout()
 plt.show()
 ```
@@ -1288,9 +1305,11 @@ the rains start.
   the drought side. Climate indices are OND means of NOAA PSL's DMI (HadISST)
   and ONI series, stored at `raw/climate_indices/` for reproducibility. EM-DAT
   events are located by matching district names in the Location text (42 of 47
-  matched); EM-DAT under-records slow wetland inundation and its reporting
-  density grows over time, so event counts are a geography of recorded
-  impacts, not a hazard climatology.
+  matched); flood and wet mass-movement (landslide) events are analyzed as
+  separate types. EM-DAT under-records slow wetland inundation, records no
+  impact where flooding meets no people, and its reporting density grows
+  over time, so event counts are a geography of recorded impacts, not a
+  hazard climatology.
 - Terego (created 2020) is not in the CODAB vintage: its rows keep their own
   people figures but inherit UG3072 (Arua)'s forecast; "Madi-Okollo & Terego"
   inherits UG3084 (Madi Okollo).
