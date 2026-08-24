@@ -13,6 +13,8 @@ Writes (dev blob):
       band 3: mean seasonal-max SFED
   {PROJECT_PREFIX}/processed/uga/flood_ond_adm2.parquet
       per-district exactextract means of the three layers
+  {PROJECT_PREFIX}/processed/uga/flood_ond_yearly_max.tif
+      one band per season (band description = year): per-pixel OND max SFED
 
 Run:  uv run python pipeline/compute_uga_flood_recurrence.py
 """
@@ -44,6 +46,7 @@ THRESH_ANY, THRESH_SUB = 0.05, 0.20
 DATE_RE = re.compile(r"aer_area_300s_v(\d{4})-(\d{2})-(\d{2})_v05r01\.tif$")
 
 OUT_TIF = f"{PROJECT_PREFIX}/processed/uga/flood_ond_recurrence.tif"
+OUT_YEARLY = f"{PROJECT_PREFIX}/processed/uga/flood_ond_yearly_max.tif"
 OUT_PARQUET = f"{PROJECT_PREFIX}/processed/uga/flood_ond_adm2.parquet"
 
 
@@ -107,6 +110,16 @@ def main() -> None:
             dst.set_band_description(i, desc)
     stratus.upload_blob_data(buf.getvalue(), OUT_TIF, stage="dev")
     tqdm.write(f"Uploaded {OUT_TIF}")
+
+    years = sorted(season_max)
+    profile_y = dict(profile, count=len(years))
+    buf_y = io.BytesIO()
+    with rasterio.open(buf_y, "w", **profile_y) as dst:
+        for i, y in enumerate(years, 1):
+            dst.write(season_max[y].astype("float32"), i)
+            dst.set_band_description(i, str(y))
+    stratus.upload_blob_data(buf_y.getvalue(), OUT_YEARLY, stage="dev")
+    tqdm.write(f"Uploaded {OUT_YEARLY} ({len(years)} bands)")
 
     cod2 = codab.load_codab_from_blob("uga", admin_level=2)
     srcs = [NumPyRasterSource(b, xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax,
