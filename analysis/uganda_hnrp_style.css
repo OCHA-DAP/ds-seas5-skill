@@ -43,3 +43,10 @@ details > summary { color:var(--n7); font-size:.85em; }
  * their semantic colors. */
 div.callout-note.callout { border-left-color:var(--b5); }
 div.callout-note .callout-header { background:var(--b05); color:var(--b7); }
+
+/* Figures must never force horizontal scrolling: scale to the text column. */
+.cell-output-display img, figure img, .quarto-figure img {
+  max-width: 100% !important;
+  height: auto !important;
+}
+.cell-output-display, .quarto-figure { overflow-x: hidden; }
