@@ -1119,14 +1119,87 @@ drp["rp_all"] = 1 / drp["recurrence_any"].clip(lower=1e-9)
 drp["rp_wet"] = 1 / drp["p_wet"].clip(lower=1e-9)
 drp["rp_oth"] = 1 / drp["p_oth"].clip(lower=1e-9)
 tt = drp.nsmallest(12, "rp_all")[["ADM2_EN", "rp_oth", "rp_wet"]]
-tt.columns = ["District", "Flood RP in normal ONDs", "Flood RP in wettest-quintile ONDs"]
+tt.columns = ["District", "RP, normal ONDs", "RP, wettest-quintile ONDs"]
 (tt.style.hide(axis="index")
-   .format({"Flood RP in normal ONDs": "1 in {:.1f} seasons",
-            "Flood RP in wettest-quintile ONDs": "1 in {:.1f} seasons"})
-   .set_caption("District-mean OND flood return periods (district mean of pixel flood "
-                "probability, inverted). The unit is OND seasons - these RPs are computed "
-                "from Oct-Dec seasonal maxima only, not from year-round flooding. None of "
-                "these districts is in the JIAF set."))
+   .format({"RP, normal ONDs": "{:.1f}", "RP, wettest-quintile ONDs": "{:.1f}"})
+   .set_caption("HISTORICAL flood frequency, not the 2026 outlook: the average number of "
+                "OND seasons between floods in each district (district mean of pixel flood "
+                "probability, inverted; Oct-Dec seasonal maxima only, 1998-2025). Lower = "
+                "floods more often. The 2026 relevance is indirect: with a record-wet OND "
+                "forecast, the wettest-quintile column is the operative climatology. None "
+                "of these districts is in the JIAF set."))
+```
+
+### The worst events on record, and what FloodScan saw
+
+Statistics summarize; events persuade. The four case studies below are the
+worst flood and landslide events in Uganda's EM-DAT record, chosen to span
+the two regimes. For each: the FloodScan flood extent over the event window
+(left) with the districts named in the event record outlined, and the daily
+flood-extent series for the event's region (right) with that year against
+every other year, and 2026 so far for context. The two wetland-extent events
+(2007 Teso, Dec 2019) are exactly the regime a record-wet OND forecast makes
+more likely; the two landslide events (Bududa 2010, Mt Elgon 2024) barely
+register in flood extent, which is the strongest visual argument for
+watching the Elgon and Rwenzori slopes with something other than FloodScan.
+
+One live observation falls out of the green lines: **Eastern region's 2026
+flood extent has run near record levels all year even while Jun-Sep rainfall
+was the driest on record**. Flood extent there is following the system's
+stored water (the Kyoga wetlands after three record flood seasons), not the
+current season's rain, and that is the state the record-wet OND forecast will
+land on.
+
+```{python}
+#| code-summary: "EM-DAT case studies: maps + regional series"
+#| fig-cap: "Left column: maximum FloodScan SFED over each event window (padded a week each side); red outlines are the districts named in EM-DAT. Right column: daily region-mean SFED (7-day rolling mean, the team's convention) for the event's region; gray = every other year, brown = the event year, green = 2026 to date, red band = the event window."
+ev_tif = stratus.load_blob_data(f"{UGA_DIR}/flood_events_maxsfed.tif", stage="dev")
+ev_meta = stratus.load_parquet_from_blob(f"{UGA_DIR}/flood_events.parquet", stage="dev")
+with MemoryFile(ev_tif) as mf, mf.open() as eds:
+    ev_bands = {d: eds.read(i + 1) for i, d in enumerate(eds.descriptions)}
+    ev_ext = [eds.bounds.left, eds.bounds.right, eds.bounds.bottom, eds.bounds.top]
+    ev_in = geometry_mask(cod1.geometry, out_shape=eds.read(1).shape, transform=eds.transform, invert=True, all_touched=True)
+
+fs1d = fs1.copy()
+fs1d["doy"] = fs1d["valid_date"].dt.dayofyear
+fs1d["yr"] = fs1d["valid_date"].dt.year
+
+fig, axes = plt.subplots(len(ev_meta), 2, figsize=(11.5, 4.1 * len(ev_meta)),
+                         gridspec_kw={"width_ratios": [1, 1.25]})
+for i, ev in ev_meta.iterrows():
+    axM, axT = axes[i]
+    arr = ev_bands[ev["disno"]]
+    m = np.ma.masked_where(~ev_in | (arr < 0.05), arr)
+    axM.imshow(np.where(ev_in, 0, np.nan), extent=ev_ext, cmap="Greys", vmin=-1, vmax=3)
+    imm = axM.imshow(m, extent=ev_ext, cmap="Blues", vmin=0, vmax=0.8, zorder=2)
+    cod1.boundary.plot(ax=axM, color="#9db1b3", linewidth=0.6, zorder=3)
+    evd = cod2[cod2["ADM2_EN"].isin(ev["districts"].split(";"))]
+    evd.boundary.plot(ax=axM, color="#b8272d", linewidth=1.1, zorder=4)
+    axM.set_xlim(29.4, 35.1); axM.set_ylim(-1.6, 4.4); axM.set_axis_off()
+    axM.set_title(f"{ev['label']}\nmax SFED over event window", fontsize=9.5)
+
+    reg = fs1d[fs1d["pcode"] == ev["region"]]
+    pivd = reg.pivot_table(index="doy", columns="yr", values="mean").rolling(7, center=True, min_periods=1).mean()
+    ev_yr = pd.Timestamp(ev["start"]).year
+    for yr in pivd.columns:
+        if yr not in (ev_yr, 2026):
+            axT.plot(pivd.index, pivd[yr], color="#c4d0d1", lw=0.5, alpha=0.5)
+    axT.plot(pivd.index, pivd[ev_yr], color="#7f5619", lw=2.0, label=str(ev_yr))
+    if 2026 in pivd.columns:
+        axT.plot(pivd.index, pivd[2026], color="#1e795f", lw=2.0, label="2026 to date")
+    x0 = pd.Timestamp(ev["start"]).dayofyear; x1 = pd.Timestamp(ev["end"]).dayofyear
+    axT.axvspan(x0 - 1, x1 + 1, color="#b8272d", alpha=0.18)
+    axT.set_xticks([1, 60, 121, 182, 244, 305, 366],
+                   ["Jan", "Mar", "May", "Jul", "Sep", "Nov", "Jan"], fontsize=8)
+    axT.set_ylabel("region-mean SFED", fontsize=8.5)
+    axT.legend(frameon=False, fontsize=8.5, loc="upper left")
+    axT.grid(color="#eef1f1", zorder=0)
+    axT.spines[["top", "right"]].set_visible(False)
+    nm1 = {"UG1": "Central", "UG2": "Eastern", "UG3": "Northern", "UG4": "Western"}
+    axT.set_title(f"{nm1[ev['region']]} region daily flood extent | "
+                  f"{int(ev['deaths'])} deaths, {int(ev['affected']):,} affected", fontsize=9.5)
+plt.tight_layout()
+plt.show()
 ```
 
 ### Reading the 2026 flood season
