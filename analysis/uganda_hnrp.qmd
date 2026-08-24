@@ -1267,6 +1267,17 @@ ask how much the one says about the other. Two answers from the data:
   elevated bursts (median 79th, p = 0.019, n = 11) but their event-month
   totals were **not** significantly elevated (median 68th, p = 0.12).
 
+One reconciliation, because these numbers can look contradictory. Three
+different links are in play. *Rain-to-rain*: wet seasons contain bigger
+bursts (r = 0.73 pooled; 0.59-0.75 within each region), the strongest link
+here. *Rain-to-events*: recorded flood events cluster in wet months (median
+70th percentile, p = 0.003), so seasonal wetness does relate to the events
+people experience. *Rain-to-extent*: the season's rainfall only weakly
+predicts total flooded area (r = 0.28), because area is dominated by what
+the wetland systems already hold, as 2025 showed. Rainfall predicts bursts
+and relates to impact events; it is specifically the year-to-year *extent*
+that runs on stored water.
+
 Would monthly granularity help? Half of it would. Monthly totals are a
 better burst proxy than seasonal ones (monthly total vs that month's largest
 3-day rain: r = 0.82, against 0.73 for the season), and flooding inside OND
