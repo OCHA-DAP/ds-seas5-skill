@@ -74,3 +74,38 @@ main { padding:36px 44px 8px; }
 }
 /* Respect users who ask for less motion — the canvas paints one static frame. */
 @media (prefers-reduced-motion:reduce) { .hero canvas { animation:none; } }
+
+/* ── feature card (the app) ───────────────────────────────────────────────
+ * The app had been at / until the Pages restructure, so most people reaching
+ * this page were trying to reach IT. It gets its own row and a screenshot:
+ * someone who knows the tool recognises it far faster than they read a card.
+ *
+ * The image is a flex ITEM, not a background, so it keeps its intrinsic ratio
+ * and cannot crop the map's edges away at an unlucky viewport. */
+.grid-one { grid-template-columns:1fr; }
+.label-2 { margin-top:30px; }
+
+.k-feature { flex-direction:row; align-items:stretch; gap:0; padding:0; overflow:hidden; }
+.k-feature .body { display:flex; flex-direction:column; padding:18px 19px 14px;
+                   flex:1 1 48%; min-width:0; }
+/* .k p grows by default so the foot sits at the bottom of a text-only card. In
+ * the feature card the image already sets the height, so growing the paragraph
+ * just opens a gap between it and the line beneath. Let the text sit at the top
+ * and push the FOOT down instead. */
+.k-feature .body p { flex:0 0 auto; margin-bottom:10px; }
+.k-feature .shot { flex:1 1 52%; min-width:0; display:flex; align-items:flex-start;
+                   background:var(--n05); border-left:1px solid #eef1f1; }
+.k-feature .shot img { width:100%; height:auto; display:block; }
+/* The right-hand cell of the foot is a plain span, not the /path/ em — say where
+ * the reader has just come from, since that is the question they arrived with. */
+.k-feature .foot span { color:var(--n7); }
+
+@media (max-width:760px) {
+  /* Stack before the text column gets too narrow to read; the screenshot is
+     still worth showing, just beneath rather than beside. */
+  .k-feature { flex-direction:column; }
+  .k-feature .shot { border-left:0; border-top:1px solid #eef1f1; }
+}
+.k-feature .views { flex:0 0 auto; font-size:12px; color:var(--n7);
+                    line-height:1.7; margin-bottom:14px; }
+.k-feature .foot { margin-top:auto; }

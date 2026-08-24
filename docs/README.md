@@ -110,15 +110,18 @@ Notes:
   when the cube is fully recomputed; it can usually be skipped between forecasts.
 
 ## GitHub Pages
-Live at **https://ocha-dap.github.io/ds-seas5-skill/**.
+The app is live at **https://ocha-dap.github.io/ds-seas5-skill/app/** — under `/app/`, not at the
+root. The root serves the landing page in `pages/`, which links to the app and to the country
+analyses.
 
-Configured under **Settings → Pages → Deploy from a branch**. It is currently served from the
-`prob-rp-alerts` branch `/docs` (so it could go live before the PR merges). **After this PR merges
-to `main`, repoint Pages to `main` / `/docs`** (the feature branch will likely be deleted):
+Pages is built by the **`Deploy pages site to GitHub Pages` workflow**, not served from a branch:
+it rsyncs `pages/` to the site root and `docs/` to `/app/`. Do NOT repoint Pages at a branch — a
+`source[branch]` change would bypass the workflow and serve `docs/` at the root again, breaking
+every `/app/` and `/uganda/` link.
 
-```bash
-gh api -X PUT repos/OCHA-DAP/ds-seas5-skill/pages -f "source[branch]=main" -f "source[path]=/docs"
-```
+Old links to the root still work: `pages/index.html` forwards a recognised app hash or query
+(`/#hnrp`, `/?country=...`) to `/app/`, and `pages/cma/index.html` redirects `/cma/` to
+`/app/cma/`.
 
 ## Local preview
 ```bash
