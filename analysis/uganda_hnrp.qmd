@@ -51,8 +51,11 @@ section at the end.
 #| code-summary: "setup: imports, thresholds, loaders"
 import calendar
 import math
+import os
 import sys
 from pathlib import Path
+
+os.environ["TQDM_DISABLE"] = "1"   # tqdm widgets render as opaque bars in HTML
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -1050,7 +1053,7 @@ ax.yaxis.set_major_formatter(lambda v, _: f"{v:g}%")
 cb = plt.colorbar(sc, ax=ax); cb.set_label("OND-mean DMI (IOD)")
 ax.grid(color="#eef1f1", zorder=0)
 ax.spines[["top", "right"]].set_visible(False)
-ax.set_title("Wet drivers set the rain; the rain and the system's memory set the flood")
+ax.set_title("Wet drivers set the rain; the rain and stored water set the flood")
 plt.tight_layout()
 plt.show()
 ```
@@ -1222,11 +1225,13 @@ statistical result. Both levers point the same way this year. The ocean drivers 
 a strong El Niño *with* a positive IOD crossing its threshold in August
 and forecast positive through December, the 2015/2023 configuration, which
 is what the 91st-98th percentile wet OND forecast in the section above is
-expressing. And the system's memory is loaded: 2023, 2024 and 2025 are the
-three largest flood ONDs of the 28-year record, so the wetlands and lakes
-enter this season high. Neither guarantees a flood year: the driver-to-rain
-step is statistically solid, the rain-to-flood step is only categorically
-supported, and the memory effect is suggestive at best. But the historically
+expressing. And the landscape is measurably wet already: 2023, 2024 and
+2025 are the three largest flood ONDs of the FloodScan record (1998-2025),
+and 2026's January-August standing flood extent ranks among the top three
+of all 29 years in every region (Central 1st, Eastern and Western 2nd,
+Northern 3rd). Neither guarantees a flood year: the driver-to-rain step is
+statistically solid, the rain-to-flood step is only categorically
+supported, and year-to-year persistence is suggestive at best. But the historically
 informative conditions are simultaneously present.
 
 The closest analogues sharpen the point. Ranking every August-issued SEAS5
@@ -1239,10 +1244,13 @@ median season: 2015 (96th), 2006 (91st; Teso floods, with Kumi and Butaleja
 among eight districts affected in EM-DAT), 2023 (89th; the largest
 El Niño-year extent, though EM-DAT records no OND event that season), and
 2019 (83rd; the deadliest OND in the record, with 104 deaths across the
-Rwenzori and Elgon events). The counterexamples run the other way: 2018 (33rd)
-and 2025 (30th) were *not* forecast wet and flooded anyway, through a
-landslide and through system memory respectively. In this record a wet August forecast has usually been followed by a wet
-flood season, but plenty of flooding has happened without one. Practically: treat the
+Rwenzori and Elgon events). The counterexamples run the other way. 2018 (33rd) was not forecast wet,
+and its worst damage came from a rainfall-triggered landslide at Bududa, not
+from large flood extent. 2025 (30th) was not forecast wet either, yet
+produced the record extent: the water was already in the system from
+2023-24, not delivered by that season's rain. In this record a wet August
+forecast has usually been followed by a wet flood season, but plenty of
+flooding has happened without one. Practically: treat the
 amplification map's Teso/Kyoga core and its expansion fringe as the
 flood-watch zone for Oct-Dec, watch Kasese and the Elgon corridor for the
 flash-flood and landslide impacts EM-DAT says actually kill, and re-check at
