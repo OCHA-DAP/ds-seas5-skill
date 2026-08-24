@@ -629,7 +629,10 @@ The readout the app's tab exists for: where a bad drought forecast meets a
 large caseload. Districts below are the JIAF 2.0 Light districts joined to
 their forecast slot; the two operational units that share a CODAB polygon
 (Terego sits inside CODAB's Arua; "Madi-Okollo & Terego" maps to Madi Okollo)
-inherit that polygon's forecast.
+inherit that polygon's forecast. The last column adds OND flood-extent
+context: pixel-mean flood recurrence is low across the whole assessed set
+(0-6%, highest on the Albert Nile at Obongi) - the flood-extent hotspots lie
+outside the JIAF footprint, in the Teso wetlands (see the flood section).
 
 ```{python}
 #| code-summary: "combined district table"
@@ -640,6 +643,11 @@ comb = (j.groupby(["pcode", "sub_region", "district"], as_index=False)
           .merge(tgt.drop(columns=["adm2_name"]), on="pcode", how="left")
           .merge(rea, on="pcode", how="left"))
 comb["pct_normal"] = 100 * comb["fc_mm"] / comb["nrm_mm"]
+
+# OND flood-extent context for the assessed districts (pixel-mean recurrence;
+# low everywhere in the JIAF set - the extent hotspots lie outside it).
+flrec = stratus.load_parquet_from_blob(f"{UGA_DIR}/flood_ond_adm2.parquet", stage="dev")
+comb = comb.merge(flrec[["pcode", "recurrence_any"]], on="pcode", how="left")
 
 # How much of a normal year's rain falls in this trimester (days-weighted ERA5
 # climatology): the deficit matters more where the season carries the year.
@@ -657,15 +665,17 @@ def tri_share(pcode, tri):
 comb["tri_share"] = [tri_share(p, t) for p, t in zip(comb["pcode"], comb["trimester"])]
 out = comb[["sub_region", "district", "worst_sev", "joint_pin", "targeted", "reached",
             "cat", "tri_label", "drought_rp", "pct_normal", "tri_share", "r",
-            "fc_mm", "nrm_mm"]].copy()
+            "fc_mm", "nrm_mm", "recurrence_any"]].copy()
 out.columns = ["Sub-region", "District", "Severity", "Joint PiN", "Targeted", "Reached",
                "Forecast category", "Trimester", "Drought RP (yr)", "% of normal",
-               "Season share of annual rain", "Skill r", "Forecast (mm)", "Normal (mm)"]
+               "Season share of annual rain", "Skill r", "Forecast (mm)", "Normal (mm)",
+               "OND flood recurrence"]
 (out.sort_values(["% of normal", "Joint PiN"], ascending=[True, False])
     .style.hide(axis="index")
     .format({"Joint PiN": "{:,.0f}", "Targeted": "{:,.0f}", "Reached": "{:,.0f}",
              "Drought RP (yr)": "{:.1f}", "% of normal": "{:.0f}%",
-             "Season share of annual rain": "{:.0f}%", "Skill r": "{:.2f}"}, na_rep="—")
+             "Season share of annual rain": "{:.0f}%", "Skill r": "{:.2f}",
+             "OND flood recurrence": "{:.0%}"}, na_rep="—")
     .background_gradient(subset=["Severity"], cmap=ListedColormap(JIAF_COLORS), vmin=1, vmax=5))
 ```
 
