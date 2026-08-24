@@ -1267,11 +1267,25 @@ ask how much the one says about the other. Two answers from the data:
   elevated bursts (median 79th, p = 0.019, n = 11) but their event-month
   totals were **not** significantly elevated (median 68th, p = 0.12).
 
-So the seasonal outlook in this document speaks to extent-type flood risk,
-which tracks totals; it half-speaks to burst risk; and it says close to
-nothing about landslide timing. Watching the Elgon and Rwenzori slopes means
-short-range rainfall monitoring (IMERG and forecast bursts), not seasonal
-totals.
+Would monthly granularity help? Half of it would. Monthly totals are a
+better burst proxy than seasonal ones (monthly total vs that month's largest
+3-day rain: r = 0.82, against 0.73 for the season), and flooding inside OND
+is not uniform (November is the Central/Western climatological peak, and the
+15 OND events in EM-DAT split Oct 4 / Nov 7 / Dec 4). But the forecast
+cannot deliver that granularity: SEAS5's skill for individual OND months
+from the August issuance is r = 0.17-0.43 by region and month, mostly below
+the r >= 0.30 gate this document applies everywhere else, against 0.35-0.48
+for the OND lump - the trimester average exists precisely to cancel the
+month-level noise. The one exception is November in the Northern and Eastern
+regions (r = 0.42-0.43), which happens to be the flood-peak month.
+
+So the practical structure is a ladder of timescales. The trimester outlook
+says how wet the season is likely to be (extent-type flood risk, which
+tracks totals). The monthly climatology says when within the season flooding
+usually happens (November). Bursts and landslide timing belong to
+short-range rainfall monitoring (IMERG and weather-scale forecasts); no
+seasonal product reaches them. Watching the Elgon and Rwenzori slopes means
+the short end of that ladder, not seasonal totals.
 
 ```{python}
 #| code-summary: "burst vs total analysis"
