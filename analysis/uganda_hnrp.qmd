@@ -56,6 +56,18 @@ import sys
 from pathlib import Path
 
 os.environ["TQDM_DISABLE"] = "1"   # tqdm widgets render as opaque bars in HTML
+# DuckDB (used by the EM-DAT loader) pops a Jupyter progress widget that
+# renders as an opaque bar in the HTML; disable it on every new connection.
+import duckdb
+_duckdb_connect = duckdb.connect
+def _quiet_connect(*args, **kwargs):
+    con = _duckdb_connect(*args, **kwargs)
+    try:
+        con.execute("SET enable_progress_bar = false")
+    except duckdb.Error:
+        pass
+    return con
+duckdb.connect = _quiet_connect
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -1235,6 +1247,95 @@ plt.tight_layout()
 plt.show()
 ```
 
+### Totals are not intensity: what a seasonal forecast can and cannot see
+
+A seasonal forecast is a statement about three-month rainfall totals. Floods
+and landslides are triggered by rain at much shorter scales, so it is fair to
+ask how much the one says about the other. Two answers from the data:
+
+- **Totals carry real but incomplete information about bursts.** Across the
+  112 region-seasons of the IMERG record (daily rain, 1998-2025), the OND
+  total and the season's largest 1-day and 3-day rains correlate at
+  Spearman r = 0.70 and 0.73: about half the rank information is shared, and
+  half is not. A wet season makes big bursts likelier; it does not schedule
+  them.
+- **Events split exactly along that line.** Taking every located EM-DAT
+  event and asking how the two weeks before it ranked against the same
+  calendar window in all other years: flood events sat under elevated 3-day
+  bursts (median 73rd percentile, Wilcoxon p = 0.001, n = 36) *and* in
+  elevated-total months (median 70th, p = 0.003). Landslide events sat under
+  elevated bursts (median 79th, p = 0.019, n = 11) but their event-month
+  totals were **not** significantly elevated (median 68th, p = 0.12).
+
+So the seasonal outlook in this document speaks to extent-type flood risk,
+which tracks totals; it half-speaks to burst risk; and it says close to
+nothing about landslide timing. Watching the Elgon and Rwenzori slopes means
+short-range rainfall monitoring (IMERG and forecast bursts), not seasonal
+totals.
+
+```{python}
+#| code-summary: "burst vs total analysis"
+#| fig-cap: "Left: each point is one region-season; the OND total against the season's largest 3-day rain (IMERG, 1998-2025) - correlated (r = 0.73) but with wide spread at any given total. Right: rainfall conditions before each located EM-DAT event, as percentiles of the same calendar window in other years; flood events follow bursts and wet months, landslide events follow bursts only."
+imr = pd.read_sql("SELECT pcode, valid_date, mean FROM public.imerg WHERE iso3='UGA' AND adm_level=1",
+                  engine, parse_dates=["valid_date"])
+im0 = pd.read_sql("SELECT valid_date, mean FROM public.imerg WHERE iso3='UGA' AND adm_level=0",
+                  engine, parse_dates=["valid_date"]).set_index("valid_date")["mean"].sort_index()
+imr["yr"], imr["mo"] = imr["valid_date"].dt.year, imr["valid_date"].dt.month
+iond = imr[imr["mo"].isin([10, 11, 12]) & (imr["yr"] < 2026)].sort_values("valid_date")
+g = iond.groupby(["pcode", "yr"])
+tot = g["mean"].sum()
+mx3 = g["mean"].apply(lambda s: s.rolling(3).sum().max())
+
+ev = emf.dropna(subset=["Start Year", "Start Month"]).copy()
+ev["d"] = pd.to_datetime(dict(year=ev["Start Year"], month=ev["Start Month"], day=ev["Start Day"].fillna(15)))
+def _burst_pct(d, win=14, agg=3):
+    end = d + pd.Timedelta(days=2)
+    obs = im0.loc[end - pd.Timedelta(days=win):end].rolling(agg).sum().max()
+    hist = []
+    for y in range(1998, 2026):
+        try:
+            e2 = end.replace(year=y)
+        except ValueError:
+            continue
+        v = im0.loc[e2 - pd.Timedelta(days=win):e2].rolling(agg).sum().max()
+        if not np.isnan(v):
+            hist.append(v)
+    return 100 * np.mean(np.array(hist) < obs)
+im0m = im0.resample("MS").sum()
+def _mo_pct(d):
+    m = pd.Timestamp(d.year, d.month, 1)
+    same = im0m[im0m.index.month == d.month]
+    return 100 * np.mean(same.drop(index=m, errors="ignore") < im0m.get(m, np.nan))
+ev["burst"] = ev["d"].map(_burst_pct)
+ev["montot"] = ev["d"].map(_mo_pct)
+
+fig, (axL, axR) = plt.subplots(1, 2, figsize=(11, 4.6), gridspec_kw={"width_ratios": [1.1, 1]})
+RC = {"UG1": ("#1f69b3", "Central"), "UG2": ("#e69f00", "Eastern"), "UG3": ("#7f5619", "Northern"), "UG4": ("#2a7e43", "Western")}
+for pc, (c, nm) in RC.items():
+    axL.scatter(tot.loc[pc], mx3.loc[pc], s=26, color=c, alpha=0.8, label=nm)
+axL.set_xlabel("OND rainfall total (mm)"); axL.set_ylabel("largest 3-day rain in season (mm)")
+axL.legend(frameon=False, fontsize=8); axL.grid(color="#eef1f1", zorder=0)
+axL.spines[["top", "right"]].set_visible(False)
+axL.set_title("Totals vs bursts: related, far from identical (r = 0.73)", fontsize=10)
+
+rows = [("Flood", "burst"), ("Flood", "montot"), ("Mass movement (wet)", "burst"), ("Mass movement (wet)", "montot")]
+labels = ["floods:\n3-day burst", "floods:\nmonth total", "landslides:\n3-day burst", "landslides:\nmonth total"]
+for k, ((typ, col), lab) in enumerate(zip(rows, labels)):
+    yy = len(rows) - 1 - k
+    vals = ev.loc[ev["Disaster Type"] == typ, col].dropna()
+    axR.scatter(vals, np.full(len(vals), yy) + np.random.default_rng(7).uniform(-0.12, 0.12, len(vals)),
+                s=34, color="#1f69b3" if typ == "Flood" else "#1f2324", alpha=0.75)
+    axR.plot([vals.median()] * 2, [yy - 0.24, yy + 0.24], color="#b8272d", lw=2.4)
+axR.set_yticks(range(len(rows)), labels[::-1], fontsize=8.5)
+axR.axvline(50, color="#9db1b3", lw=1, ls="--")
+axR.set_xlabel("pre-event rainfall, percentile vs other years (red = median)")
+axR.set_xlim(0, 100); axR.grid(axis="x", color="#eef1f1", zorder=0)
+axR.spines[["top", "right"]].set_visible(False)
+axR.set_title("What preceded the recorded events", fontsize=10)
+plt.tight_layout()
+plt.show()
+```
+
 ### Reading the 2026 flood season
 
 What follows is interpretation built on the pieces above: an outlook, not a
@@ -1310,6 +1411,10 @@ the rains start.
   impact where flooding meets no people, and its reporting density grows
   over time, so event counts are a geography of recorded impacts, not a
   hazard climatology.
+- Intensity analysis: IMERG daily rainfall from public.imerg (adm0/adm1,
+  1998-2025); pre-event windows are the 14 days ending two days after the
+  EM-DAT start date, compared against the same calendar window in all other
+  years; monthly EM-DAT start dates without a day use the 15th.
 - Terego (created 2020) is not in the CODAB vintage: its rows keep their own
   people figures but inherit UG3072 (Arua)'s forecast; "Madi-Okollo & Terego"
   inherits UG3084 (Madi Okollo).
