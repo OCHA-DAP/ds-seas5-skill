@@ -994,14 +994,33 @@ relationship (r = +0.28, p = 0.14) and season-to-season persistence of
 flooded area (lag-1 r = +0.38, p = 0.053).
 
 **Not supported as direct links**: neither index predicts flooded area
-directly (area vs DMI r = +0.17, p = 0.40; vs ONI r = +0.31, p = 0.11). The
-chain runs through rainfall or not at all.
+directly (area vs DMI r = +0.17, p = 0.40; vs ONI r = +0.31, p = 0.11). In
+plain terms: if the ocean drivers matter for flooding here, the data say they
+matter only by making the season wetter; there is no sign of an additional
+index-to-flood pathway beyond rainfall.
 
 **Interpretation, not tested**: the pattern that El Niño years flood more
-when a positive IOD co-occurs (2006, 2018, 2019, 2023) than without one
-(2002, 2009) — too few events to test; and the reading that 2025's record
-flood, with *negative* indices, reflects antecedent wetness from 2023-24
-(we used no lake-level data — that mechanism is inferred, not measured).
+when a positive IOD co-occurs. Descriptively, the four El Niño + IOD seasons
+(2006, 2018, 2019, 2023) averaged 4.9% flooded (median 3.8%) against 3.2%
+(median 2.9%) in the five El Niño-only seasons — but the split is not clean:
+the El Niño-only group contains 2015 (5.9%), and the biggest floods of all
+(2024, 2025) sit in the neither-driver group. Read it as a lean, not a rule.
+
+**Also interpretation — why 2025 flooded on little rain**: two candidate
+mechanisms, neither measured here. *Antecedent wetness*: 2023-24 were the
+second- and third-largest flood ONDs, so the system entered 2025 wet.
+*Regulation and channel state*: Lake Victoria's only outlet is the managed
+release at Jinja (Nalubaale/Kiira, then Bujagali-Isimba-Kyoga), release
+policy has been publicly blamed for downstream flooding in earlier high-stand
+years, and papyrus "floating islands" have blocked the Kyoga outlet before
+([Monitor](https://www.monitor.co.ug/uganda/news/national/floods-blamed-on-uganda-s-policy-on-releasing-l-victoria-water-1891212),
+[EACCR](http://www.eaccr.org/rising-water-levels-lake-victoria-and-nile-system-uganda)).
+One spatial clue from our own data: only 18% of 2025's flooded pixels lie in
+the recurrent Kyoga/wetland core (2019: 40%) — the 2023-25 floods spread far
+beyond the lake system, which fits broad antecedent wetness better than a
+purely lake-stage or dam-release story, without excluding either as a
+contributor. Settling this needs lake-level and discharge data we have not
+used.
 :::
 
 ```{python}
@@ -1095,14 +1114,15 @@ drp = drp.merge(fl[["pcode", "recurrence_any"]], left_on="ADM2_PCODE", right_on=
 drp["rp_all"] = 1 / drp["recurrence_any"].clip(lower=1e-9)
 drp["rp_wet"] = 1 / drp["p_wet"].clip(lower=1e-9)
 drp["rp_oth"] = 1 / drp["p_oth"].clip(lower=1e-9)
-drp["jiaf"] = np.where(drp["ADM2_PCODE"].isin(jiaf_pcodes), "yes", "")
-tt = drp.nsmallest(12, "rp_all")[["ADM2_EN", "rp_all", "rp_oth", "rp_wet", "jiaf"]]
-tt.columns = ["District", "Flood RP, all years", "RP in normal ONDs", "RP in wettest-quintile ONDs", "JIAF"]
+tt = drp.nsmallest(12, "rp_all")[["ADM2_EN", "rp_oth", "rp_wet"]]
+tt.columns = ["District", "Flood RP in normal ONDs", "Flood RP in wettest-quintile ONDs"]
 (tt.style.hide(axis="index")
-   .format({"Flood RP, all years": "{:.1f} yr", "RP in normal ONDs": "{:.1f} yr",
-            "RP in wettest-quintile ONDs": "{:.1f} yr"})
-   .set_caption("District-mean flood return periods (district mean of pixel flood probability, inverted). "
-                "A wet-quintile OND roughly shifts the whole distribution one class wetter."))
+   .format({"Flood RP in normal ONDs": "1 in {:.1f} seasons",
+            "Flood RP in wettest-quintile ONDs": "1 in {:.1f} seasons"})
+   .set_caption("District-mean OND flood return periods (district mean of pixel flood "
+                "probability, inverted). The unit is OND seasons - these RPs are computed "
+                "from Oct-Dec seasonal maxima only, not from year-round flooding. None of "
+                "these districts is in the JIAF set."))
 ```
 
 ### Reading the 2026 flood season
@@ -1117,7 +1137,21 @@ three largest flood ONDs of the 28-year record, so the wetlands and lakes
 enter this season high. Neither guarantees a flood year: the driver-to-rain
 step is statistically solid, the rain-to-flood step is only categorically
 supported, and the memory effect is suggestive at best. But the historically
-informative conditions are simultaneously present. Practically: treat the
+informative conditions are simultaneously present.
+
+The closest analogues sharpen the point. Ranking every August-issued SEAS5
+OND forecast within its own history, **2026 sits at the 93rd percentile — the
+wettest August-issued OND outlook in the record**. The three prior years
+issued at the 83rd percentile or above all flooded above the median: 2006
+(91st; Teso floods, EM-DAT: Kumi/Butaleja among eight districts affected),
+2019 (83rd; the deadliest OND in the record — 104 deaths across the
+Rwenzori and Elgon events), and 2023 (89th; the largest El Niño-year extent,
+though EM-DAT records no OND event that season — extent and recorded impact
+are different things). The counterexamples run the other way: 2018 (33rd)
+and 2025 (30th) were *not* forecast wet and flooded anyway, through a
+landslide and through system memory respectively. A wet August forecast has
+so far been sufficient-ish for a wet flood season; it has never been
+necessary. Practically: treat the
 amplification map's Teso/Kyoga core and its expansion fringe as the
 flood-watch zone for Oct-Dec, watch Kasese and the Elgon corridor for the
 flash-flood and landslide impacts EM-DAT says actually kill, and re-check at
