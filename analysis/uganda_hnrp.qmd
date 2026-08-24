@@ -954,8 +954,9 @@ top = fl.nlargest(12, "recurrence_any")[["ADM2_EN", "recurrence_any", "recurrenc
 top.columns = ["District", "Any flooding (share of OND seasons)", "Substantial (SFED >= 0.2)"]
 (top.style.hide(axis="index")
     .format({"Any flooding (share of OND seasons)": "{:.0%}", "Substantial (SFED >= 0.2)": "{:.0%}"})
-    .set_caption("Pixel-mean OND flood recurrence by district, 1998-2025. None of these "
-                 "districts is in the JIAF set (see the note below the map)."))
+    .set_caption("The 12 most flood-recurrent of Uganda's 135 districts, ranked by "
+                 "pixel-mean OND flood recurrence, 1998-2025. Selected on the flood metric "
+                 "alone, country-wide; none is in the JIAF set (see the note below the map)."))
 ```
 
 The recurrence concentrates in the **Teso / Lake Kyoga wetland systems**
@@ -1178,7 +1179,8 @@ tt.columns = ["District", "Median area flooded, normal ONDs",
 (tt.style.hide(axis="index")
    .format({"Median area flooded, normal ONDs": "{:.0f}%",
             "Median, wettest-quintile ONDs": "{:.0f}%", "Worst season on record": "{:.0f}%"})
-   .set_caption("HISTORICAL flooding, not the 2026 outlook: share of each district's area "
+   .set_caption("The 12 districts with the largest typical flooded area, of Uganda's 135. "
+                "HISTORICAL flooding, not the 2026 outlook: share of each district's area "
                 "with OND seasonal-max SFED >= 0.05, 1998-2025. These wetland districts show "
                 "some water every season, so a binary flood/no-flood count is meaningless "
                 "here; the question is how much of the district floods. With a near-record "
