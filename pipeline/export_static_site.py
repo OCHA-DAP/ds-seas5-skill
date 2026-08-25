@@ -296,10 +296,18 @@ def main() -> None:
 
     pcode_to_iso3 = df.drop_duplicates("pcode").set_index("pcode")["iso3"].to_dict()
 
+    # Rows at this issued_month whose forecast is actually LAST year's vintage:
+    # when the pipeline runs before the current in-season ERA5 month lands in
+    # the DB, the in-season trimesters cannot update and keep the previous
+    # year's forecast (Uganda, Aug 2026: 2025's JJA/JAS next to 2026's ASO..DJF).
+    # Month-only selection would publish them as current — drop them instead.
+    stale_idx = set(iy.index[iy["_iy"] != global_max_iy])
+
     # Build per-iso3 per-trimester records (latest forecast only).
     data: dict[str, dict] = {}
     for tri in valid_tris:
         sub = df[(df["issued_month"] == issued_month) & (df["trimester"] == tri)]
+        sub = sub[~sub.index.isin(stale_idx)]
         for _, row in sub.iterrows():
             pc = row["pcode"]
             iso3 = pcode_to_iso3.get(pc)

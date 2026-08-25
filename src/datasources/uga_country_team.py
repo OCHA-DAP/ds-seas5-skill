@@ -17,6 +17,15 @@ Loaders return tidy district-level frames keyed by CODAB ADM2 pcode. Two JIAF
   A shared pcode only attaches the same forecast to both rows — people counts
   stay per-row, so nothing is double-counted; only a per-pcode choropleth sum
   would merge them (flagged by the `pcode_shared` column).
+
+  That safety argument covers FORECAST joins only. People-count joins across
+  workbooks must match by NAME, never by pcode: the reach workbooks use
+  post-split districts, so their "Arua" row lands on UG3072 — the same pcode
+  as JIAF "Terego" — and a pcode-keyed merge silently credits Arua's
+  targeted/reached to Terego (disjoint territories since the 2020 split).
+  The consumer (analysis/uganda_hnrp.qmd) joins reach by normalized district
+  name, with the single documented exception that the combined JIAF unit
+  "Madi-Okollo & Terego" takes the workbook's "Madi Okollo" row.
 """
 
 import io

@@ -1945,7 +1945,12 @@ def main() -> None:
         return fc, nrm
 
     # Per unit: the worst qualifying drought slot at the latest issuance.
-    sub = skill[skill["issued_month"] == issued_month].copy()
+    # Filter on the ACTUAL issued year too, never the month alone: when this
+    # runs before the current in-season ERA5 month has landed in the DB, the
+    # in-season trimesters at this issued_month still carry LAST year's
+    # forecast, and month-only selection mixes vintages (Uganda, Aug 2026:
+    # 2025's JJA/JAS rows rendered next to 2026's ASO..DJF).
+    sub = iy[(iy["issued_month"] == issued_month) & (iy["_iy"] == global_max_iy)].copy()
     sub = sub[sub.apply(lambda r: _tri_valid(TRIMESTERS[r["trimester"]], issued_month), axis=1)]
     records = []
     for pcode, g in sub.groupby("pcode"):

@@ -29,8 +29,9 @@ the Forecast × HNRP tab's methodology for Uganda, with supplementary data from
 the country team:
 
 - PiN and severity: *Uganda JIAF 2.0 Light - Data Collection (v5 census
-  baseline)*, sheets `1. Severity` and `2. PiN` (26 districts × host
-  community / refugee population groups).
+  baseline)*, sheets `1. Severity` and `2. PiN` (22 districts × host
+  community / refugee population groups; the raw sheets list 26 "District"
+  values, four of which are subtotal rows the loader drops).
 - Targeted and reached: *Gender-MAX Targeted / Achieved People* (2026-08-19),
   district-level maxima with gender and disability breakdowns.
 - Climate: the same SEAS5 / ERA5 sources the app uses. The region level comes
@@ -115,8 +116,12 @@ def worst_drought_slot(skill: pd.DataFrame, rainy_set: set) -> pd.DataFrame:
     iy = skill[skill["current_forecast_year"].notna()].copy()
     iy["_iy"] = iy.apply(_actual_issued_year, axis=1)
     by_month = iy.groupby("issued_month")["_iy"].max().astype(int)
-    issued_month = int(by_month[by_month == by_month.max()].index.max())
-    sub = skill[skill["issued_month"] == issued_month].copy()
+    issued_year = int(by_month.max())
+    issued_month = int(by_month[by_month == issued_year].index.max())
+    # Filter on the actual issued YEAR too, never the month alone: if the skill
+    # pipeline ran before the current in-season ERA5 month reached the DB, the
+    # in-season trimesters at this issued_month still carry LAST year's forecast.
+    sub = iy[(iy["issued_month"] == issued_month) & (iy["_iy"] == issued_year)].copy()
     sub = sub[sub.apply(lambda r: _tri_valid(TRIMESTERS[r["trimester"]], issued_month), axis=1)]
 
     def _mm(r):
@@ -147,7 +152,7 @@ def worst_drought_slot(skill: pd.DataFrame, rainy_set: set) -> pd.DataFrame:
                             lead=trimester_lead(issued_month, TRIMESTERS[r["trimester"]]),
                             drought_rp=float(r["forecast_rp"]), pct=float(pct), r=float(pr),
                             fc_mm=fc_mm, nrm_mm=nrm_mm)
-        row = dict(pcode=pcode, issued_month=issued_month)
+        row = dict(pcode=pcode, issued_month=issued_month, issued_year=issued_year)
         if best:
             row |= best
             row["cat"] = "strongly below normal" if best["drought_rp"] >= THRESHOLDS["vsev_rp"] \
@@ -184,8 +189,14 @@ era5_2["valid_date"] = pd.to_datetime(era5_2["valid_date"])
 fc2 = worst_drought_slot(skill2, rainy_from_era5(era5_2))
 
 issued = int(fc2["issued_month"].iloc[0])
-print(f"Latest issuance: {calendar.month_name[issued]} "
-      f"{int(skill2.loc[skill2['is_predictive'], 'current_forecast_year'].min())} | "
+issued_yr = int(fc2["issued_year"].iloc[0])
+if (issued, issued_yr) != (int(fc1["issued_month"].iloc[0]), int(fc1["issued_year"].iloc[0])):
+    raise ValueError(
+        f"adm1 and adm2 skill parquets disagree on the latest issuance: "
+        f"adm2 {calendar.month_name[issued]} {issued_yr} vs adm1 "
+        f"{calendar.month_name[int(fc1['issued_month'].iloc[0])]} {int(fc1['issued_year'].iloc[0])} "
+        f"— re-run the stale pipeline before rendering")
+print(f"Latest issuance: {calendar.month_name[issued]} {issued_yr} | "
       f"{len(fc2)} districts, {len(fc1)} regions")
 ```
 
@@ -199,17 +210,18 @@ against every year since 1981. Karamoja and West Nile sit at opposite ends
 of the range. **Karamoja has received
 41-54% of its normal season-to-date rain**, the driest or near-driest
 Apr-Jul on record in its districts, with the remaining season forecast at
-the 0th-2nd percentile. **West Nile has received 84-99% of normal**: the wet
+the 0th percentile. **West Nile has received 84-99% of normal**: the wet
 March banked most of the season's water early, so in accumulation terms its
 main season is close to normal and the record-dry June-July is a
 harvest-timing concern rather than a water-quantity failure. (Do not confuse
 this observed season-to-date figure with the forecast deficit map in the next
 section, which is the *forecast* for the worst upcoming slot.) The bimodal
-zones sit in between at roughly 65-99%.
+zones sit in between at roughly 74-100%. Throughout this section "normal"
+is the 1981-2025 mean season-to-date.
 
 ```{python}
 #| code-summary: "cumulative season curves by zone"
-#| fig-cap: "Cumulative rainfall over each zone's main-season window, zone mean of district series. Gray: every year 1981-2025; dashed: median year; brown: 2026 through July (the ERA5 record's edge). The percentage is 2026 season-to-date as a share of the normal season-to-date."
+#| fig-cap: "Cumulative rainfall over each zone's main-season window, zone mean of district series. Gray: every year 1981-2025; dashed: the 1981-2025 mean; brown: 2026 through July (the ERA5 record's edge). The percentage is 2026 season-to-date as a share of the normal (1981-2025 mean) season-to-date — the same basis as the district ranking below."
 cal = stratus.load_parquet_from_blob(f"{UGA_DIR}/asap_crop_calendar.parquet", stage="dev")
 dz = stratus.load_parquet_from_blob(f"{UGA_DIR}/asap_district_zones.parquet", stage="dev")
 zones = ["Karamoja", "West Nile", "Mid Northen", "Eastern", "Lake Albert Crescent",
@@ -238,11 +250,13 @@ for ax, zone in zip(axes.flat, zones):
     hist = cum.loc[cum.index < 2026]
     for _, row in hist.iterrows():
         ax.plot(mos, row.values, color="#c4d0d1", lw=0.6, alpha=0.6)
-    ax.plot(mos, hist.median(), color="#3f4748", lw=1.4, ls="--")
+    ax.plot(mos, hist.mean(), color="#3f4748", lw=1.4, ls="--")
     upto = [m for m in mos if m <= LATEST_OBS]
     if 2026 in cum.index and upto:
         ax.plot(upto, cum.loc[2026, upto], color="#7f5619", lw=2.2)
-        pct = 100 * cum.loc[2026, upto[-1]] / hist[upto[-1]].median()
+        # mean basis, matching the district ranking below (was median: the two
+        # figures silently used different definitions of "normal")
+        pct = 100 * cum.loc[2026, upto[-1]] / hist[upto[-1]].mean()
         ax.set_title(f"{zone}\n{pct:.0f}% of normal to date", fontsize=8)
     ax.set_xticks([mos[0], mos[-1]], [calendar.month_abbr[mos[0]], calendar.month_abbr[mos[-1]]], fontsize=7)
     ax.tick_params(axis='y', labelsize=7)
@@ -254,7 +268,7 @@ plt.show()
 
 ```{python}
 #| code-summary: "JIAF districts: season-to-date ranking"
-#| fig-cap: "Observed season-to-date rainfall as % of the normal season-to-date, per JIAF district over its zone's calendar window. Filled markers are districts having their driest season-to-date since 1981."
+#| fig-cap: "Observed season-to-date rainfall as % of the normal (1981-2025 mean) season-to-date, per JIAF district over its zone's calendar window. Filled markers are districts having their driest season-to-date since 1981."
 std_rows = []
 for (pc, dist, zone), gg in e_all[e_all["pcode"].isin(jiaf_pcodes)].groupby(["pcode", "district", "zone"]):
     m0, m1 = season_win[zone]
@@ -309,7 +323,7 @@ t.sort_values("Drought RP (yr)", ascending=False).style.hide(axis="index").forma
 
 ```{python}
 #| code-summary: "district drought map"
-#| fig-cap: "Worst qualifying drought slot per district, latest SEAS5 issuance, in the app's category palette. The black outline marks the 26 districts assessed in the JIAF 2.0 Light exercise (severity and PiN); other districts are climate context only."
+#| fig-cap: "Worst qualifying drought slot per district, latest SEAS5 issuance, in the app's category palette. The black outline marks the 22 districts assessed in the JIAF 2.0 Light exercise (severity and PiN); other districts are climate context only."
 g = cod2.merge(fc2, left_on="ADM2_PCODE", right_on="pcode", how="left")
 jiaf_pcodes = set(uct.load_jiaf_pin()["pcode"])
 
@@ -328,7 +342,7 @@ g.plot(ax=ax, color=g["color"], edgecolor=C_EDGE, linewidth=0.5)
 cod1.boundary.plot(ax=ax, color="#9db1b3", linewidth=1.2)
 g[g["ADM2_PCODE"].isin(jiaf_pcodes)].boundary.plot(ax=ax, color="#1d2021", linewidth=1.1)
 ax.set_axis_off()
-ax.set_title(f"SEAS5 drought signal by district, issued {calendar.month_name[issued]} 2026")
+ax.set_title(f"SEAS5 drought signal by district, issued {calendar.month_name[issued]} {issued_yr}")
 ax.legend(handles=[
     Patch(facecolor=C_DROUGHT_VSEV, edgecolor=C_EDGE, label=f"strongly below normal (RP ≥ {THRESHOLDS['vsev_rp']} yr)"),
     Patch(facecolor=C_DROUGHT_SEV, edgecolor=C_EDGE, label=f"below normal (RP ≥ {THRESHOLDS['sev_rp']} yr)"),
@@ -343,13 +357,17 @@ plt.show()
 ::: {.callout-important}
 ## Dry now, wet later
 
-The drought signal is concentrated in June to September 2026. June was the
-driest June in the 45-year record (observed), July sat at the 11th percentile,
-and the August-issued forecast puts August at the 0th and September at the 2nd
-percentile. From October onward the same issuance forecasts wetter than normal
-(Oct 91st / Nov 96th / Dec 98th percentile for Northern region), so a "wetter
-than normal OND" reading elsewhere in the app is correct and does not
-contradict this document. The Forecast × HNRP methodology is drought-side only
+The drought signal is concentrated in June to September 2026. Monthly
+percentiles below are vs 1981-2025, computed as the mean of the district
+series (`seas5_adm2` / `era5_adm2`) over the named unit. June was the driest
+June in the 45-year record at national, Northern-region, and Karamoja
+aggregation alike (observed); July sat at the 13th percentile nationally
+(Karamoja: the 0th). The August-issued forecast puts August at the 0th
+percentile on all three aggregations, and September at the 0th nationally
+and over Karamoja (Northern region: the 2nd). From October onward the same
+issuance forecasts wetter than normal (Northern region: Oct 93rd / Nov 96th /
+Dec 98th percentile), so a "wetter than normal OND" reading elsewhere in the
+app is correct and does not contradict this document. The Forecast × HNRP methodology is drought-side only
 and reports each unit's *worst* qualifying slot, which lands on the Jun-Sep
 window. The table below gives every valid trimester so both sides are visible.
 
@@ -369,7 +387,12 @@ built from the JRC ASAP crop calendars.
 
 ```{python}
 #| code-summary: "full seasonal picture: forecast percentile by region × trimester"
-iy1 = skill1[skill1["issued_month"] == issued].copy()
+# Same vintage guard as worst_drought_slot: month-only selection would render
+# last year's in-season rows whenever the adm1 pipeline ran before the current
+# ERA5 month landed (this table once showed Aug 2025's JJA/JAS as "issued 2026").
+iy1 = skill1[skill1["current_forecast_year"].notna()].copy()
+iy1["_iy"] = iy1.apply(_actual_issued_year, axis=1)
+iy1 = iy1[(iy1["issued_month"] == issued) & (iy1["_iy"] == issued_yr)]
 iy1 = iy1[iy1.apply(lambda r: _tri_valid(TRIMESTERS[r["trimester"]], issued), axis=1)]
 iy1["region"] = iy1["pcode"].map(dict(zip(cod1["ADM1_PCODE"], cod1["ADM1_EN"])))
 iy1["lead"] = iy1["trimester"].map(lambda t: trimester_lead(issued, TRIMESTERS[t]))
@@ -380,7 +403,7 @@ piv.columns = [f"{_tri_label(TRIMESTERS[t])} (lead {l})" for t, l in zip(order["
 (piv.style.format("{:.0f}")
     .background_gradient(cmap="BrBG", vmin=0, vmax=100, axis=None)
     .set_caption("Forecast percentile vs 1981-2025 for each valid trimester, "
-                 f"issued {calendar.month_name[issued]} 2026 (brown = dry, green = wet). "
+                 f"issued {calendar.month_name[issued]} {issued_yr} (brown = dry, green = wet). "
                  "In-season trimesters (negative leads) mix observed months with the forecast."))
 ```
 
@@ -562,6 +585,16 @@ JIAF classifies **areas**; PiN counts **people**. The joint PiN per district ×
 population group is the highest sectoral PiN (JIAF 2.0 mosaic rule); the
 intersectoral severity is the area's class.
 
+Two honesty notes on reading the table. The intersectoral severity scale is
+**saturated** in this dataset: every district × group is class 2 or 3, 21 of
+the 22 districts include a class-3 area (Kampala is the exception), and 100%
+of the joint PiN sits in severity-3 areas — so the color-graded Severity
+column separates almost nothing *within* the assessed set. Where the data do
+differentiate is the sectoral classes (Nutrition reaches 4 in Kaabong,
+Karenga, Kotido and Moroto — exactly the Karamoja core). And the PiN is a
+**pre-shock baseline** from the 2026 planning cycle: it cannot respond to the
+forecast shock this document is about, only be read alongside it.
+
 ```{python}
 #| code-summary: "JIAF severity + PiN table"
 pin = uct.load_jiaf_pin()
@@ -594,17 +627,44 @@ Max targeted / achieved people from the response-monitoring workbooks
 sum of the finer level: district figures here are the district-level series,
 and levels must never be added together.
 
+One join caveat, resolved conservatively: the workbooks use post-split
+districts and have an "Arua" row but no "Terego" row, while JIAF assesses
+Terego and not Arua - and the two share a CODAB pcode (Terego split from Arua
+in 2020) without being the same territory. Response figures therefore attach
+to JIAF rows by district *name*: **Terego shows "none reported" rather than
+inheriting Arua's figures**, and whether Arua's reporting actually covers
+Terego is a question to put to the country team. The combined JIAF unit
+"Madi-Okollo & Terego" takes the workbook's "Madi Okollo" row, its dominant
+part.
+
 ```{python}
 #| code-summary: "district funnel chart"
 #| fig-cap: "Per district: joint PiN (host + refugee groups summed), max targeted, max reached. Districts with any response data, sorted by PiN."
 tgt = uct.load_reach("targeted", level=2)[["pcode", "adm2_name", "total"]].rename(columns={"total": "targeted"})
-rea = uct.load_reach("achieved", level=2)[["pcode", "total"]].rename(columns={"total": "reached"})
+rea = uct.load_reach("achieved", level=2)[["pcode", "adm2_name", "total"]].rename(columns={"total": "reached"})
+reach = tgt.merge(rea, on=["pcode", "adm2_name"], how="outer")
+reach["_k"] = reach["adm2_name"].str.strip().str.lower()
+
+# The workbooks use post-split districts, JIAF uses operational units, and a
+# pcode is not an identity: workbook "Arua" and JIAF "Terego" both map to
+# UG3072 (Terego split from Arua in 2020) while being disjoint territories, so
+# a pcode join would credit Arua's response to Terego's row. Reach therefore
+# attaches by NAME, with one documented exception: the combined JIAF unit
+# "Madi-Okollo & Terego" takes workbook "Madi Okollo" (its dominant part).
+REACH_NAME_FOR_JIAF = {"madi-okollo & terego": "madi okollo"}
+
+def attach_reach(df, name_col="district"):
+    k = df[name_col].str.strip().str.lower().map(lambda s: REACH_NAME_FOR_JIAF.get(s, s))
+    return (df.assign(_k=k)
+              .merge(reach[["_k", "targeted", "reached"]], on="_k", how="left")
+              .drop(columns="_k"))
+
 dpin = pin.groupby(["pcode"], as_index=False).agg(district=("district", "first"),
                                                   pin=("joint_pin", "sum"))
-fun = dpin.merge(tgt.drop(columns=["adm2_name"]), on="pcode", how="outer") \
-          .merge(rea, on="pcode", how="outer")
-names2 = dict(zip(cod2["ADM2_PCODE"], cod2["ADM2_EN"]))
-fun["district"] = fun["district"].fillna(fun["pcode"].map(names2))
+jf = attach_reach(dpin)
+matched = set(jf["district"].str.strip().str.lower().map(lambda s: REACH_NAME_FOR_JIAF.get(s, s)))
+extra = reach[~reach["_k"].isin(matched)].rename(columns={"adm2_name": "district"})
+fun = pd.concat([jf, extra[["pcode", "district", "targeted", "reached"]]], ignore_index=True)
 fun = fun[fun[["targeted", "reached"]].notna().any(axis=1) | fun["pin"].notna()]
 fun = fun.sort_values("pin", ascending=True).fillna(0)
 
@@ -639,9 +699,8 @@ outside the JIAF footprint, in the Teso wetlands (see the flood section).
 comb = (j.groupby(["pcode", "sub_region", "district"], as_index=False)
           .agg(population=("population", "sum"), joint_pin=("joint_pin", "sum"),
                worst_sev=("intersectoral_severity", "max"))
-          .merge(fc2, on="pcode", how="left")
-          .merge(tgt.drop(columns=["adm2_name"]), on="pcode", how="left")
-          .merge(rea, on="pcode", how="left"))
+          .merge(fc2, on="pcode", how="left"))
+comb = attach_reach(comb)   # by name, not pcode — see the response section
 comb["pct_normal"] = 100 * comb["fc_mm"] / comb["nrm_mm"]
 
 # OND flood-extent context for the assessed districts (pixel-mean recurrence;
@@ -974,14 +1033,15 @@ Ocean Dipole crossing its event threshold (weekly DMI +0.41 in early August,
 forecast to stay positive through December; [BOM](https://www.bom.gov.au/climate/iod/),
 [WMO](https://wmo.int/resources/publication-series/global-seasonal-climate-update/gscu-aso2026)).
 What did past seasons like that look like? The panels below show every
-El Niño OND in the FloodScan record plus 2025, each labeled with its
+El Niño OND in the FloodScan record (OND-mean ONI ≥ +0.5, the standard cut:
+nine seasons) plus 2025, each labeled with its
 observed OND-mean ONI (ENSO) and DMI (IOD) from NOAA
 (`pipeline/fetch_climate_indices.py`), its flooded area, and that area's
 empirical return period.
 
 ```{python}
 #| code-summary: "extreme-year facet maps"
-#| fig-cap: "OND seasonal-max SFED in every El Niño OND of the record plus 2025, against the same color scale. Panel labels give the observed OND-mean ENSO (ONI) and IOD (DMI) indices, the flooded share of pixels (SFED >= 0.05), and its rank-based return period among the 28 seasons."
+#| fig-cap: "OND seasonal-max SFED in every El Niño OND of the record (OND-mean ONI >= +0.5) plus 2025, against the same color scale. Panel labels give the observed OND-mean ENSO (ONI) and IOD (DMI) indices, the flooded share of pixels (SFED >= 0.05), and its rank-based return period among the 28 seasons."
 from scipy.stats import spearmanr
 ytif = stratus.load_blob_data(f"{UGA_DIR}/flood_ond_yearly_max.tif", stage="dev")
 with MemoryFile(ytif) as mf, mf.open() as yds:
@@ -994,8 +1054,14 @@ area_pct = pd.Series({y: 100 * np.nanmean((ystack[i] >= 0.05)[yin]) for i, y in 
 area_rank = area_pct.rank(ascending=False)
 area_rp = (len(area_pct) + 1) / area_rank
 
-FACET_YEARS = [2002, 2006, 2009, 2015, 2018, 2019, 2023, 2025]
-fig, axes = plt.subplots(2, 4, figsize=(13, 8.2), layout="constrained")
+nino_years = sorted(int(y) for y in idxs.index
+                    if 1998 <= y <= 2025 and idxs.loc[y, "oni_ond"] >= 0.5)
+FACET_YEARS = nino_years + [2025]   # 2025 is not an El Niño OND; shown for scale
+fig, axes = plt.subplots(2, 5, figsize=(13, 7.0), layout="constrained")
+if len(FACET_YEARS) > axes.size:   # zip would silently drop panels
+    raise ValueError(f"{len(FACET_YEARS)} facet years > {axes.size} panels — resize the grid")
+for ax in axes.flat[len(FACET_YEARS):]:
+    ax.set_visible(False)
 for ax, yr in zip(axes.flat, FACET_YEARS):
     arr = ystack[yyears.index(yr)]
     m = np.ma.masked_where(~yin | (arr < 0.05), arr)
@@ -1032,11 +1098,15 @@ matter only by making the season wetter; there is no sign of an additional
 index-to-flood pathway beyond rainfall.
 
 **Interpretation, not tested**: the pattern that El Niño years flood more
-when a positive IOD co-occurs. Descriptively, the four El Niño + IOD seasons
+when a positive IOD co-occurs. Group cuts: El Niño = OND-mean ONI ≥ +0.5,
++IOD = OND-mean DMI ≥ +0.4. Descriptively, the four El Niño + IOD seasons
 (2006, 2018, 2019, 2023) averaged 4.9% flooded (median 3.8%) against 3.2%
-(median 2.9%) in the five El Niño-only seasons. The split is not clean:
-the El Niño-only group contains 2015 (5.9%), and the biggest floods of all
-(2024, 2025) sit in the neither-driver group. Read it as a lean, not a rule.
+(median 2.9%) in the five El Niño-only seasons (2002, 2004, 2009, 2014,
+2015). The split is sensitive to the DMI cut: 2015 (DMI +0.37, flooded 5.9%)
+sits a hair below it in the El Niño-only group, and moving that one
+borderline year across strengthens the contrast to 5.1% vs 2.5% (means) -
+so the lean survives the cut, but the biggest floods of all (2024, 2025)
+still sit in the neither-driver group. Read it as a lean, not a rule.
 
 **Also interpretation, on why 2025 flooded on little rain**: two candidate
 mechanisms, neither measured here. *Antecedent wetness*: 2023-24 were the
@@ -1048,7 +1118,9 @@ years, and papyrus "floating islands" have blocked the Kyoga outlet before
 ([Monitor](https://www.monitor.co.ug/uganda/news/national/floods-blamed-on-uganda-s-policy-on-releasing-l-victoria-water-1891212),
 [EACCR](http://www.eaccr.org/rising-water-levels-lake-victoria-and-nile-system-uganda)).
 One spatial clue from our own data: only 18% of 2025's flooded pixels lie in
-the recurrent Kyoga/wetland core (2019: 40%). The 2023-25 floods spread far
+the recurrent Kyoga/wetland core, defined here as pixels that flood in at
+least 30% of ONDs 1998-2025 (`recurrence_any` ≥ 0.3 on the recurrence
+raster); for 2019 the same figure is 40%. The 2023-25 floods spread far
 beyond the lake system, which fits broad antecedent wetness better than a
 purely lake-stage or dam-release story, without excluding either as a
 contributor. Settling this needs lake-level and discharge data we have not
@@ -1394,12 +1466,15 @@ OND forecast in the 1981-2026 hindcast (46 issuances), **2026 is the fourth
 wettest, the 93rd percentile**. The only wetter ones are 1997 (the strongest
 El Niño + IOD combination on record) and 1994 (a major positive-IOD year),
 both before FloodScan coverage begins, and 2015. Within the FloodScan era,
-all four years issued at the 83rd percentile or above flooded above the
-median season: 2015 (96th), 2006 (91st; Teso floods, with Kumi and Butaleja
-among eight districts affected in EM-DAT), 2023 (89th; the largest
-El Niño-year extent, though EM-DAT records no OND event that season), and
-2019 (83rd; the deadliest OND in the record, with 104 deaths across the
-Rwenzori and Elgon events). The counterexamples run the other way. 2018 (33rd) was not forecast wet,
+the four wettest August-issued outlooks all flooded above the median season:
+2015 (96th percentile; strong El Niño, and at 5.9% the largest flood extent
+outside 2023-25), 2006 (91st; Teso floods, with Kumi and Butaleja among eight
+districts affected in EM-DAT), 2023 (89th; the largest El Niño-year extent,
+though EM-DAT records no OND event that season), and 2011 (87th; 4.7%
+flooded, the seventh-largest OND extent of the 28). Just below that set,
+2019 (83rd) also flooded above the median and was the deadliest OND in the
+record, with 104 deaths across the Rwenzori and Elgon events. The
+counterexamples run the other way. 2018 (33rd) was not forecast wet,
 and its worst damage came from a rainfall-triggered landslide at Bududa, not
 from large flood extent. 2025 (30th) was not forecast wet either, yet
 produced the record extent: the water was already in the system from
@@ -1426,7 +1501,8 @@ the rains start.
   `pipeline/compute_skill_uga_adm2.py` ran the standard skill code.
   Region-level exactextract means reproduce the DB's stored means within
   about 1%.
-- JIAF 2.0 Light covers 26 districts (× host/refugee groups); all other
+- JIAF 2.0 Light covers 22 districts (× host/refugee groups; the raw sheets'
+  26 distinct "District" values include four subtotal rows); all other
   districts appear on the map for climate context only. Joint PiN is the
   mosaic-rule maximum of sectoral PiN, not their sum. Severity classifies
   areas, not people.
