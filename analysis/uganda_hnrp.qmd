@@ -585,6 +585,16 @@ JIAF classifies **areas**; PiN counts **people**. The joint PiN per district ×
 population group is the highest sectoral PiN (JIAF 2.0 mosaic rule); the
 intersectoral severity is the area's class.
 
+Two honesty notes on reading the table. The intersectoral severity scale is
+**saturated** in this dataset: every district × group is class 2 or 3, 21 of
+the 22 districts include a class-3 area (Kampala is the exception), and 100%
+of the joint PiN sits in severity-3 areas — so the color-graded Severity
+column separates almost nothing *within* the assessed set. Where the data do
+differentiate is the sectoral classes (Nutrition reaches 4 in Kaabong,
+Karenga, Kotido and Moroto — exactly the Karamoja core). And the PiN is a
+**pre-shock baseline** from the 2026 planning cycle: it cannot respond to the
+forecast shock this document is about, only be read alongside it.
+
 ```{python}
 #| code-summary: "JIAF severity + PiN table"
 pin = uct.load_jiaf_pin()
