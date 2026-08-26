@@ -1531,14 +1531,280 @@ def combine_ipc_view() -> None:
           f"({gout.stat().st_size / 1e6:.1f} MB)")
 
 
+def _fews_lists() -> tuple[dict[str, list], pd.DataFrame]:
+    """FEWS NET classifications per FNID + the unit registry, from ds-fewsnet-mirror.
+
+    From fewsnet.classification (FDW ipcphase): the published-map series only —
+    assistance = false (verified against the package shapefiles, which ARE the
+    rendered map), subnational units (FEWS NET's own geography: livelihood-zone x
+    admin intersections and admin units — IDP camps are points and national parks
+    are sentinels, neither drawable as a choropleth), the map scales (the FAOB's
+    national "IPC Highest Household" series is a different product). Recency
+    mirrors IPC mode: windows valid in 2025 or later.
+
+    Per FNID: one combo per (scenario x window x collection round), same shape as
+    the IPC lists but carrying the unit's PHASE, not populations — FEWS NET
+    classifies areas and publishes no population-in-phase figures. Newest rounds
+    first, capped at 9 (three scenarios x the three newest rounds, typically):
+    FEWS NET collects monthly-ish (Key Message Updates between Outlooks), so a
+    smaller cap than IPC's 6 would reach less than a season back.
+    """
+    engine = stratus.get_engine("dev")
+    q = """
+    SELECT fnid, iso3, scenario, projection_start, projection_end,
+           reporting_date, phase
+    FROM fewsnet.classification
+    WHERE assistance = false
+      AND unit_type IN ('fsc_admin', 'fsc_admin_lhz')
+      AND scale <> 'IPC Highest Household'
+      AND projection_end >= '2025-01-01'
+      AND phase BETWEEN 1 AND 5
+    """
+    qu = """
+    SELECT fnid, iso3, unit_name, admin1, admin2, lzname, unit_type
+    FROM fewsnet.units
+    """
+    with engine.connect() as conn:
+        df = pd.read_sql(q, conn, parse_dates=[
+            "projection_start", "projection_end", "reporting_date"])
+        units = pd.read_sql(qu, conn)
+    # NaN is truthy and json.dumps writes it as bare NaN, which JSON.parse
+    # rejects — a single unit with no admin2 would brick the whole payload.
+    units = units.astype(object).where(pd.notna(units), None)
+    # One row per (unit x scenario x window x round): revisions within a round
+    # would double a combo; keep one (values are identical when they collide).
+    df = df.drop_duplicates(
+        subset=["fnid", "scenario", "projection_start", "projection_end",
+                "reporting_date"])
+    tmap = {"CS": "current", "ML1": "near-term projection",
+            "ML2": "medium-term projection"}
+    df = df[df["scenario"].isin(tmap)]
+    lists: dict[str, list] = {}
+    for fnid, g in df.groupby("fnid"):
+        g = g.sort_values(["reporting_date", "projection_end"],
+                          ascending=False).head(9)
+        lists[fnid] = [
+            {
+                "t": tmap[r["scenario"]],
+                "s": r["projection_start"].strftime("%Y-%m"),
+                "e": r["projection_end"].strftime("%Y-%m"),
+                "a": r["reporting_date"].strftime("%Y-%m"),
+                # One-month windows (a round's current situation) read as
+                # "Jun 2026", not "Jun–Jun 2026".
+                "label": (f"{calendar.month_abbr[r['projection_start'].month]}–"
+                          if (r['projection_start'].year, r['projection_start'].month)
+                          != (r['projection_end'].year, r['projection_end'].month)
+                          else "")
+                         + f"{calendar.month_abbr[r['projection_end'].month]} "
+                           f"{r['projection_end'].year}",
+                "ph": int(r["phase"]),
+            }
+            for _, r in g.iterrows()
+        ]
+    print(f"FEWS NET: {df['iso3'].nunique()} countries, {len(lists)} units, "
+          f"{df.groupby(['iso3', 'reporting_date']).ngroups} collection rounds")
+    return lists, units
+
+
+def build_fewsnet_view() -> None:
+    """FEWS NET's own units -> hnrp_drought_fews.json + hnrp_fews.geojson.
+
+    Same philosophy as the IPC view: each severity source is drawn on ITS OWN
+    units, and FEWS NET's are its own geography (FNIDs — livelihood-zone x admin
+    intersections in much of East/West Africa, admin units elsewhere), never COD
+    p-coded. Geometry comes from the ds-fewsnet-mirror blob (the latest
+    collection round's shapefile package per country).
+
+    The forecast is the point of the tab and FEWS NET units carry no zonal
+    stats, so each unit INHERITS the forecast of the COD admin unit it sits in,
+    name-matched from the package's ADMIN2 (then ADMIN1) attribute against the
+    plan payloads — the same mechanism as adm3 inheriting adm2, one step
+    looser (names, not parent pcodes), flagged on the row ("fcu") so the site
+    can say where the forecast came from. A country in the tab's scope with no
+    FEWS NET coverage keeps its plan units and forecast, exactly as countries
+    without IPC do in the IPC view.
+    """
+    base = HERE.parent / "docs" / "data"
+    data, geo = {}, {}
+    for lvl, suffix in [(1, ""), (2, "_adm2"), (3, "_adm3")]:
+        dp = base / f"hnrp_drought{suffix}.json"
+        gp = base / f"hnrp_adm{lvl}.geojson"
+        if not dp.exists() or not gp.exists():
+            sys.exit(f"Missing level-{lvl} outputs — run --level {lvl} first")
+        data[lvl] = json.loads(dp.read_text())
+        geo[lvl] = json.loads(gp.read_text())
+
+    lists, units = _fews_lists()
+    units = units[units["fnid"].isin(lists)]
+    have_geo = set(units["fnid"])
+    orphans = {f for f in lists if f not in have_geo}
+    if orphans:
+        # Classifications on FNID vintages older than the latest package — they
+        # cannot be drawn (no geometry is mirrored for them) and are left out,
+        # like IPC periods that classify fewer units than the map shows.
+        by_iso = pd.Series([f[:2] for f in orphans]).value_counts()
+        print(f"FEWS NET: {len(orphans)} classified unit(s) have no geometry "
+              f"(older FNID vintage than the mirrored package) — not drawn: "
+              + ", ".join(f"{i}:{n}" for i, n in by_iso.head(8).items()))
+
+    fews_isos = sorted(units["iso3"].unique())
+
+    # Forecast-by-name: (iso3, folded admin name) -> plan row, unique names only —
+    # a district name repeating within a country cannot say which forecast to
+    # inherit, so it inherits the admin-1 one instead.
+    def _name_map(lvl: int) -> dict:
+        cnt: dict = {}
+        for r in data[lvl]["rows"]:
+            if r.get("nog") or not r.get("name"):
+                continue
+            k = (r["iso3"], _fold(r["name"]))
+            cnt[k] = None if k in cnt else r  # None marks ambiguous names
+        return {k: v for k, v in cnt.items() if v}
+    by_name = {1: _name_map(1), 2: _name_map(2)}
+    # Everything the site's classifier reads: the precomputed worst slot, the
+    # per-trimester series, AND the fb_* fallback slot — rawSlotOf falls back to
+    # it whenever no drought qualifies, so omitting it would grey out every
+    # normal-forecast unit.
+    FC_KEYS = ("tri", "tri_label", "lead", "rp", "pct", "r", "fc", "nrm", "tris",
+               "fb_tri", "fb_label", "fb_pct", "fb_r", "fb_rp", "fb_rainy",
+               "fb_fc", "fb_nrm")
+
+    country_names = {r["iso3"]: r.get("country")
+                     for lvl in (1, 2, 3) for r in data[lvl]["rows"]
+                     if r.get("country")}
+    missing_names = [i for i in fews_isos if i not in country_names]
+    if missing_names:
+        with stratus.get_engine("prod").connect() as conn:
+            extra = pd.read_sql(
+                "SELECT iso3, name FROM public.polygon WHERE adm_level=0", conn)
+        country_names |= {r["iso3"]: r["name"] for _, r in extra.iterrows()
+                          if r["iso3"] in missing_names}
+
+    rows, matched = [], {1: 0, 2: 0}
+    for _, u in units.iterrows():
+        iso3, fnid = u["iso3"], u["fnid"]
+        # Some packages put the zone name in unit_name (UGA), others the full
+        # "Zone, District, Region, Country" string (SOM) — the livelihood-zone
+        # name is the stable short form for intersection units.
+        name = (u["lzname"] if u["unit_type"] == "fsc_admin_lhz" and u["lzname"]
+                else u["unit_name"])
+        row = {"pcode": fnid, "iso3": iso3,
+               "country": country_names.get(iso3, iso3),
+               "name": name, "lvl": "fews",
+               "fews": lists[fnid]}
+        # Zone names repeat across the districts they intersect — qualify them
+        # the way adm2 names are qualified by their adm1 parent.
+        parent = u["admin2"] or u["admin1"]
+        if u["unit_type"] == "fsc_admin_lhz" and parent:
+            row["parent"] = parent
+        src = None
+        for lvl, name in ((2, u["admin2"]), (1, u["admin1"])):
+            if not name:
+                continue
+            src = by_name[lvl].get((iso3, _fold(name)))
+            if src:
+                matched[lvl] += 1
+                break
+        if src:
+            row |= {k: src[k] for k in FC_KEYS if src.get(k) is not None}
+            row["fcu"] = src.get("name")
+        rows.append(row)
+    n_fc = sum(matched.values())
+    print(f"FEWS NET view: {len(rows)} units, forecast inherited for {n_fc} "
+          f"({matched[2]} via admin-2 names, {matched[1]} via admin-1; "
+          f"{len(rows) - n_fc} without)")
+
+    # Countries in the tab's scope with no FEWS NET coverage keep their plan
+    # units, so the forecast stays on screen in this mode too.
+    plan_level: dict[str, int] = {}
+    for lvl in (1, 2, 3):
+        for r in data[lvl]["rows"]:
+            if r.get("nog"):
+                continue
+            plan_level[r["iso3"]] = max(plan_level.get(r["iso3"], 1), lvl)
+    no_fews = sorted(set(plan_level) - set(fews_isos))
+    if no_fews:
+        print(f"FEWS NET view: {len(no_fews)} country/ies carry no FEWS NET "
+              f"analysis and are drawn on their plan units for the forecast "
+              f"alone ({', '.join(no_fews)})")
+    level_of = {iso: plan_level[iso] for iso in no_fews}
+    rows += [dict(r, lvl=lvl) for lvl in (1, 2, 3) for r in data[lvl]["rows"]
+             if level_of.get(r["iso3"]) == lvl]
+    feats = [f for lvl in (1, 2, 3) for f in geo[lvl]["features"]
+             if level_of.get(f["properties"].get("iso3")) == lvl]
+
+    # FEWS NET geometry: the mirror's per-country geojson, filtered to the units
+    # drawn, simplified per country with topology preserved (same treatment as
+    # the COD mosaics; cross-country seams are edge-matched below).
+    keep = {r["pcode"] for r in rows if r.get("lvl") == "fews"}
+    names = {r["pcode"]: r["name"] for r in rows if r.get("lvl") == "fews"}
+    for iso3 in fews_isos:
+        try:
+            raw = json.loads(stratus.load_blob_data(
+                f"ds-fewsnet-mirror/processed/units/{iso3}.geojson",
+                stage="dev"))
+        except Exception as e:  # noqa: BLE001 — one country must not kill the view
+            print(f"  {iso3}: unit geometry load failed ({type(e).__name__}), "
+                  f"its units will not draw")
+            continue
+        fs = [f for f in raw["features"]
+              if f["properties"].get("fnid") in keep]
+        if not fs:
+            continue
+        g = gpd.GeoDataFrame.from_features(fs, crs="EPSG:4326")
+        g["pcode"] = g["fnid"]
+        g = g[["pcode", "geometry"]]
+        topo = tp.Topology(g, prequantize=True, shared_coords=True)
+        g = topo.toposimplify(0.03).to_gdf()
+        try:
+            g["geometry"] = g["geometry"].make_valid()
+        except Exception:
+            g["geometry"] = g["geometry"].make_valid(
+                method="structure", keep_collapsed=False)
+        g = g.explode(index_parts=False)
+        g = g[g.geometry.geom_type.isin(["Polygon", "MultiPolygon"])]
+        g = g.dissolve("pcode", as_index=False)
+        feats += json.loads(
+            g.assign(iso3=iso3, name=g["pcode"].map(names)).to_json()
+        )["features"]
+        print(f"  {iso3}: {len(g)} FEWS NET unit polygons")
+
+    mon_admin = {iso: d for lvl in (1, 2, 3)
+                 for iso, d in (data[lvl].get("mon_admin") or {}).items()
+                 if level_of.get(iso) == lvl}
+    payload = {**data[1], "adm_level": "fews", "rows": rows,
+               "mon_admin": mon_admin}
+    out = base / "hnrp_drought_fews.json"
+    out.write_text(json.dumps(payload, separators=(",", ":")))
+    gout = base / "hnrp_fews.geojson"
+    gout.write_text(json.dumps({"type": "FeatureCollection", "features": feats},
+                               separators=(",", ":")))
+    edge_match(gout)
+    # edge_match writes the outline only when the clean is ACCEPTED, and this
+    # view has a few FEWS NET units whose geometry collapses under -clean (the
+    # rejection above keeps them drawable, which is the right trade). The
+    # outline is a plain dissolve of whatever mosaic ships, so it is correct —
+    # same line by construction — either way.
+    if not outline_path(gout).exists():
+        write_outline(gout)
+    with_fews = sum(1 for r in rows if r.get("fews"))
+    print(f"FEWS NET-native view: {len(rows)} units ({with_fews} with FEWS NET), "
+          f"{len(feats)} polygons ({len(fews_isos)} countries on FEWS NET units, "
+          f"{len(no_fews)} on plan units)")
+    print(f"Wrote {out} ({out.stat().st_size / 1024:.0f} KB) and {gout.name} "
+          f"({gout.stat().st_size / 1e6:.1f} MB)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rebuild-geometry", action="store_true",
                     help="Rewrite the geojson even if it already exists (it is "
                          "stable between runs; the default skips it when present).")
-    ap.add_argument("--level", choices=("1", "2", "3", "low", "ipc"), default="1",
+    ap.add_argument("--level", choices=("1", "2", "3", "low", "ipc", "fews"),
+                    default="1",
                     help="Admin level of the export (2/3 write *_admN outputs; "
-                         "'low' combines the three per-country finest levels)")
+                         "'low' combines the three per-country finest levels; "
+                         "'ipc'/'fews' draw each source on its own units)")
     ap.add_argument("--edge-match-only", action="store_true",
                     help="Edge-match the geojsons that already exist and write "
                          "their country outlines, without rebuilding anything. "
@@ -1548,7 +1814,8 @@ def main() -> None:
     if args.edge_match_only:
         base = HERE.parent / "docs" / "data"
         found = [p for p in (base / f"hnrp_{n}.geojson" for n in
-                             ("adm1", "adm2", "adm3", "low", "ipc")) if p.exists()]
+                             ("adm1", "adm2", "adm3", "low", "ipc", "fews"))
+                 if p.exists()]
         if not found:
             sys.exit("No geojsons to edge-match — build a level first")
         for p in found:
@@ -1559,6 +1826,9 @@ def main() -> None:
         return
     if args.level == "ipc":
         combine_ipc_view()
+        return
+    if args.level == "fews":
+        build_fewsnet_view()
         return
     _set_level(int(args.level))
 

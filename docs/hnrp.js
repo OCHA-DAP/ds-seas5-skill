@@ -24,6 +24,11 @@
     // being prorated onto the other. Selected by the Severity source, not ?adm.
     ipc: ["data/hnrp_drought_ipc.json", "data/hnrp_ipc.geojson",
           "data/hnrp_ipc_adm0.geojson"],
+    // FEWS NET's own units (FNIDs — livelihood-zone × admin intersections in
+    // much of Africa, admin units elsewhere), same reasoning as the IPC view:
+    // its geography is nobody else's, so it gets its own geometry and payload.
+    fews: ["data/hnrp_drought_fews.json", "data/hnrp_fews.geojson",
+           "data/hnrp_fews_adm0.geojson"],
     1: ["data/hnrp_drought.json", "data/hnrp_adm1.geojson",
         "data/hnrp_adm1_adm0.geojson"],
     2: ["data/hnrp_drought_adm2.json", "data/hnrp_adm2.geojson",
@@ -33,10 +38,11 @@
   };
   const QS = new URLSearchParams(location.search);
   let ADM = QS.get("adm") ?? "low";
-  if (!(ADM in ADM_FILES) || ADM === "ipc") ADM = "low";
+  if (!(ADM in ADM_FILES) || ADM === "ipc" || ADM === "fews") ADM = "low";
   // Which payload this page load needs. A fixed ?adm= level pins the geometry and
   // keeps both sources on it; the default view follows the source.
-  let PAYLOAD = (ADM === "low" && QS.get("sev") === "ipc") ? "ipc" : ADM;
+  let PAYLOAD = (ADM === "low" && ["ipc", "fews"].includes(QS.get("sev")))
+    ? QS.get("sev") : ADM;
   const ADM_LABEL = { low: "lowest available level", 1: "admin 1", 2: "admin 2", 3: "admin 3" };
   let data, geo, adm0, world, countryFc = {};
   try {
@@ -276,7 +282,16 @@
   // forecast horizon. IPC and JIAF use different analysed-population bases and
   // scopes, so shares are not comparable across the two sources.
   const ipcMode = () => srcTypeSel.value === "ipc";
+  // FEWS NET mode rides the same period machinery as IPC — one estimate per
+  // country, chosen from combos carrying (scenario, validity window, collection
+  // round) — but its combos carry the unit's PHASE ("ph"), not populations:
+  // FEWS NET classifies areas and publishes no population-in-phase figures, so
+  // everything people-denominated (caseloads, shares, the bar chart) is
+  // deliberately absent in this mode rather than approximated.
+  const fewsMode = () => srcTypeSel.value === "fews";
   const pinMode = () => srcTypeSel.value === "pin";
+  // The combo list a row carries for the active phase source.
+  const combosOf = (r) => (fewsMode() ? r.fews : r.ipc);
   const lvl = () => +srcLvlSel.value;
   const ym = (s) => { const [y, m] = s.split("-").map(Number); return y * 12 + m - 1; };
   const NOW_YM = data.issued_year * 12 + data.issued_month - 1; // anchor: forecast issuance
@@ -289,7 +304,7 @@
   // windows. That is a unit OUTSIDE the projection, not one with nobody in crisis;
   // selected literally it walks the class search down from 5, finds nothing, and
   // paints the area phase 1. Never select such a combo while a real one exists.
-  const hasPhases = (c) => c.p.some((v) => (v ?? 0) > 0);
+  const hasPhases = (c) => (c.ph != null) || (c.p ?? []).some((v) => (v ?? 0) > 0);
   // ONE PERIOD PER COUNTRY, exactly as ipcinfo.org does it. Its country page draws
   // Current / Projected 1 / Projected 2 as three separate maps, and on a projection
   // map every area outside the projection is left WHITE — Sudan's Jun–Sep 2026 map
@@ -300,14 +315,17 @@
   const periodKey = (c) => `${c.t}|${c.a}|${c.s}|${c.e}`;
   const periodCache = new Map();
   function ipcPeriodOf(iso, mode) {
-    const key = `${iso}|${mode}`;
+    // The source is part of the key: IPC and FEWS NET are different period sets
+    // over the same countries, and a cached IPC period served to FEWS NET mode
+    // (or vice versa) would match no combo and blank the whole map.
+    const key = `${srcTypeSel.value}|${iso}|${mode}`;
     if (periodCache.has(key)) return periodCache.get(key);
     const covers = (c) => ym(c.s) <= NOW_YM && ym(c.e) >= NOW_YM;
     // Every period the country publishes, deduped, newest exercise first.
     const seen = new Map();
     for (const r of data.rows) {
       if (r.iso3 !== iso) continue;
-      for (const c of r.ipc ?? []) if (hasPhases(c) && !seen.has(periodKey(c))) seen.set(periodKey(c), c);
+      for (const c of combosOf(r) ?? []) if (hasPhases(c) && !seen.has(periodKey(c))) seen.set(periodKey(c), c);
     }
     const list = [...seen.values()];
     // An explicit period picked from the dropdown wins outright — that is the whole
@@ -337,21 +355,24 @@
     const want = ipcPeriodOf(r.iso3, mode);
     if (!want) return null;
     const k = periodKey(want);
-    const c = (r.ipc ?? []).find((x) => periodKey(x) === k);
+    const c = (combosOf(r) ?? []).find((x) => periodKey(x) === k);
     // Present but unclassified for this period = outside its coverage. Blank, not phase 1.
     return c && hasPhases(c) ? c : null;
   }
   function sevValOf(r) {
     if (pinMode()) return pinOf(r);
+    if (fewsMode()) return null; // area classifications only — no people figures
     const c = ipcComboOf(r);
     if (!c) return null;
     return c.p.slice(lvl() - 1).reduce((a, b) => a + (b ?? 0), 0);
   }
   // Denominator: each source's own analysed population. PiN has none of its own —
   // shares use the plan's JIAF analysed population (same plan, same admin unit).
-  const sevTotOf = (r) => (ipcMode() ? (ipcComboOf(r)?.tot ?? null) : r.sev_total);
+  const sevTotOf = (r) => (ipcMode() ? (ipcComboOf(r)?.tot ?? null)
+    : fewsMode() ? null : r.sev_total);
   const lvlTag = () => (lvl() === 5 ? "5" : lvl() + "+");
-  const sevLabel = () => (pinMode() ? `PiN${secTag()}` : `IPC ${lvlTag()}`);
+  const sevLabel = () => (pinMode() ? `PiN${secTag()}`
+    : fewsMode() ? "FEWS NET phase" : `IPC ${lvlTag()}`);
 
   // Exercise (analysis) month + validity window of an IPC combo — spelled out
   // everywhere a figure from it appears, since periods differ by country.
@@ -360,7 +381,8 @@
     const [y, m] = s.split("-").map(Number);
     return new Date(Date.UTC(y, m - 1)).toLocaleString("en", { month: "short", timeZone: "UTC" }) + " " + y;
   };
-  const comboDesc = (c) => `${c.t}, exercise ${fmtYM(c.a)}, valid ${c.label}` +
+  const comboDesc = (c) => `${c.t}, ${fewsMode() ? "reported" : "exercise"} ` +
+    `${fmtYM(c.a)}, valid ${c.label}` +
     (c.d ? ` — downscaled from admin-${c.d} by population share` : "");  // legacy flag: no longer produced
 
   const IPC_OPT_BASE = { now: "Now", fwd: "Forecast window" };
@@ -372,8 +394,8 @@
   function ipcPeriodsFor(country) {
     const seen = new Map();
     for (const r of data.rows) {
-      if (!r.ipc || (country && r.country !== country)) continue;
-      for (const c of r.ipc) {
+      if (!combosOf(r) || (country && r.country !== country)) continue;
+      for (const c of combosOf(r)) {
         if (!hasPhases(c)) continue;
         const k = periodKey(c);
         const e = seen.get(k) ?? { c, units: 0 };
@@ -385,12 +407,19 @@
       (b.c.a ?? "").localeCompare(a.c.a ?? "") || ym(b.c.s) - ym(a.c.s));
   }
   function updateIpcPeriodUI() {
-    ipcPeriodWrap.hidden = !ipcMode();
-    srcLvlWrap.hidden = pinMode(); // PiN is a headline total, no severity level
-    // Plan year selects an HNRP cycle. It does nothing to IPC figures, so showing
-    // it beside the IPC controls just invites the reader to think it does.
-    if (planYrWrap) planYrWrap.hidden = ipcMode();
-    if (!ipcMode()) return;
+    const phaseMode = ipcMode() || fewsMode();
+    ipcPeriodWrap.hidden = !phaseMode;
+    // PiN is a headline total, no severity level; FEWS NET has no populations
+    // for a "phase N+" count either — its fill is the class itself.
+    srcLvlWrap.hidden = pinMode() || fewsMode();
+    // Plan year selects an HNRP cycle. It does nothing to IPC/FEWS NET figures,
+    // so showing it beside those controls just invites the reader to think it does.
+    if (planYrWrap) planYrWrap.hidden = phaseMode;
+    const periodLabel = document.getElementById("hnrp-ipc-period-label");
+    if (periodLabel) {
+      periodLabel.textContent = fewsMode() ? "FEWS NET estimate" : "IPC estimate";
+    }
+    if (!phaseMode) return;
     // Explicit periods are only meaningful for one country at a time — across
     // countries the same window belongs to different exercises.
     const keep = ipcPeriodSel.value;
@@ -403,7 +432,7 @@
         const o = document.createElement("option");
         o.value = periodKey(c);
         o.dataset.period = "1";
-        o.textContent = `${c.t}, exercise ${fmtYM(c.a)}, valid ${c.label}`
+        o.textContent = comboDesc(c)
           + ` — ${units} unit${units === 1 ? "" : "s"}`
           + (chosen && periodKey(chosen) === periodKey(c) ? " (current default)" : "");
         ipcPeriodSel.appendChild(o);
@@ -420,7 +449,7 @@
     const perCountry = (mode) => {
       const per = new Map();
       for (const r of data.rows) {
-        if (!r.ipc || per.has(r.iso3)) continue;
+        if (!combosOf(r) || per.has(r.iso3)) continue;
         if (countrySel.value && r.country !== countrySel.value) continue;
         const c = ipcComboOf(r, mode);
         if (c) per.set(r.iso3, c);
@@ -441,7 +470,8 @@
       // "YYYY-MM" strings compare lexicographically = chronologically.
       const lo = (k) => cs.reduce((a, c) => (c[k] && (!a || c[k] < a) ? c[k] : a), null);
       const hi = (k) => cs.reduce((a, c) => (c[k] && (!a || c[k] > a) ? c[k] : a), null);
-      opt.textContent = `${IPC_OPT_BASE[opt.value]} — exercises ` +
+      opt.textContent = `${IPC_OPT_BASE[opt.value]} — ` +
+        `${fewsMode() ? "reported" : "exercises"} ` +
         `${fmtYM(lo("a"))}–${fmtYM(hi("a"))}, valid ${fmtYM(lo("s"))}–${fmtYM(hi("e"))}`;
     }
     // A projection that is ALSO the latest estimate for now makes the two choices
@@ -848,18 +878,33 @@
       // or the PiN-by-severity distribution. Both in one section, class first —
       // that is what the area IS; the split is how its people divide.
       const mix = ipcMode() ? (ipcComboOf(r)?.p ?? null)
+        : fewsMode() ? null
         : ((r.sevc ?? {})[planYr()]?.pb ?? null);
       const headline = ADM === "low" ? sevClassHeadline(r) : null;
       rows += mixHtml(mix, headline);
       if (ADM === "low" && !headline && pinMode() && pinOf(r) != null) {
         rows += `<div class="muted">No severity published for this area</div>`;
       }
+      if (fewsMode()) {
+        const c = ipcComboOf(r);
+        if (c) rows += `<div class="muted">${comboDesc(c)}</div>`;
+        else if (r.fews) {
+          rows += `<div class="muted">not classified for the selected estimate</div>`;
+        }
+        // The forecast belongs to the COD admin unit this FEWS NET unit sits
+        // in — livelihood zones have no zonal stats of their own. Said plainly,
+        // like the adm3 inheritance note.
+        if (r.fcu && r.tris) {
+          rows += `<div class="muted">forecast from ${r.fcu} (the admin unit ` +
+            `containing this area)</div>`;
+        }
+      }
     }
     if (agg) {
       rows += `<div class="sec"><div class="sec-t">Coverage</div>` +
         `<div>${agg.nUnits} area${agg.nUnits === 1 ? "" : "s"} on the map` +
         `${agg.nWithSev ? `, ${agg.nWithSev} with ${pinMode() ? "a caseload"
-          : "an IPC classification"}` : ""}</div>` +
+          : fewsMode() ? "a FEWS NET classification" : "an IPC classification"}` : ""}</div>` +
         (agg.pop != null ? `<div class="muted">population ${fmtN(agg.pop)}</div>` : "") +
         placedNote(agg) +
         `</div>` +
@@ -867,8 +912,12 @@
     } else {
       // Membership must be per-unit, never assumed from scope: in IPC mode most of
       // a country's states can be in view yet outside its HNRP (Nigeria covers only
-      // Borno/Adamawa/Yobe).
-      if (!inHnrp(r)) rows += `<div class="muted">Not in an HNRP</div>`;
+      // Borno/Adamawa/Yobe). A FEWS NET unit is not a plan unit at all — whether
+      // the zone overlaps the HNRP's areas is not knowable from these rows, so
+      // the line would be a guess there.
+      if (!inHnrp(r) && !(fewsMode() && r.fews)) {
+        rows += `<div class="muted">Not in an HNRP</div>`;
+      }
       const pop = popOf(r);
       if (pop != null) {
         rows += `<div class="muted">population ${fmtN(pop)} (${popSrcOf(r)})</div>`;
@@ -901,13 +950,16 @@
     // divides, which is the normal case for IPC and the rare one for PbS.
     const classes = (mix ?? []).filter((v) => v > 0).length;
     const showSplit = total > 0 && !(headline && classes <= 1);
+    // FEWS NET publishes no populations, so its country mix counts AREAS —
+    // said on every line, or the counts read as people.
+    const unit = fewsMode() ? " areas" : "";
     return `<div class="sec"><div class="sec-t">${sevClassTitle()}</div>` +
       (headline ?? "") +
       (showSplit
         ? mix.map((v, i) => (!(v > 0) ? "" :
             `<div><span style="display:inline-block;width:10px;height:10px;` +
             `background:${sevColors()[i]};border:1px solid #9db1b3;` +
-            `vertical-align:baseline"></span> ${sevClassLabels()[i]} — ${fmtN(v)}` +
+            `vertical-align:baseline"></span> ${sevClassLabels()[i]} — ${fmtN(v)}${unit}` +
             ` <span class="muted">(${Math.round((100 * v) / total)}%)</span></div>`)).join("")
         : "") +
       `</div>`;
@@ -983,6 +1035,14 @@
         if (!c) continue;
         nWithSev++;
         c.p.forEach((v, i) => { if (v) { mix[i] += v; mixAny = true; } });
+      } else if (fewsMode()) {
+        // No populations to weight by — the mix counts classified AREAS, and
+        // mixHtml says so on every line.
+        const c = ipcComboOf(r);
+        if (!c || c.ph == null) continue;
+        nWithSev++;
+        mix[c.ph - 1] += 1;
+        mixAny = true;
       } else {
         const v = pinOf(r);
         if (v == null) continue;
@@ -1021,7 +1081,8 @@
       // national figure to prefer, so the sum stands.
       sevVal: useNatl && pinMode() && natl.mon[0] != null
         ? natl.mon[0] : sum((r) => sevValOf(r)),
-      combo: ipcMode() && iso ? ipcPeriodOf(iso, ipcPeriodSel.value) : null,
+      combo: (ipcMode() || fewsMode()) && iso
+        ? ipcPeriodOf(iso, ipcPeriodSel.value) : null,
       tgt: useNatl && pinMode() && natl.mon[1] != null
         ? natl.mon[1] : sum((r) => tgtOf(r)),
       pop: sum((r) => popOf(r)),
@@ -1548,6 +1609,12 @@
   const spread = (arr) => (arr ?? []).map((v, i) => [i + 1, v ?? 0]).filter(([, v]) => v > 0);
   function sevClassInfo(r) {
     if (!r) return { cls: null };
+    if (fewsMode()) {
+      // The phase IS the class — FEWS NET classifies the area directly, no
+      // area rule to apply and no split behind it.
+      const c = ipcComboOf(r);
+      return c && c.ph != null ? { cls: c.ph, src: "fews" } : { cls: null };
+    }
     if (ipcMode()) {
       const c = ipcComboOf(r);
       if (!c || !c.tot) return { cls: null };
@@ -1908,7 +1975,7 @@
   // choropleths (Datawrapper stops on the Global HNO plan pages).
   const IPC_COLORS = ["#cdfacd", "#fae61e", "#e67800", "#c80000", "#640000"];
   const JIAF_COLORS = ["#e9f2fb", "#d4e5f7", "#82b5e9", "#418fde", "#1f69b3"];
-  const sevColors = () => (ipcMode() ? IPC_COLORS : JIAF_COLORS);
+  const sevColors = () => (ipcMode() || fewsMode() ? IPC_COLORS : JIAF_COLORS);
   // Readable ink for a label sitting on one of the ramp colours.
   const inkOn = (hex) => {
     const n = parseInt(hex.slice(1), 16);
@@ -1917,7 +1984,7 @@
   };
   const JIAF_LABELS = ["1 — minimal", "2 — stress", "3 — severe", "4 — extreme", "5 — catastrophic"];
   const IPC_LABELS = ["1 — minimal", "2 — stressed", "3 — crisis", "4 — emergency", "5 — catastrophe"];
-  const sevClassLabels = () => (ipcMode() ? IPC_LABELS : JIAF_LABELS);
+  const sevClassLabels = () => (ipcMode() || fewsMode() ? IPC_LABELS : JIAF_LABELS);
   // Class breakdown for the bars — IPC mode only: the selected period's phases.
   // People reached, from response monitoring, for the selected cycle only.
   const reaOf = (r) => monLive(r)?.[3] ?? null;
@@ -1955,7 +2022,7 @@
   const REACH_PCT_CAP = 3;
   const fmtReachPct = (f) => (f == null ? "–"
     : f > REACH_PCT_CAP ? `>${100 * REACH_PCT_CAP}%` : `${Math.round(100 * f)}%`);
-  const segsOf = (r) => (pinMode() ? null : (ipcComboOf(r)?.p ?? null));
+  const segsOf = (r) => (pinMode() || fewsMode() ? null : (ipcComboOf(r)?.p ?? null));
   const barsWrap = document.getElementById("hnrp-bars-wrap");
   const barsHint = document.getElementById("hnrp-bars-hint");
   const barsSvg = document.getElementById("hnrp-bars");
@@ -1994,11 +2061,13 @@
   const sevClassWord = (cls) => sevClassLabels()[cls - 1].replace(/^\d+\s*—\s*/, "");
   // The severity encoding is the plan's intersectoral class, or IPC's phase —
   // named in full wherever it is labelled.
-  const sevClassTitle = () => (pinMode() ? "Intersectoral severity" : "IPC phase");
+  const sevClassTitle = () => (pinMode() ? "Intersectoral severity"
+    : fewsMode() ? "FEWS NET phase" : "IPC phase");
   // "IPC phase class" reads badly — the phase IS the class.
   // No "(fill)" any more: the forecast swatches are drawn as boundaries and these
   // as blocks, so each strip states its own encoding by looking like it.
-  const sevLegendTitle = () => (pinMode() ? "Intersectoral severity" : "IPC phase");
+  const sevLegendTitle = () => (pinMode() ? "Intersectoral severity"
+    : fewsMode() ? "FEWS NET phase" : "IPC phase");
   const fmtSI = (v) => (v == null ? "–"
     : v >= 1e6 ? (v / 1e6).toFixed(v >= 1e7 ? 0 : 1) + "M"
     : v >= 1e3 ? Math.round(v / 1e3) + "k" : String(Math.round(v)));
@@ -2113,7 +2182,12 @@
     // actually missing, and which cycles the country does publish — an empty
     // chart under a country that plainly has data on the map above it reads as a
     // fault in the tab rather than as a gap in the plan year selected.
-    if (!rows.length && country) {
+    if (fewsMode() && !rows.length) {
+      // Not a gap in the data — the product has no people figures at all.
+      barsHint.textContent = "FEWS NET publishes area classifications, not " +
+        "population estimates, so there are no caseloads to chart. Phases are " +
+        "on the map above; for population in phase use the IPC/CH source.";
+    } else if (!rows.length && country) {
       const yrs = [...new Set(allOfCountry.flatMap((r) => [
         ...Object.keys(r.cyc ?? {}), ...(r.mon_yr ? [r.mon_yr] : []),
       ]))].sort();
@@ -2147,7 +2221,7 @@
     // say THAT instead: the figures are the same measure but a different source
     // and a different vintage, and a reader comparing to HAPI should know.
     const monTgtRows = rows.filter((r) => tgtSrcOf(r) === "response monitoring");
-    noTgtEl.hidden = ipcMode() || yearsWithTgt.has(planYr());
+    noTgtEl.hidden = ipcMode() || fewsMode() || yearsWithTgt.has(planYr());
     noTgtEl.textContent = `No targeted figures published for the HNRP ${planYr()} cycle yet` +
       ` — its subnational figures come from the needs analysis, which carries PiN only.` +
       (cycYears.some((y) => yearsWithTgt.has(String(y)))
@@ -2749,7 +2823,8 @@
   // misregistration this outline was introduced to remove.
   let swapping = false;
   srcTypeSel.addEventListener("change", async () => {
-    const want = (ADM === "low" && srcTypeSel.value === "ipc") ? "ipc" : ADM;
+    const want = (ADM === "low" && ["ipc", "fews"].includes(srcTypeSel.value))
+      ? srcTypeSel.value : ADM;
     if (want === PAYLOAD || swapping) { renderAll(); return; }
     swapping = true;
     mapEl.classList.add("swapping");

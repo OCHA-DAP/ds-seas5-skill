@@ -154,13 +154,15 @@
           <select id="hnrp-sev-type" class="map-select">
             <option value="pin" selected>HNRP PiN</option>
             <option value="ipc">IPC/CH phases</option>
+            <option value="fews">FEWS NET phases</option>
           </select>
         </label>
         <!-- Options are filled from the cycles the payload actually carries. -->
         <label class="ctl" id="hnrp-plan-yr-wrap">Plan year
           <select id="hnrp-plan-yr" class="map-select"></select>
         </label>
-        <label class="ctl" id="hnrp-ipc-period-wrap" hidden>IPC estimate
+        <label class="ctl" id="hnrp-ipc-period-wrap" hidden><span
+            id="hnrp-ipc-period-label">IPC estimate</span>
           <select id="hnrp-ipc-period" class="map-select">
             <option value="now" selected>Now (latest covering this month)</option>
             <option value="fwd">Forecast window (latest projection)</option>
@@ -413,6 +415,16 @@
         <em>not</em> line up:
         they measure different things (acute food insecurity vs inter-sectoral needs) over
         different analysed populations, scopes, and periods — compare shapes, not values.
+        <strong>FEWS NET phases</strong> (via <a
+        href="https://github.com/OCHA-DAP/ds-fewsnet-mirror">ds-fewsnet-mirror</a>)
+        is the third source: USAID's Famine Early Warning Systems Network publishes
+        IPC-<em>compatible</em> classifications on the same 1–5 scale, but they are
+        FEWS NET's own analysis, not the IPC/CH consensus, and the two can disagree
+        — which is exactly why both are offered. FEWS NET classifies
+        <em>areas</em> and publishes no population-in-phase figures, so this mode
+        carries no caseloads, no shares and no bar chart: the map fill is the
+        area's phase, full stop. There is no Level selector either — with no
+        populations there is nothing for "3+" to count.
         Areas <strong>outside any HNRP</strong> (no PiN/severity/targeted — most of
         Nigeria, whose plan covers Borno, Adamawa and Yobe, and IPC-covered countries
         with no plan) are on the map in either mode: muted body, since there is no
@@ -562,11 +574,41 @@
         subnational severity uses the same blue ramp reproduced here.
       </p>
 
+      <h4>FEWS NET mode</h4>
+      <p>
+        FEWS NET is drawn on <strong>its own geography</strong> (FNIDs): in much of
+        East and West Africa its units are livelihood-zone × district
+        intersections, elsewhere admin units — never COD p-coded, so this view
+        ships its own geometry from the latest FEWS NET shapefile package, the
+        same way the IPC view ships IPC's units. Zone names repeat across the
+        districts they cross, so tooltips qualify them with the district.
+        Each collection round (Food Security Outlooks ~3×/year, with Outlook
+        Updates and monthly Key Message Updates between) carries a
+        <em>current</em> situation and <em>near-term</em>/<em>medium-term</em>
+        projections; the <strong>FEWS NET estimate</strong> selector works exactly
+        like the IPC one — one round per country, <em>Now</em> preferring a
+        current estimate covering the issuance month, and every published round
+        listed once a country is selected. The series shown is the published-map
+        one ("not allowing for assistance", verified against FEWS NET's own
+        rendered shapefiles); areas FEWS NET did not classify in a round are
+        <em>not assessed</em> grey, never phase 1. Because FEWS NET units carry
+        no zonal statistics, each unit <strong>inherits the forecast of the COD
+        admin unit containing it</strong> (matched by district, then region name
+        — the tooltip names the unit used); a country in scope that FEWS NET does
+        not cover keeps its plan units and forecast, exactly as countries without
+        IPC do in IPC mode. FEWS NET also covers countries the tab otherwise
+        does not (Ethiopia — whose IPC series stopped in 2021 — Angola, Burundi,
+        Nepal, Sri Lanka and Zimbabwe): they appear in this mode
+        with their phases and, having no zonal statistics on our side yet, no
+        forecast. Figures here should match the country's page on
+        <a href="https://fews.net/" target="_blank" rel="noopener">fews.net</a>.
+      </p>
+
       <h4>Reading the map</h4>
       <p>
         The map <strong>fills</strong> each unit with its <strong>severity class
         colour</strong> (1→5; the humanitarianaction.info blue ramp for the plan's own
-        classes, IPC convention colours in IPC mode) and draws the <strong>forecast
+        classes, IPC convention colours in IPC and FEWS NET modes) and draws the <strong>forecast
         category</strong> as each unit's boundary line (dashed = moderate skill, solid
         = high). In the world view the map answers "which
         country?", so hovering targets the <strong>whole country</strong> — one
@@ -878,7 +920,10 @@
       (<a href="https://github.com/OCHA-DAP/ds-hnrp-mirror">ds-hnrp-mirror</a>) ·
       IPC/CH acute food insecurity (<a
       href="https://github.com/OCHA-DAP/ds-ipc-mirror">ds-ipc-mirror</a>; IPC,
-      CC&nbsp;BY-NC-SA&nbsp;3.0&nbsp;IGO) · COD administrative boundaries &amp;
+      CC&nbsp;BY-NC-SA&nbsp;3.0&nbsp;IGO) · FEWS NET acute food insecurity
+      classifications (<a
+      href="https://github.com/OCHA-DAP/ds-fewsnet-mirror">ds-fewsnet-mirror</a>;
+      Source: FEWS NET) · COD administrative boundaries &amp;
       population statistics · WorldPop (admin-3 denominators).
       OCHA Centre for Humanitarian Data.</p>
   </footer>
@@ -887,7 +932,7 @@
   <script src="app.js"></script>
   <script src="skillmap.js"></script>
   <script src="skill.js"></script>
-  <script src="hnrp.js?v=20260812b"></script>
+  <script src="hnrp.js?v=20260826a"></script>
   <script src="alerts.js?v=20260804j"></script>
 </body>
 </html>
