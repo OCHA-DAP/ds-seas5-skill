@@ -1561,7 +1561,7 @@ def _fews_lists() -> tuple[dict[str, list], pd.DataFrame]:
       AND phase BETWEEN 1 AND 5
     """
     qu = """
-    SELECT fnid, iso3, unit_name, admin1, admin2, lzname, unit_type
+    SELECT fnid, iso3, unit_name, admin1, admin2, admin3, lzname, unit_type
     FROM fewsnet.units
     """
     with engine.connect() as conn:
@@ -1669,6 +1669,128 @@ def build_fewsnet_view() -> None:
                "fb_tri", "fb_label", "fb_pct", "fb_r", "fb_rp", "fb_rainy",
                "fb_fc", "fb_nrm")
 
+    # Countries FEWS NET covers that carry NO payload rows at all (no HNRP, no
+    # recent IPC — Ethiopia, Angola, Burundi, Nepal, Sri Lanka, Zimbabwe) still
+    # have SEAS5 zonal stats and an ERA5 climatology at admin-1: the tab never
+    # exported them only because its scope starts from the humanitarian tables.
+    # Build their forecast records straight from the skill blob — the same rules
+    # as the main export, at the issuance the payloads already carry — and put
+    # them in the admin-1 name map so their FEWS NET units inherit exactly like
+    # everyone else's. Without this, Ethiopia's 1,141 units sat grey over data
+    # we were holding all along.
+    plan_isos = {r["iso3"] for lvl in (1, 2, 3) for r in data[lvl]["rows"]}
+    fc_only = sorted(set(units["iso3"].unique()) - plan_isos)
+    if fc_only:
+        issued_month = int(data[1]["issued_month"])
+        skill1 = stratus.load_parquet_from_blob(
+            f"{PROJECT_PREFIX}/processed/skill_stats_detrended_adm1.parquet",
+            stage="dev")
+        with stratus.get_engine("prod").connect() as conn:
+            p1 = pd.read_sql(
+                "SELECT pcode, iso3, name FROM public.polygon WHERE adm_level=1",
+                conn)
+            p1 = p1[p1["iso3"].isin(fc_only)]
+            ph = ",".join(["%s"] * len(p1))
+            era5 = pd.read_sql(
+                f"SELECT pcode, valid_date, mean FROM public.era5 "
+                f"WHERE pcode IN ({ph})",
+                conn, params=tuple(p1["pcode"]), parse_dates=["valid_date"])
+        monthly_clim = (era5.assign(month=era5["valid_date"].dt.month)
+                        .groupby(["pcode", "month"])["mean"].mean()
+                        .reset_index().rename(columns={"mean": "mean_mm_day"}))
+        rainy_set = compute_rainy_set(monthly_clim)
+        sub = skill1[skill1["pcode"].isin(set(p1["pcode"]))
+                     & (skill1["issued_month"] == issued_month)].copy()
+        sub = sub[sub.apply(lambda r: _tri_valid(TRIMESTERS[r["trimester"]],
+                                                 issued_month), axis=1)]
+
+        def _mm(r):
+            days = sum(calendar.monthrange(2025, m)[1]
+                       for m in TRIMESTERS[r["trimester"]])
+            fc_log, nrm_log = r["current_forecast_mean"], r["era5_mean"]
+            fc = (round(math.expm1(float(fc_log)) * days)
+                  if pd.notna(fc_log) else None)
+            nrm = (round(math.expm1(float(nrm_log)) * days)
+                   if pd.notna(nrm_log) else None)
+            return fc, nrm
+
+        # The same uniqueness rule as the payload name maps: a region name
+        # repeating within a country cannot say which forecast to inherit.
+        keys = [(i, _fold(n)) for i, n in zip(p1["iso3"], p1["name"])]
+        dup = {k for k in keys if keys.count(k) > 1}
+        names1 = p1.set_index("pcode")[["iso3", "name"]]
+        added = 0
+        for pcode, g in sub.groupby("pcode"):
+            iso3, name = names1.loc[pcode, "iso3"], names1.loc[pcode, "name"]
+            row = {"name": name}
+            best = None
+            for _, r in g.iterrows():
+                pct, pr = r["forecast_percentile"], r["pearson_r"]
+                if pd.isna(pct) or pd.isna(pr):
+                    continue
+                if pr < THRESHOLDS["r_mod"] or pct >= 50:
+                    continue
+                if (pcode, r["trimester"]) not in rainy_set:
+                    continue
+                rp = r["forecast_rp"]
+                if pd.isna(rp):
+                    continue
+                if best is None or rp > best["rp"]:
+                    fc_mm, nrm_mm = _mm(r)
+                    best = {"tri": r["trimester"],
+                            "lead": trimester_lead(issued_month,
+                                                   TRIMESTERS[r["trimester"]]),
+                            "rp": round(float(rp), 1),
+                            "pct": round(float(pct), 1),
+                            "r": round(float(pr), 3),
+                            "fc": fc_mm, "nrm": nrm_mm}
+            if best:
+                best["tri_label"] = _tri_label(TRIMESTERS[best["tri"]])
+                row |= best
+            tris = {}
+            for _, r in g.iterrows():
+                pct, pr = r["forecast_percentile"], r["pearson_r"]
+                if pd.isna(pct):
+                    continue
+                drp = r["forecast_rp"] if pct < 50 else r["flood_rp"]
+                fc_mm, nrm_mm = _mm(r)
+                tris[r["trimester"]] = {
+                    "lead": trimester_lead(issued_month,
+                                           TRIMESTERS[r["trimester"]]),
+                    "pct": round(float(pct), 1),
+                    "r": round(float(pr), 3) if pd.notna(pr) else None,
+                    "rp": round(float(drp), 1) if pd.notna(drp) else None,
+                    "rainy": (pcode, r["trimester"]) in rainy_set,
+                    "fc": fc_mm, "nrm": nrm_mm,
+                }
+            if tris:
+                row["tris"] = tris
+            fb = next((r for _, r in g.iterrows()
+                       if trimester_lead(issued_month,
+                                         TRIMESTERS[r["trimester"]]) == 1), None)
+            if fb is not None:
+                fpct, fr = fb["forecast_percentile"], fb["pearson_r"]
+                frp = (fb["forecast_rp"] if pd.notna(fpct) and fpct < 50
+                       else fb["flood_rp"])
+                fb_fc, fb_nrm = _mm(fb)
+                row |= {"fb_tri": fb["trimester"],
+                        "fb_label": _tri_label(TRIMESTERS[fb["trimester"]]),
+                        "fb_pct": round(float(fpct), 1) if pd.notna(fpct) else None,
+                        "fb_r": round(float(fr), 3) if pd.notna(fr) else None,
+                        "fb_rp": round(float(frp), 1) if pd.notna(frp) else None,
+                        "fb_rainy": (pcode, fb["trimester"]) in rainy_set,
+                        "fb_fc": fb_fc, "fb_nrm": fb_nrm}
+            if "tris" not in row and "fb_tri" not in row:
+                continue
+            k = (iso3, _fold(name))
+            if k in dup or k in by_name[1]:
+                continue
+            by_name[1][k] = row
+            added += 1
+        print(f"FEWS NET view: forecasts computed from the skill blob for "
+              f"{added} admin-1 units in {len(fc_only)} countries with no "
+              f"plan rows ({', '.join(fc_only)})")
+
     country_names = {r["iso3"]: r.get("country")
                      for lvl in (1, 2, 3) for r in data[lvl]["rows"]
                      if r.get("country")}
@@ -1683,19 +1805,31 @@ def build_fewsnet_view() -> None:
     rows, matched = [], {1: 0, 2: 0}
     for _, u in units.iterrows():
         iso3, fnid = u["iso3"], u["fnid"]
-        # Some packages put the zone name in unit_name (UGA), others the full
-        # "Zone, District, Region, Country" string (SOM) — the livelihood-zone
-        # name is the stable short form for intersection units.
-        name = (u["lzname"] if u["unit_type"] == "fsc_admin_lhz" and u["lzname"]
-                else u["unit_name"])
+        # Some packages put the short name in unit_name (UGA), others the full
+        # "Unit, District, Region, Country" string (SOM, ETH) — the stable
+        # short forms are the livelihood-zone name for intersection units and
+        # the deepest admin name for admin units; the parent qualifier and the
+        # tooltip's containing-unit note carry the rest of the hierarchy.
+        if u["unit_type"] == "fsc_admin_lhz" and u["lzname"]:
+            name = u["lzname"]
+        else:
+            name = u["admin3"] or u["admin2"] or u["admin1"] or u["unit_name"]
         row = {"pcode": fnid, "iso3": iso3,
                "country": country_names.get(iso3, iso3),
                "name": name, "lvl": "fews",
                "fews": lists[fnid]}
-        # Zone names repeat across the districts they intersect — qualify them
-        # the way adm2 names are qualified by their adm1 parent.
-        parent = u["admin2"] or u["admin1"]
-        if u["unit_type"] == "fsc_admin_lhz" and parent:
+        # Zone names repeat across the districts they intersect, and woreda
+        # names repeat across regions — qualify them the way adm2 names are
+        # qualified by their adm1 parent.
+        if u["unit_type"] == "fsc_admin_lhz":
+            parent = u["admin2"] or u["admin1"]
+        elif name == u["admin3"]:
+            parent = u["admin2"] or u["admin1"]
+        elif name == u["admin2"]:
+            parent = u["admin1"]
+        else:
+            parent = None
+        if parent:
             row["parent"] = parent
         src = None
         for lvl, name in ((2, u["admin2"]), (1, u["admin1"])):
