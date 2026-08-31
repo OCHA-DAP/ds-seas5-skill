@@ -7,6 +7,9 @@ analysis/_ne_*_countries.gpkg
 # generated plots / images (kept locally, not committed)
 outputs/
 
+# local data cache for the PNG slides (pages/png-enso/ holds the committed outputs)
+analysis/_png_enso_cache/
+
 # local credentials
 .env
 pipeline/.checkpoint_adm2/
