@@ -582,18 +582,14 @@ def load_skill_cube_png(issued_month: int, trimesters: list[str]):
     return out, ds["x"].values, ds["y"].values
 
 
-def country_mean_rp(hist_mm: np.ndarray, current_mm: np.ndarray,
-                    mask: np.ndarray) -> tuple[float, str]:
-    """Weibull RP of the country-mean forecast within the country-mean hindcast
-    (repo convention, src.skill_raster._empirical_rp_grid): RP = (n+1)/rank.
-    Returns (rp_years, 'dry'|'wet') for whichever direction the forecast sits."""
-    cm_hist = np.array([float(np.nanmean(np.where(mask, h, np.nan)))
-                        for h in hist_mm])
-    cm_cur = float(np.nanmean(np.where(mask, current_mm, np.nan)))
-    n = len(cm_hist)
-    rp_dry = (n + 1) / ((cm_hist < cm_cur).sum() + 1)
-    rp_wet = (n + 1) / ((cm_hist > cm_cur).sum() + 1)
-    return (rp_dry, "dry") if rp_dry >= rp_wet else (rp_wet, "wet")
+def load_app_country_forecast(issued: pd.Timestamp) -> dict:
+    """The alerts app's own country-level numbers for this issuance — the same
+    pct / directional RP / rainy flags the main app page shows (adm0 zonal
+    stats, detrended, exported by pipeline/export_static_site.py)."""
+    f = REPO / "docs" / "data" / "forecasts" / f"{issued:%Y-%m}.json"
+    d = json.loads(f.read_text())
+    assert (d["issued_year"], d["issued_month"]) == (issued.year, issued.month)
+    return d["data"][COUNTRY["iso3"]]
 
 
 def _rp_bin_color(p: float) -> str:
@@ -821,7 +817,9 @@ def make_slide2(path_png: Path):
                   for t in order]
     fc_means = [float(np.nanmean(np.where(mask, per_tri[t]["current_mm"], np.nan)))
                 for t in order]
-    fc_colors = [_rp_bin_color(means[t]) for t in order]
+    app_vals = load_app_country_forecast(issued)
+    fc_colors = [_rp_bin_color(app_vals[t]["pct"]) if app_vals[t]["rainy"]
+                 else C_OFF for t in order]
     bax.bar(xs_pos - 0.19, clim_means, width=0.34, color=C_CLIM_BAR, zorder=2)
     bax.bar(xs_pos + 0.19, fc_means, width=0.34, color=fc_colors,
             edgecolor="#888", linewidth=0.4, zorder=2)
@@ -834,15 +832,19 @@ def make_slide2(path_png: Path):
         if t == worst:
             tick.set_color("#7B3A1A")
             tick.set_fontweight("bold")
-    # overall RP of the country-mean forecast, per trimester (Weibull vs hindcast)
+    # overall country-level RP per trimester — the app's own numbers
     for xp, tri in zip(xs_pos, order):
-        rp, side = country_mean_rp(per_tri[tri]["hist_mm"],
-                                   per_tri[tri]["current_mm"], mask)
-        lab = f"1-in-{rp:.0f} {side}" if rp >= 1.5 else "≈ normal"
+        v = app_vals[tri]
+        side = "dry" if v["pct"] < 50 else "wet"
+        if not v["rainy"]:
+            lab, col = f"1-in-{v['rp']:.0f} {side}*", "#999"
+        elif v["rp"] < 1.5:
+            lab, col = "≈ normal", "#777"
+        else:
+            lab = f"1-in-{v['rp']:.0f} {side}"
+            col = {"dry": "#7B3A1A", "wet": "#0D40B0"}[side]
         bax.text(xp, -0.21, lab, transform=bax.get_xaxis_transform(),
-                 ha="center", va="top", fontsize=8,
-                 color={"dry": "#7B3A1A", "wet": "#0D40B0"}[side]
-                 if rp >= 1.5 else "#777")
+                 ha="center", va="top", fontsize=8, color=col)
     bax.set_ylim(0, max(clim_means + fc_means) * 1.22)
     bax.tick_params(axis="y", labelsize=8, length=2)
     bax.tick_params(axis="x", length=0)
@@ -863,10 +865,9 @@ def make_slide2(path_png: Path):
     fig.text(lx + 0.169, 0.147, "this forecast", fontsize=8.5, color="#333")
 
     fig.text(lx, 0.112,
-             "Categories from the detrended skill cube's forecast\n"
-             "percentile vs the same issued month + leads. RPs\n"
-             f"under the bars: country mean vs the {per_tri[order[0]]['n']}-yr "
-             "hindcast.\n"
+             "Categories from the detrended skill cube vs the\n"
+             "same issued month + leads. Bar colours + RPs: the\n"
+             "app's country-level forecast (* = off-season).\n"
              f"Niño3.4: {nino_last:+.1f} °C in {nino_when:%b %Y}.",
              fontsize=9, color="#333", va="top", linespacing=1.4)
     fig.text(lx, 0.015,
