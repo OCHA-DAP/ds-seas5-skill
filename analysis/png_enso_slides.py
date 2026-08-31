@@ -8,10 +8,12 @@ per-pixel best lags frozen from the total sweep, p<0.05, the discrete blue/brown
 
 Slide 2 — the current SEAS5 forecast, pixelwise with ADM1 boundaries overlaid,
 one tile per upcoming trimester (all four fully covered by the latest issuance),
-each pixel the ensemble-mean forecast as a percentile of the same-issuance
-hindcast (so model bias cancels), plus a bar chart of country-mean hindcast
-climatology vs this forecast (mm/day). The tile with the lowest country-mean
-percentile is tagged as the driest.
+in the alerts app's own colours: drought/flood 3-yr and 10-yr return-period
+categories from the detrended skill cube's forecast percentile, skill-shaded
+exactly as the app (solid = high skill, white hatch = moderate, cross-hatch =
+low, grey = off-season). Plus a bar chart of country-mean hindcast climatology
+vs this forecast (mm/day). The tile with the lowest country-mean percentile is
+tagged as the driest.
 
 Data:
   - ERA5 monthly mm/day COGs (prod raster blob, era5/monthly/processed/) — read
@@ -478,16 +480,101 @@ def make_slide1(path_png: Path):
 
 
 # ── Slide 2: current SEAS5 forecast, pixelwise, tiled trimesters ────────────────
+#
+# Colour scheme + skill shading identical to the alerts app raster view
+# (pipeline/export_raster_site.py + docs/raster/app.js): drought/flood 3-yr and
+# 10-yr return-period categories from the detrended skill cube's forecast
+# percentile, solid where skill r >= 0.5, white-hatched where 0.30-0.50, grey
+# cross-hatch where r < 0.30, light grey outside the rainy season.
 
-from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap  # noqa: E402
+THRESH = {"sev_rp": 3, "vsev_rp": 10, "r_mod": 0.30, "r_high": 0.50}
+RAINY_TRIMESTER_PCT = 0.15   # matches export_raster_site.py
+C_DV, C_DS, C_FS, C_FV = "#7B3A1A", "#C8844A", "#71B3E5", "#0D40B0"
+C_OFF, C_HATCH_GREY = "#D0D0D0", "#B4B4B4"
+CUBE_PATH = Path("/tmp/skill_stats_grid_detrended.nc")
 
-# Brown-neutral-blue drought/flood ramp shared with the teleconnections page
-DROUGHT_FLOOD_CMAP = LinearSegmentedColormap.from_list(
-    "drought_flood",
-    [(0.00, "#7B3A1A"), (0.35, "#C8844A"), (0.50, "#F5F0EC"),
-     (0.65, "#71B3E5"), (1.00, "#0D40B0")],
-)
-PCT_BOUNDS = [0, 10, 20, 33, 67, 80, 90, 100]
+T, OFF, LOW, HN, MN = 0, 1, 2, 3, 4
+DVH, DVM, DSH, DSM, FSH, FSM, FVH, FVM = 5, 6, 7, 8, 9, 10, 11, 12
+CODE_FILL = {OFF: C_OFF, DVH: C_DV, DVM: C_DV, DSH: C_DS, DSM: C_DS,
+             FSH: C_FS, FSM: C_FS, FVH: C_FV, FVM: C_FV}
+
+
+def _classify_app(P, R, rainy):
+    """Per-pixel category code — verbatim port of export_raster_site._classify
+    (masked variant, the app default)."""
+    vsev_m, sev_m = 100 / THRESH["vsev_rp"], 100 / THRESH["sev_rp"]
+    valid = np.isfinite(P) & np.isfinite(R)
+    off = valid & ~rainy
+    skill = valid & ~off
+    low = skill & (R < THRESH["r_mod"])
+    ok = skill & (R >= THRESH["r_mod"])
+    drought = P < 50
+    high = R >= THRESH["r_high"]
+    vsev = (P <= vsev_m) | (P >= 100 - vsev_m)
+    sev = ((P > vsev_m) & (P <= sev_m)) | ((P >= 100 - sev_m) & (P < 100 - vsev_m))
+    none = ok & ~vsev & ~sev
+
+    code = np.zeros(P.shape, dtype=np.uint8)
+    code[off] = OFF
+    code[low] = LOW
+    code[none & high] = HN
+    code[none & ~high] = MN
+    code[ok & vsev & drought & high] = DVH
+    code[ok & vsev & drought & ~high] = DVM
+    code[ok & sev & drought & high] = DSH
+    code[ok & sev & drought & ~high] = DSM
+    code[ok & sev & ~drought & high] = FSH
+    code[ok & sev & ~drought & ~high] = FSM
+    code[ok & vsev & ~drought & high] = FVH
+    code[ok & vsev & ~drought & ~high] = FVM
+    return code
+
+
+def load_skill_cube_png(issued_month: int, trimesters: list[str]):
+    """App inputs for the PNG window from the detrended skill cube (dev blob):
+    per-trimester forecast percentile, skill r, rainy mask + grid coords."""
+    import sys
+
+    sys.path.insert(0, str(REPO))
+    import xarray as xr
+
+    if not CUBE_PATH.exists():
+        import ocha_stratus as stratus
+        from src.constants import PROJECT_PREFIX
+
+        print("Downloading detrended skill cube from DEV blob (one-time)...")
+        CUBE_PATH.write_bytes(stratus.load_blob_data(
+            f"{PROJECT_PREFIX}/processed/raster/skill_stats_grid_detrended.nc",
+            stage="dev"))
+    from src.skill_raster import rainy_from_cube
+
+    ds = xr.open_dataset(CUBE_PATH).sel(x=slice(*LON), y=slice(*LAT))
+    rainy_all = rainy_from_cube(ds, RAINY_TRIMESTER_PCT)
+    out = {}
+    for tri in trimesters:
+        sel = dict(issued_month=issued_month, trimester=tri)
+        cfy = float(ds["current_forecast_year"].sel(**sel))
+        out[tri] = {
+            "P": ds["forecast_percentile"].sel(**sel).values,
+            "R": ds["pearson_r"].sel(**sel).values,
+            "rainy": rainy_all.sel(trimester=tri).values.astype(bool),
+            "forecast_year": int(cfy),
+        }
+    return out, ds["x"].values, ds["y"].values
+
+
+def _rp_bin_color(p: float) -> str:
+    """Country-mean percentile -> the app's RP category colour (bar chart)."""
+    vsev_m, sev_m = 100 / THRESH["vsev_rp"], 100 / THRESH["sev_rp"]
+    if p <= vsev_m:
+        return C_DV
+    if p <= sev_m:
+        return C_DS
+    if p >= 100 - vsev_m:
+        return C_FV
+    if p >= 100 - sev_m:
+        return C_FS
+    return "#F5F0EC"
 
 
 def load_current_seas5():
@@ -563,6 +650,12 @@ def load_current_seas5():
     return per_tri, x, y, issued
 
 
+def _ordinal(n: float) -> str:
+    n = int(round(n))
+    suf = "th" if 10 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suf}"
+
+
 def _season_label(tri: str, season_year: int) -> str:
     months = _TRI_MONTHS[tri]
     wraps = 1 in months and 12 in months
@@ -577,12 +670,20 @@ def make_slide2(path_png: Path):
     mask = land_mask(adm0, x, y)
 
     order = sorted(per_tri, key=lambda t: per_tri[t]["lead"])
-    means = {t: float(np.nanmean(np.where(mask, per_tri[t]["pct"], np.nan)))
+    cube, cx, cy = load_skill_cube_png(int(issued.month), order)
+    for tri in order:   # vintage guard: cube must hold the same issuance
+        assert cube[tri]["forecast_year"] == per_tri[tri]["season_year"], \
+            f"skill cube {tri} is {cube[tri]['forecast_year']}, " \
+            f"expected {per_tri[tri]['season_year']} — rerun compute_skill_raster"
+    # the cube extends over ocean and neighbouring countries; restrict to PNG
+    cmask = land_mask(adm0, cx, cy)
+    means = {t: float(np.nanmean(np.where(cmask, cube[t]["P"], np.nan)))
              for t in order}
     worst = min(means, key=means.get)
 
-    cmap = DROUGHT_FLOOD_CMAP
-    norm = BoundaryNorm(PCT_BOUNDS, cmap.N)
+    def hx(h):
+        h = h.lstrip("#")
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
     fig = plt.figure(figsize=(13.333, 7.5))
     fig.patch.set_facecolor("white")
@@ -592,9 +693,27 @@ def make_slide2(path_png: Path):
     for k, tri in enumerate(order):
         ax = fig.add_subplot(gs[k // 2, k % 2])
         d = per_tri[tri]
-        pct = np.where(mask, d["pct"], np.nan)
-        ax.imshow(pct, extent=_extent(x, y), origin="upper", cmap=cmap, norm=norm,
+        code = _classify_app(cube[tri]["P"], cube[tri]["R"], cube[tri]["rainy"])
+        code[~cmask] = 0   # off-PNG -> transparent/white
+
+        img = np.full((*code.shape, 3), 255, dtype="uint8")
+        for c, col in CODE_FILL.items():
+            img[code == c] = hx(col)
+        ax.imshow(img, extent=_extent(cx, cy), origin="upper",
                   interpolation="nearest", zorder=1)
+        # skill shading, as the app: white "\" = moderate skill on an alert,
+        # grey "/" = no signal at moderate skill, grey "X" = low skill
+        for codes, hatch, colr in (
+            ({DVM, DSM, FSM, FVM}, "\\\\\\", "#FFFFFF"),
+            ({MN}, "///", C_HATCH_GREY),
+            ({LOW}, "xxx", C_HATCH_GREY),
+        ):
+            m = np.isin(code, list(codes)).astype("float32")
+            if not m.any():
+                continue
+            with plt.rc_context({"hatch.linewidth": 0.5, "hatch.color": colr}):
+                ax.contourf(cx, cy, m, levels=[0.5, 1.5], colors="none",
+                            hatches=[hatch], zorder=2)
         adm1.boundary.plot(ax=ax, color="#6B7683", linewidth=0.55, zorder=3)
         adm0.boundary.plot(ax=ax, color="#3E4650", linewidth=0.8, zorder=4)
         ax.set_xlim(LON)
@@ -604,7 +723,7 @@ def make_slide2(path_png: Path):
         tag = "  ← driest overall" if tri == worst else ""
         ax.set_title(
             f"{_season_label(tri, d['season_year'])} — lead {d['lead']} mo — "
-            f"mean {means[tri]:.0f}th pct{tag}",
+            f"mean {_ordinal(means[tri])} pct{tag}",
             fontsize=10.5, pad=4,
             color="#7B3A1A" if tri == worst else "#1a1a1a",
             fontweight="bold" if tri == worst else "normal")
@@ -612,35 +731,54 @@ def make_slide2(path_png: Path):
     fig.text(0.04, 0.945, "Papua New Guinea — current SEAS5 seasonal forecast",
              fontsize=19, fontweight="bold", color="#1a1a1a")
     fig.text(0.04, 0.895,
-             f"Issued {issued:%B %Y} · ensemble-mean trimester rainfall as a percentile of "
-             f"the same-issuance SEAS5 hindcast (1981–{per_tri[order[0]]['season_year'] - 1}) "
-             "· native 0.4° grid · ADM1 boundaries",
+             f"Issued {issued:%B %Y} · drought/flood return-period categories vs the "
+             f"same-issuance SEAS5 hindcast (1981–{per_tri[order[0]]['season_year'] - 1}) "
+             "· skill-shaded · native 0.4° grid · ADM1 boundaries",
              fontsize=11, color="#444")
 
-    # right column: percentile legend, climatology bar chart, notes
+    # right column: RP category legend (app colours), climatology bars, notes
     lx = 0.70
-    fig.text(lx, 0.84, "Forecast percentile vs climatology", fontsize=11,
-             fontweight="bold")
-    labels = ["≤ 10th (severely dry)", "10–20th (very dry)", "20–33rd (dry tercile)",
-              "33–67th (near normal)", "67–80th (wet)", "80–90th (very wet)",
-              "> 90th (severely wet)"]
-    for i, lab in enumerate(labels):
-        c = cmap(norm((PCT_BOUNDS[i] + PCT_BOUNDS[i + 1]) / 2))
-        yy = 0.798 - i * 0.042
-        fig.add_artist(plt.Rectangle((lx, yy), 0.020, 0.028, facecolor=c,
+
+    def _swatch(xx, yy, fill, hatch=None, hatch_color=None, w=0.020, h=0.028):
+        if fill is not None:
+            fig.add_artist(plt.Rectangle((xx, yy), w, h, facecolor=fill,
+                                         linewidth=0, transform=fig.transFigure))
+        if hatch:
+            with plt.rc_context({"hatch.linewidth": 0.5}):
+                fig.add_artist(plt.Rectangle((xx, yy), w, h, facecolor="none",
+                                             hatch=hatch, edgecolor=hatch_color,
+                                             linewidth=0, transform=fig.transFigure))
+        fig.add_artist(plt.Rectangle((xx, yy), w, h, facecolor="none",
                                      edgecolor="#999", linewidth=0.4,
                                      transform=fig.transFigure))
+
+    fig.text(lx, 0.845, "Forecast category (as the alerts app)", fontsize=11,
+             fontweight="bold")
+    legend_rows = [
+        (C_DV, None, None, "Drought — ≥ 10-yr return period"),
+        (C_DS, None, None, "Drought — 3–10-yr return period"),
+        (C_FS, None, None, "Flood — 3–10-yr return period"),
+        (C_FV, None, None, "Flood — ≥ 10-yr return period"),
+        (C_DS, "\\\\\\", "#FFFFFF", "White hatch: moderate skill (r 0.3–0.5)"),
+        ("#FFFFFF", "///", C_HATCH_GREY, "No signal (< 3-yr RP), moderate skill"),
+        ("#FFFFFF", None, None, "No signal, high skill (r ≥ 0.5)"),
+        ("#FFFFFF", "xxx", C_HATCH_GREY, "Low skill (r < 0.3) — no alert"),
+        (C_OFF, None, None, "Outside the rainy season"),
+    ]
+    for i, (fill, hatch, hcol, lab) in enumerate(legend_rows):
+        yy = 0.805 - i * 0.040
+        _swatch(lx, yy, fill, hatch, hcol)
         fig.text(lx + 0.030, yy + 0.005, lab, fontsize=9, color="#333")
 
     # climatology as a bar chart: country-mean hindcast vs this forecast, mm/day
     C_CLIM_BAR = "#AEB8C2"
-    bax = fig.add_axes([lx + 0.012, 0.265, 0.265, 0.20])
+    bax = fig.add_axes([lx + 0.012, 0.225, 0.265, 0.175])
     xs_pos = np.arange(len(order))
     clim_means = [float(np.nanmean(np.where(mask, per_tri[t]["clim_mm"], np.nan)))
                   for t in order]
     fc_means = [float(np.nanmean(np.where(mask, per_tri[t]["current_mm"], np.nan)))
                 for t in order]
-    fc_colors = [cmap(norm(means[t])) for t in order]
+    fc_colors = [_rp_bin_color(means[t]) for t in order]
     bax.bar(xs_pos - 0.19, clim_means, width=0.34, color=C_CLIM_BAR, zorder=2)
     bax.bar(xs_pos + 0.19, fc_means, width=0.34, color=fc_colors,
             edgecolor="#888", linewidth=0.4, zorder=2)
@@ -663,25 +801,24 @@ def make_slide2(path_png: Path):
     bax.grid(axis="y", color="#EAEAEA", linewidth=0.6, zorder=0)
     bax.set_title("Country-mean rainfall (mm/day)", fontsize=10.5,
                   fontweight="bold", loc="left", pad=10)
-    fig.add_artist(plt.Rectangle((lx + 0.012, 0.212), 0.016, 0.022,
+    fig.add_artist(plt.Rectangle((lx + 0.012, 0.172), 0.016, 0.022,
                                  facecolor=C_CLIM_BAR, transform=fig.transFigure))
-    fig.text(lx + 0.036, 0.216, "hindcast climatology", fontsize=8.5, color="#333")
-    fig.add_artist(plt.Rectangle((lx + 0.145, 0.212), 0.016, 0.022,
-                                 facecolor=cmap(norm(means[worst])), edgecolor="#888",
-                                 linewidth=0.4, transform=fig.transFigure))
-    fig.text(lx + 0.169, 0.216, "this forecast (bin colour)", fontsize=8.5,
-             color="#333")
+    fig.text(lx + 0.036, 0.176, "hindcast climatology", fontsize=8.5, color="#333")
+    fig.add_artist(plt.Rectangle((lx + 0.145, 0.172), 0.016, 0.022,
+                                 facecolor=_rp_bin_color(means[worst]),
+                                 edgecolor="#888", linewidth=0.4,
+                                 transform=fig.transFigure))
+    fig.text(lx + 0.169, 0.176, "this forecast", fontsize=8.5, color="#333")
 
-    fig.text(lx, 0.155,
-             "Percentile per pixel vs the same issued month\n"
-             "and leads in the hindcast, so model bias cancels.\n"
+    fig.text(lx, 0.125,
+             "Categories from the detrended skill cube's forecast\n"
+             "percentile vs the same issued month + leads.\n"
              f"Driest outlook: {_season_label(worst, per_tri[worst]['season_year'])} "
-             f"(mean {means[worst]:.0f}th pct). "
-             f"Niño3.4: {nino_last:+.1f} °C\nin {nino_when:%b %Y}.",
+             f"(mean {_ordinal(means[worst])} pct).\n"
+             f"Niño3.4: {nino_last:+.1f} °C in {nino_when:%b %Y}.",
              fontsize=9, color="#333", va="top", linespacing=1.5)
-    fig.text(lx, 0.025, "Data: ECMWF SEAS5 (ensemble-mean monthly\n"
-                        "precipitation). Boundaries: PNG ADM1 (COD).",
-             fontsize=8.5, color="#777", va="bottom", linespacing=1.4)
+    fig.text(lx, 0.015, "Data: ECMWF SEAS5 · Boundaries: PNG ADM1 (COD)",
+             fontsize=8.5, color="#777", va="bottom")
 
     fig.savefig(path_png, dpi=200, facecolor="white")
     plt.close(fig)
