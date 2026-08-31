@@ -430,10 +430,10 @@
     // Plan year selects an HNRP cycle. It does nothing to IPC/FEWS NET figures,
     // so showing it beside those controls just invites the reader to think it does.
     if (planYrWrap) planYrWrap.hidden = phaseMode;
+    // The Source select already names IPC or FEWS NET — the label describes
+    // what THIS control picks.
     const periodLabel = document.getElementById("hnrp-ipc-period-label");
-    if (periodLabel) {
-      periodLabel.textContent = fewsMode() ? "FEWS NET analysis" : "IPC analysis";
-    }
+    if (periodLabel) periodLabel.textContent = "Analysis period";
     if (!phaseMode) { phasePerBtns.hidden = true; return; }
     // Explicit periods are only meaningful for one country at a time — across
     // countries the same window belongs to different exercises.

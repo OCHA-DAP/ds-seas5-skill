@@ -53,6 +53,12 @@ h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 /* display:inline-flex above outranks the UA [hidden] rule — restate it (the
    valid-period button group hides outside the phase-source country view) */
 .seg[hidden] { display: none; }
+/* Analysis-period buttons: denser than the map's Country/Pixel toggle so the
+   source select, exercise dropdown and all three windows share one row. */
+#hnrp-phase-periods { margin-left: 4px; }
+#hnrp-phase-periods .seg-btn {
+  font-size: 0.75rem; padding: 0 8px; white-space: nowrap;
+}
 .seg-btn {
   appearance: none; cursor: pointer; font-family: var(--hdx-font-body);
   font-size: 0.875rem; font-weight: 500; line-height: 1.3; color: var(--hdx-neutral-8);
