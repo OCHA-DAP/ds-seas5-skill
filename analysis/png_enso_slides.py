@@ -7,11 +7,11 @@ per-pixel best lags frozen from the total sweep, p<0.05, the discrete blue/brown
 |r| bins) zoomed to PNG instead of the global viewport.
 
 Slide 2 — the current SEAS5 forecast, pixelwise with ADM1 boundaries overlaid,
-one column per upcoming trimester (all four fully covered by the latest
-issuance): top row the hindcast-mean climatology (mm/day), bottom row the
-ensemble-mean forecast as a percentile of the same-issuance hindcast (so model
-bias cancels). The column with the lowest country-mean percentile is tagged as
-the driest.
+one tile per upcoming trimester (all four fully covered by the latest issuance),
+each pixel the ensemble-mean forecast as a percentile of the same-issuance
+hindcast (so model bias cancels), plus a bar chart of country-mean hindcast
+climatology vs this forecast (mm/day). The tile with the lowest country-mean
+percentile is tagged as the driest.
 
 Data:
   - ERA5 monthly mm/day COGs (prod raster blob, era5/monthly/processed/) — read
@@ -583,52 +583,31 @@ def make_slide2(path_png: Path):
 
     cmap = DROUGHT_FLOOD_CMAP
     norm = BoundaryNorm(PCT_BOUNDS, cmap.N)
-    clim_max = max(float(np.nanmax(np.where(mask, per_tri[t]["clim_mm"], np.nan)))
-                   for t in order)
-    clim_cmap = plt.get_cmap("Blues")
 
     fig = plt.figure(figsize=(13.333, 7.5))
     fig.patch.set_facecolor("white")
-    gs = fig.add_gridspec(2, 4, left=0.065, right=0.72, top=0.80, bottom=0.04,
-                          hspace=0.10, wspace=0.06)
+    gs = fig.add_gridspec(2, 2, left=0.03, right=0.66, top=0.82, bottom=0.05,
+                          hspace=0.24, wspace=0.06)
 
-    def _finish(ax):
-        adm1.boundary.plot(ax=ax, color="#6B7683", linewidth=0.45, zorder=3)
-        adm0.boundary.plot(ax=ax, color="#3E4650", linewidth=0.7, zorder=4)
+    for k, tri in enumerate(order):
+        ax = fig.add_subplot(gs[k // 2, k % 2])
+        d = per_tri[tri]
+        pct = np.where(mask, d["pct"], np.nan)
+        ax.imshow(pct, extent=_extent(x, y), origin="upper", cmap=cmap, norm=norm,
+                  interpolation="nearest", zorder=1)
+        adm1.boundary.plot(ax=ax, color="#6B7683", linewidth=0.55, zorder=3)
+        adm0.boundary.plot(ax=ax, color="#3E4650", linewidth=0.8, zorder=4)
         ax.set_xlim(LON)
         ax.set_ylim(LAT[1], LAT[0])
         ax.set_aspect("equal")
         ax.set_axis_off()
-
-    for k, tri in enumerate(order):
-        d = per_tri[tri]
-
-        ax = fig.add_subplot(gs[0, k])   # hindcast climatology, mm/day
-        clim = np.where(mask, d["clim_mm"], np.nan)
-        ax.imshow(clim, extent=_extent(x, y), origin="upper", cmap=clim_cmap,
-                  vmin=0, vmax=clim_max, interpolation="nearest", zorder=1)
-        _finish(ax)
+        tag = "  ← driest overall" if tri == worst else ""
         ax.set_title(
-            f"{_season_label(tri, d['season_year'])} — lead {d['lead']} mo",
-            fontsize=10.5, pad=5,
+            f"{_season_label(tri, d['season_year'])} — lead {d['lead']} mo — "
+            f"mean {means[tri]:.0f}th pct{tag}",
+            fontsize=10.5, pad=4,
             color="#7B3A1A" if tri == worst else "#1a1a1a",
             fontweight="bold" if tri == worst else "normal")
-
-        ax = fig.add_subplot(gs[1, k])   # forecast percentile
-        pct = np.where(mask, d["pct"], np.nan)
-        ax.imshow(pct, extent=_extent(x, y), origin="upper", cmap=cmap, norm=norm,
-                  interpolation="nearest", zorder=1)
-        _finish(ax)
-        tag = " ← driest" if tri == worst else ""
-        ax.set_title(f"country mean {means[tri]:.0f}th pct{tag}", fontsize=9.5, pad=2,
-                     color="#7B3A1A" if tri == worst else "#555",
-                     fontweight="bold" if tri == worst else "normal")
-
-    for row, label in ((0, "Hindcast climatology\n(mm/day)"),
-                       (1, "Forecast percentile\nvs climatology")):
-        fig.text(0.055, 0.62 - row * 0.385, label, fontsize=10, fontweight="bold",
-                 color="#333", ha="right", va="center", rotation=90,
-                 linespacing=1.3)
 
     fig.text(0.04, 0.945, "Papua New Guinea — current SEAS5 seasonal forecast",
              fontsize=19, fontweight="bold", color="#1a1a1a")
@@ -638,44 +617,70 @@ def make_slide2(path_png: Path):
              "· native 0.4° grid · ADM1 boundaries",
              fontsize=11, color="#444")
 
-    # legends
-    lx = 0.745
-    fig.text(lx, 0.795, "Hindcast climatology (mm/day)", fontsize=11,
-             fontweight="bold")
-    cax = fig.add_axes([lx, 0.755, 0.19, 0.022])
-    from matplotlib.cm import ScalarMappable
-    from matplotlib.colors import Normalize
-
-    fig.colorbar(ScalarMappable(Normalize(0, clim_max), clim_cmap), cax=cax,
-                 orientation="horizontal")
-    cax.tick_params(labelsize=8, length=2, pad=2)
-
-    fig.text(lx, 0.675, "Forecast percentile vs climatology", fontsize=11,
+    # right column: percentile legend, climatology bar chart, notes
+    lx = 0.70
+    fig.text(lx, 0.84, "Forecast percentile vs climatology", fontsize=11,
              fontweight="bold")
     labels = ["≤ 10th (severely dry)", "10–20th (very dry)", "20–33rd (dry tercile)",
               "33–67th (near normal)", "67–80th (wet)", "80–90th (very wet)",
               "> 90th (severely wet)"]
     for i, lab in enumerate(labels):
         c = cmap(norm((PCT_BOUNDS[i] + PCT_BOUNDS[i + 1]) / 2))
-        yy = 0.633 - i * 0.044
-        fig.add_artist(plt.Rectangle((lx, yy), 0.022, 0.030, facecolor=c,
+        yy = 0.798 - i * 0.042
+        fig.add_artist(plt.Rectangle((lx, yy), 0.020, 0.028, facecolor=c,
                                      edgecolor="#999", linewidth=0.4,
                                      transform=fig.transFigure))
-        fig.text(lx + 0.032, yy + 0.006, lab, fontsize=9.5, color="#333")
+        fig.text(lx + 0.030, yy + 0.005, lab, fontsize=9, color="#333")
 
-    fig.text(lx, 0.315,
-             "One column per upcoming trimester fully\n"
-             "covered by this issuance (leads 1–4). Top row:\n"
-             "the SEAS5 hindcast-mean rainfall — what is\n"
-             "normal. Bottom row: this forecast as a per-pixel\n"
-             "percentile of the same issued month and leads\n"
-             "in the hindcast, so model bias cancels.\n\n"
-             f"Driest outlook overall: {_season_label(worst, per_tri[worst]['season_year'])} "
-             f"(country mean\n{means[worst]:.0f}th percentile). "
-             f"Niño3.4: {nino_last:+.1f} °C in {nino_when:%b %Y}.",
-             fontsize=9.5, color="#333", va="top", linespacing=1.5)
-    fig.text(lx, 0.03, "Data: ECMWF SEAS5 (ensemble-mean monthly\n"
-                       "precipitation). Boundaries: PNG ADM1 (COD).",
+    # climatology as a bar chart: country-mean hindcast vs this forecast, mm/day
+    C_CLIM_BAR = "#AEB8C2"
+    bax = fig.add_axes([lx + 0.012, 0.265, 0.265, 0.20])
+    xs_pos = np.arange(len(order))
+    clim_means = [float(np.nanmean(np.where(mask, per_tri[t]["clim_mm"], np.nan)))
+                  for t in order]
+    fc_means = [float(np.nanmean(np.where(mask, per_tri[t]["current_mm"], np.nan)))
+                for t in order]
+    fc_colors = [cmap(norm(means[t])) for t in order]
+    bax.bar(xs_pos - 0.19, clim_means, width=0.34, color=C_CLIM_BAR, zorder=2)
+    bax.bar(xs_pos + 0.19, fc_means, width=0.34, color=fc_colors,
+            edgecolor="#888", linewidth=0.4, zorder=2)
+    for xp, v in list(zip(xs_pos - 0.19, clim_means)) + list(zip(xs_pos + 0.19, fc_means)):
+        bax.text(xp, v + 0.12, f"{v:.1f}", ha="center", va="bottom",
+                 fontsize=7.5, color="#555")
+    bax.set_xticks(xs_pos)
+    bax.set_xticklabels([t for t in order], fontsize=9)
+    for t, tick in zip(order, bax.get_xticklabels()):
+        if t == worst:
+            tick.set_color("#7B3A1A")
+            tick.set_fontweight("bold")
+    bax.set_ylim(0, max(clim_means + fc_means) * 1.22)
+    bax.tick_params(axis="y", labelsize=8, length=2)
+    bax.tick_params(axis="x", length=0)
+    for spine in ("top", "right"):
+        bax.spines[spine].set_visible(False)
+    for spine in ("left", "bottom"):
+        bax.spines[spine].set_color("#CCC")
+    bax.grid(axis="y", color="#EAEAEA", linewidth=0.6, zorder=0)
+    bax.set_title("Country-mean rainfall (mm/day)", fontsize=10.5,
+                  fontweight="bold", loc="left", pad=10)
+    fig.add_artist(plt.Rectangle((lx + 0.012, 0.212), 0.016, 0.022,
+                                 facecolor=C_CLIM_BAR, transform=fig.transFigure))
+    fig.text(lx + 0.036, 0.216, "hindcast climatology", fontsize=8.5, color="#333")
+    fig.add_artist(plt.Rectangle((lx + 0.145, 0.212), 0.016, 0.022,
+                                 facecolor=cmap(norm(means[worst])), edgecolor="#888",
+                                 linewidth=0.4, transform=fig.transFigure))
+    fig.text(lx + 0.169, 0.216, "this forecast (bin colour)", fontsize=8.5,
+             color="#333")
+
+    fig.text(lx, 0.155,
+             "Percentile per pixel vs the same issued month\n"
+             "and leads in the hindcast, so model bias cancels.\n"
+             f"Driest outlook: {_season_label(worst, per_tri[worst]['season_year'])} "
+             f"(mean {means[worst]:.0f}th pct). "
+             f"Niño3.4: {nino_last:+.1f} °C\nin {nino_when:%b %Y}.",
+             fontsize=9, color="#333", va="top", linespacing=1.5)
+    fig.text(lx, 0.025, "Data: ECMWF SEAS5 (ensemble-mean monthly\n"
+                        "precipitation). Boundaries: PNG ADM1 (COD).",
              fontsize=8.5, color="#777", va="bottom", linespacing=1.4)
 
     fig.savefig(path_png, dpi=200, facecolor="white")
