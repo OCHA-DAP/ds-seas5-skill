@@ -752,23 +752,29 @@ def make_slide2(path_png: Path):
                                      edgecolor="#999", linewidth=0.4,
                                      transform=fig.transFigure))
 
-    fig.text(lx, 0.845, "Forecast category (as the alerts app)", fontsize=11,
-             fontweight="bold")
-    legend_rows = [
-        (C_DV, None, None, "Drought — ≥ 10-yr return period"),
-        (C_DS, None, None, "Drought — 3–10-yr return period"),
-        (C_FS, None, None, "Flood — 3–10-yr return period"),
-        (C_FV, None, None, "Flood — ≥ 10-yr return period"),
-        (C_DS, "\\\\\\", "#FFFFFF", "White hatch: moderate skill (r 0.3–0.5)"),
-        ("#FFFFFF", "///", C_HATCH_GREY, "No signal (< 3-yr RP), moderate skill"),
-        ("#FFFFFF", None, None, "No signal, high skill (r ≥ 0.5)"),
-        ("#FFFFFF", "xxx", C_HATCH_GREY, "Low skill (r < 0.3) — no alert"),
-        (C_OFF, None, None, "Outside the rainy season"),
+    legend_groups = [
+        ("Forecast (high skill):", [
+            (C_DV, None, None, "Drought — ≥ 10-yr return period"),
+            (C_DS, None, None, "Drought — 3–10-yr return period"),
+            ("#FFFFFF", None, None, "Roughly normal"),
+            (C_FS, None, None, "Flood — 3–10-yr return period"),
+            (C_FV, None, None, "Flood — ≥ 10-yr return period"),
+        ]),
+        ("Other:", [
+            ("#FFFFFF", "///", C_HATCH_GREY, "Roughly normal (mod skill)"),
+            ("#FFFFFF", "xxx", C_HATCH_GREY, "Low skill"),
+            (C_OFF, None, None, "Outside rainy season"),
+        ]),
     ]
-    for i, (fill, hatch, hcol, lab) in enumerate(legend_rows):
-        yy = 0.805 - i * 0.040
-        _swatch(lx, yy, fill, hatch, hcol)
-        fig.text(lx + 0.030, yy + 0.005, lab, fontsize=9, color="#333")
+    yy = 0.845
+    for title, rows in legend_groups:
+        fig.text(lx, yy, title, fontsize=10.5, fontweight="bold")
+        yy -= 0.042
+        for fill, hatch, hcol, lab in rows:
+            _swatch(lx, yy, fill, hatch, hcol)
+            fig.text(lx + 0.030, yy + 0.005, lab, fontsize=9, color="#333")
+            yy -= 0.038
+        yy -= 0.012
 
     # climatology as a bar chart: country-mean hindcast vs this forecast, mm/day
     C_CLIM_BAR = "#AEB8C2"
