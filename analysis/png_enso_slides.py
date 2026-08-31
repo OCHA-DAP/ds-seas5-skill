@@ -1,21 +1,22 @@
 """Two slides for Papua New Guinea, published under pages/png-enso/.
 
 Slide 1 — ERA5 rainfall x ENSO (Nino3.4) teleconnection, pixelwise at the native
-0.25 degree ERA5 grid, using exactly the ds-teleconnections page methodology
-(trimester means, rainy-season + arid filters, lag sweep, p<0.05, the discrete
-blue/brown |r| bins) but zoomed to PNG instead of the global viewport.
+0.25 degree ERA5 grid: the ds-teleconnections page's PARTIAL pass (Nino3.4's
+unique signal holding DMI/TNA/TSA/AMM constant, PDO excluded from controls,
+per-pixel best lags frozen from the total sweep, p<0.05, the discrete blue/brown
+|r| bins) zoomed to PNG instead of the global viewport.
 
 Slide 2 — the current SEAS5 forecast, pixelwise with ADM1 boundaries overlaid,
-one tile per upcoming trimester (all four trimesters fully covered by the latest
-issuance), coloured by percent anomaly of the ensemble-mean forecast vs the
-SEAS5 hindcast climatology for the same issued month + leads (so model bias
-cancels). The tile with the most negative country-mean anomaly is tagged as the
-worst trimester.
+one column per upcoming trimester (all four fully covered by the latest
+issuance): top row the hindcast-mean climatology (mm/day), bottom row the
+ensemble-mean forecast as a percentile of the same-issuance hindcast (so model
+bias cancels). The column with the lowest country-mean percentile is tagged as
+the driest.
 
 Data:
   - ERA5 monthly mm/day COGs (prod raster blob, era5/monthly/processed/) — read
     from the ds-teleconnections local cache when present, else fetched.
-  - Nino3.4 anomaly index from NOAA PSL (cached next to this script's outputs).
+  - Six NOAA PSL climate indices (nino34, dmi, tna, tsa, amm, pdo; cached).
   - SEAS5 monthly-by-leadtime COGs via stratus.stack_cogs("seas5", ...).
   - PNG ADM1 from public.polygon (prod DB).
 
@@ -66,7 +67,19 @@ C_POS_STRONG, C_POS_MOD = "#0D40B0", "#71B3E5"
 C_NEG_MOD, C_NEG_STRONG = "#C8844A", "#7B3A1A"
 C_NOSIG, C_OCEAN, C_OUTLINE = "#E8E8E8", "#FFFFFF", "#9AA3B0"
 
-NINA34_URL = "https://psl.noaa.gov/data/correlation/nina34.anom.data"
+# Same index set + partial-control convention as the teleconnections page:
+# every mode enters at its own per-pixel best lag; PDO is kept out of the
+# control set (cfg["partial_exclude"] there) but nino34's partial is computed
+# within the base model {nino34, dmi, tna, tsa, amm}.
+INDEX_SOURCES = {
+    "nino34": "https://psl.noaa.gov/data/correlation/nina34.anom.data",
+    "dmi":    "https://psl.noaa.gov/gcos_wgsp/Timeseries/Data/dmi.had.long.data",
+    "tna":    "https://psl.noaa.gov/data/correlation/tna.data",
+    "tsa":    "https://psl.noaa.gov/data/correlation/tsa.data",
+    "amm":    "https://psl.noaa.gov/data/correlation/amm.data",
+    "pdo":    "https://psl.noaa.gov/data/correlation/pdo.data",
+}
+PARTIAL_EXCLUDE = {"pdo"}
 
 
 # ── shared helpers ──────────────────────────────────────────────────────────────
@@ -101,12 +114,19 @@ def _parse_psl(text: str) -> pd.Series:
     return s.where(s > -900)
 
 
-def load_nino34() -> pd.Series:
+def load_indices() -> pd.DataFrame:
     CACHE.mkdir(parents=True, exist_ok=True)
-    f = CACHE / "nina34.anom.data"
-    if not f.exists():
-        f.write_text(requests.get(NINA34_URL, timeout=60).text)
-    return _parse_psl(f.read_text())
+    out = {}
+    for name, url in INDEX_SOURCES.items():
+        f = CACHE / f"{name}.data"
+        if not f.exists():
+            f.write_text(requests.get(url, timeout=60).text)
+        out[name] = _parse_psl(f.read_text())
+    return pd.DataFrame(out).loc[f"{START_YEAR}":]
+
+
+def load_nino34() -> pd.Series:
+    return load_indices()["nino34"]
 
 
 def index_trimester_mean(idx: pd.Series, end_month: int, lag: int) -> pd.Series:
@@ -209,24 +229,52 @@ def land_mask(gdf: gpd.GeoDataFrame, x: np.ndarray, y: np.ndarray) -> np.ndarray
 # ── Slide 1: pixelwise ERA5 x Nino3.4 ───────────────────────────────────────────
 
 
-def pearson_p(r: np.ndarray, n: int) -> np.ndarray:
-    dof = float(n) - 2
+def pearson_p(r: np.ndarray, n: int, k: int = 0) -> np.ndarray:
+    """Two-tailed p for Pearson/partial r with `k` controlled variables."""
+    dof = float(n) - k - 2
     with np.errstate(invalid="ignore", divide="ignore"):
         t = r * np.sqrt(dof / np.clip(1 - r**2, 1e-12, None))
         return 2 * stats.t.sf(np.abs(t), dof)
 
 
-def compute_enso_correlations():
-    """Per-trimester best-lag Pearson r of trimester rainfall vs Nino3.4.
+def _partial_vs_last(V: np.ndarray) -> np.ndarray:
+    """Partial correlation of each leading column of V with its last column,
+    controlling for the others — the precision-matrix identity, batched over
+    cells exactly as in the teleconnections script. V: (c, n, q) -> (c, q-1)."""
+    c, n, q = V.shape
+    Vc = V - V.mean(axis=1, keepdims=True)
+    sd = np.sqrt((Vc**2).sum(axis=1))
+    ok = sd > 0
+    Vs = Vc / np.where(ok, sd, 1.0)[:, None, :]
+    C = np.einsum("cni,cnj->cij", Vs, Vs)
+    C[:, np.arange(q), np.arange(q)] += 1e-9
+    P = np.linalg.inv(C)
+    d = np.sqrt(np.abs(np.diagonal(P, axis1=1, axis2=2)))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        r = -P[:, :-1, -1] / (d[:, :-1] * d[:, -1:])
+    r = np.clip(r, -1.0, 1.0)
+    r[~(ok[:, :-1] & ok[:, -1:])] = np.nan
+    return r
 
-    Returns (results, rainy, x, y, mask) where results[tri] = dict(r, p, lag)
-    each an (ny, nx) array (NaN off-land), rainy[tri] the analysable mask.
+
+def compute_enso_correlations():
+    """Per-trimester PARTIAL r of trimester rainfall vs Nino3.4 — the unique
+    ENSO signal, holding DMI, TNA, TSA and AMM constant (PDO excluded from the
+    control set, as on the teleconnections page). Each index enters at its own
+    per-pixel best lag frozen from the total sweep, mirroring pixel_partial_pass.
+
+    Returns (results, rainy, x, y, mask) where results[tri] = dict(r, p) each an
+    (ny, nx) array (partial r / p; NaN off-land), rainy[tri] the analysable mask.
     """
     stack, ym, x, y = era5_png_stack()
     adm0 = load_png_adm0()
     mask = land_mask(adm0, x, y)
     mpos = {p: i for i, p in enumerate(ym)}
-    nino = load_nino34()
+    indices = load_indices()
+    cols = list(indices.columns)
+    base = [j for j, c in enumerate(cols) if c not in PARTIAL_EXCLUDE]
+    j_nino = base.index(cols.index("nino34"))
+    k_controls = len(base) - 1
 
     tri_years, tri_data = {}, {}
     for tri in TRIMESTERS:
@@ -251,32 +299,57 @@ def compute_enso_correlations():
 
     results = {}
     for tri in TRIMESTERS:
-        Y = tri_data[tri].reshape(len(tri_years[tri]), -1)
         yrs = tri_years[tri]
-        r_best = np.full(Y.shape[1], np.nan)
-        lag_best = np.full(Y.shape[1], -1, dtype=int)
-        n_best = 0
-        for lag in range(MAX_LAG + 1):
-            xs = index_trimester_mean(nino, TRIMESTERS[tri], lag).dropna()
-            common = np.intersect1d(yrs, xs.index.values)
-            if len(common) < MIN_YEARS:
-                continue
-            sel = np.isin(yrs, common)
-            Yc = Y[sel] - Y[sel].mean(axis=0)
-            sy = np.sqrt((Yc**2).sum(axis=0))
-            xc = xs.loc[common].values
-            xc = xc - xc.mean()
-            sx = np.sqrt((xc**2).sum())
-            with np.errstate(invalid="ignore", divide="ignore"):
-                r = (xc @ Yc) / (sx * sy)
-            upd = np.isfinite(r) & (np.isnan(r_best) | (np.abs(r) > np.abs(r_best)))
-            r_best[upd], lag_best[upd] = r[upd], lag
-            n_best = len(common)
+        npix = mask.size
         shape = mask.shape
+
+        # one shared year set per trimester: seasons where every index exists at
+        # every candidate lag, so the frozen per-cell lag mix is always aligned
+        series = {}
+        common = yrs
+        for j, name in enumerate(cols):
+            for lag in range(MAX_LAG + 1):
+                s = index_trimester_mean(indices[name], TRIMESTERS[tri], lag).dropna()
+                series[(j, lag)] = s
+                common = np.intersect1d(common, s.index.values)
+        if len(common) < MIN_YEARS:
+            nan = np.full(shape, np.nan)
+            results[tri] = {"r": nan, "p": nan.copy()}
+            continue
+        sel = np.isin(yrs, common)
+        Y = tri_data[tri].reshape(len(yrs), -1)[sel]        # (n_yr, npix)
+        n_yr = len(common)
+
+        # TOTAL sweep per index: per-pixel best lag (frozen for the partial)
+        Yc = Y - Y.mean(axis=0)
+        sy_norm = np.sqrt((Yc**2).sum(axis=0))
+        lag_best = np.zeros((len(cols), npix), dtype=int)
+        for j in range(len(cols)):
+            r_best = np.full(npix, np.nan)
+            for lag in range(MAX_LAG + 1):
+                xc = series[(j, lag)].loc[common].values.astype("float64")
+                xc -= xc.mean()
+                sx = np.sqrt((xc**2).sum())
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    r = (xc @ Yc) / (sx * sy_norm)
+                upd = np.isfinite(r) & (np.isnan(r_best)
+                                        | (np.abs(r) > np.abs(r_best)))
+                r_best[upd], lag_best[j, upd] = r[upd], lag
+
+        # PARTIAL pass on the frozen lags, base model only (PDO left out)
+        X = np.stack([
+            np.stack([series[(j, lag)].loc[common].values
+                      for lag in range(MAX_LAG + 1)])
+            for j in range(len(cols))
+        ])                                                  # (n_idx, n_lags, n_yr)
+        M = np.empty((npix, n_yr, len(base)))
+        for bj, j in enumerate(base):
+            M[:, :, bj] = X[j][lag_best[j]]
+        V = np.concatenate([M, Y.T[:, :, None]], axis=2)
+        rp = _partial_vs_last(V)[:, j_nino]                 # (npix,)
         results[tri] = {
-            "r": np.where(mask.reshape(-1), r_best, np.nan).reshape(shape),
-            "p": pearson_p(r_best, n_best).reshape(shape),
-            "lag": lag_best.reshape(shape),
+            "r": np.where(mask.reshape(-1), rp, np.nan).reshape(shape),
+            "p": pearson_p(rp, n_yr, k=k_controls).reshape(shape),
         }
     return results, rainy, x, y, mask
 
@@ -346,7 +419,7 @@ def make_slide1(path_png: Path):
 
     ax_main = fig.add_subplot(gs[0, :])
     _map_panel(ax_main, r_best, has, mask, x, y, adm1, adm0,
-               "Peak ENSO signal — strongest significant trimester per pixel",
+               "Unique ENSO signal — strongest significant trimester per pixel",
                title_size=12)
 
     for k, tri in enumerate(_ANNUAL):
@@ -358,13 +431,14 @@ def make_slide1(path_png: Path):
     fig.text(0.04, 0.955, "Papua New Guinea — ERA5 rainfall × ENSO teleconnection",
              fontsize=19, fontweight="bold", color="#1a1a1a")
     fig.text(0.04, 0.905,
-             "Pixelwise Pearson correlation of trimester rainfall with Niño3.4, "
-             f"ERA5 native 0.25° grid, {START_YEAR}–{END_YEAR}",
+             "Pixelwise partial correlation of trimester rainfall with Niño3.4 — the other "
+             f"climate modes held constant — ERA5 0.25° grid, {START_YEAR}–{END_YEAR}",
              fontsize=11.5, color="#444")
 
     # Legend + reading notes
     lx = 0.745
-    fig.text(lx, 0.82, "Correlation with Niño3.4", fontsize=11, fontweight="bold")
+    fig.text(lx, 0.82, "Partial correlation with Niño3.4", fontsize=11,
+             fontweight="bold")
     legend_rows = [
         (C_POS_STRONG, f"Positive, strong (r ≥ {R_STRONG})"),
         (C_POS_MOD, f"Positive, moderate ({R_MIN} ≤ r < {R_STRONG})"),
@@ -380,12 +454,15 @@ def make_slide1(path_png: Path):
         fig.text(lx + 0.032, yy + 0.007, lab, fontsize=9.5, color="#333")
 
     fig.text(lx, 0.50,
-             "Method (as the ERA5 teleconnections page):\n"
+             "Method (the teleconnections page's partial pass):\n"
              "• Trimester rainfall means per pixel, all 12\n"
              "   overlapping 3-month windows\n"
-             "• Niño3.4 window ending 0–3 months before the\n"
-             "   trimester end; lag with max |r| kept\n"
-             "• Two-tailed p < 0.05\n"
+             "• Partial r of rainfall vs Niño3.4, holding DMI\n"
+             "   (IOD), TNA, TSA and AMM constant (PDO kept\n"
+             "   out of the controls, as on the page)\n"
+             "• Each mode enters at its per-pixel best lag\n"
+             "   (0–3 mo) frozen from the total sweep\n"
+             "• Two-tailed p < 0.05, df adjusted for controls\n"
              "• Unlike the global page, all seasons are kept\n"
              "   (no rainy-season filter): PNG's El Niño drought\n"
              "   signal peaks in its drier JAS–OND months\n\n"
@@ -506,31 +583,52 @@ def make_slide2(path_png: Path):
 
     cmap = DROUGHT_FLOOD_CMAP
     norm = BoundaryNorm(PCT_BOUNDS, cmap.N)
+    clim_max = max(float(np.nanmax(np.where(mask, per_tri[t]["clim_mm"], np.nan)))
+                   for t in order)
+    clim_cmap = plt.get_cmap("Blues")
 
     fig = plt.figure(figsize=(13.333, 7.5))
     fig.patch.set_facecolor("white")
-    gs = fig.add_gridspec(2, 2, left=0.04, right=0.72, top=0.82, bottom=0.05,
-                          hspace=0.24, wspace=0.08)
+    gs = fig.add_gridspec(2, 4, left=0.065, right=0.72, top=0.80, bottom=0.04,
+                          hspace=0.10, wspace=0.06)
 
-    for k, tri in enumerate(order):
-        ax = fig.add_subplot(gs[k // 2, k % 2])
-        d = per_tri[tri]
-        pct = np.where(mask, d["pct"], np.nan)
-        ax.imshow(pct, extent=_extent(x, y), origin="upper", cmap=cmap, norm=norm,
-                  interpolation="nearest", zorder=1)
-        adm1.boundary.plot(ax=ax, color="#6B7683", linewidth=0.55, zorder=3)
-        adm0.boundary.plot(ax=ax, color="#3E4650", linewidth=0.8, zorder=4)
+    def _finish(ax):
+        adm1.boundary.plot(ax=ax, color="#6B7683", linewidth=0.45, zorder=3)
+        adm0.boundary.plot(ax=ax, color="#3E4650", linewidth=0.7, zorder=4)
         ax.set_xlim(LON)
         ax.set_ylim(LAT[1], LAT[0])
         ax.set_aspect("equal")
         ax.set_axis_off()
-        tag = "   ← driest overall" if tri == worst else ""
+
+    for k, tri in enumerate(order):
+        d = per_tri[tri]
+
+        ax = fig.add_subplot(gs[0, k])   # hindcast climatology, mm/day
+        clim = np.where(mask, d["clim_mm"], np.nan)
+        ax.imshow(clim, extent=_extent(x, y), origin="upper", cmap=clim_cmap,
+                  vmin=0, vmax=clim_max, interpolation="nearest", zorder=1)
+        _finish(ax)
         ax.set_title(
-            f"{_season_label(tri, d['season_year'])} — lead {d['lead']} mo — "
-            f"country mean {means[tri]:.0f}th pct{tag}",
-            fontsize=10.5, pad=4,
+            f"{_season_label(tri, d['season_year'])} — lead {d['lead']} mo",
+            fontsize=10.5, pad=5,
             color="#7B3A1A" if tri == worst else "#1a1a1a",
             fontweight="bold" if tri == worst else "normal")
+
+        ax = fig.add_subplot(gs[1, k])   # forecast percentile
+        pct = np.where(mask, d["pct"], np.nan)
+        ax.imshow(pct, extent=_extent(x, y), origin="upper", cmap=cmap, norm=norm,
+                  interpolation="nearest", zorder=1)
+        _finish(ax)
+        tag = " ← driest" if tri == worst else ""
+        ax.set_title(f"country mean {means[tri]:.0f}th pct{tag}", fontsize=9.5, pad=2,
+                     color="#7B3A1A" if tri == worst else "#555",
+                     fontweight="bold" if tri == worst else "normal")
+
+    for row, label in ((0, "Hindcast climatology\n(mm/day)"),
+                       (1, "Forecast percentile\nvs climatology")):
+        fig.text(0.055, 0.62 - row * 0.385, label, fontsize=10, fontweight="bold",
+                 color="#333", ha="right", va="center", rotation=90,
+                 linespacing=1.3)
 
     fig.text(0.04, 0.945, "Papua New Guinea — current SEAS5 seasonal forecast",
              fontsize=19, fontweight="bold", color="#1a1a1a")
@@ -540,32 +638,43 @@ def make_slide2(path_png: Path):
              "· native 0.4° grid · ADM1 boundaries",
              fontsize=11, color="#444")
 
-    # legend
+    # legends
     lx = 0.745
-    fig.text(lx, 0.78, "Forecast percentile vs climatology", fontsize=11,
+    fig.text(lx, 0.795, "Hindcast climatology (mm/day)", fontsize=11,
+             fontweight="bold")
+    cax = fig.add_axes([lx, 0.755, 0.19, 0.022])
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    fig.colorbar(ScalarMappable(Normalize(0, clim_max), clim_cmap), cax=cax,
+                 orientation="horizontal")
+    cax.tick_params(labelsize=8, length=2, pad=2)
+
+    fig.text(lx, 0.675, "Forecast percentile vs climatology", fontsize=11,
              fontweight="bold")
     labels = ["≤ 10th (severely dry)", "10–20th (very dry)", "20–33rd (dry tercile)",
               "33–67th (near normal)", "67–80th (wet)", "80–90th (very wet)",
               "> 90th (severely wet)"]
     for i, lab in enumerate(labels):
         c = cmap(norm((PCT_BOUNDS[i] + PCT_BOUNDS[i + 1]) / 2))
-        yy = 0.735 - i * 0.048
-        fig.add_artist(plt.Rectangle((lx, yy), 0.022, 0.032, facecolor=c,
+        yy = 0.633 - i * 0.044
+        fig.add_artist(plt.Rectangle((lx, yy), 0.022, 0.030, facecolor=c,
                                      edgecolor="#999", linewidth=0.4,
                                      transform=fig.transFigure))
-        fig.text(lx + 0.032, yy + 0.007, lab, fontsize=9.5, color="#333")
+        fig.text(lx + 0.032, yy + 0.006, lab, fontsize=9.5, color="#333")
 
-    fig.text(lx, 0.36,
-             "One tile per upcoming trimester fully covered\n"
-             "by this issuance (leads 1–4). Percentile is\n"
-             "computed per pixel against the same issued\n"
-             "month and leads in the SEAS5 hindcast, so\n"
-             "model bias cancels.\n\n"
+    fig.text(lx, 0.315,
+             "One column per upcoming trimester fully\n"
+             "covered by this issuance (leads 1–4). Top row:\n"
+             "the SEAS5 hindcast-mean rainfall — what is\n"
+             "normal. Bottom row: this forecast as a per-pixel\n"
+             "percentile of the same issued month and leads\n"
+             "in the hindcast, so model bias cancels.\n\n"
              f"Driest outlook overall: {_season_label(worst, per_tri[worst]['season_year'])} "
-             f"(country mean\n{means[worst]:.0f}th percentile). Niño3.4 anomaly:\n"
-             f"{nino_last:+.1f} °C in {nino_when:%b %Y}.",
+             f"(country mean\n{means[worst]:.0f}th percentile). "
+             f"Niño3.4: {nino_last:+.1f} °C in {nino_when:%b %Y}.",
              fontsize=9.5, color="#333", va="top", linespacing=1.5)
-    fig.text(lx, 0.06, "Data: ECMWF SEAS5 (ensemble-mean monthly\n"
+    fig.text(lx, 0.03, "Data: ECMWF SEAS5 (ensemble-mean monthly\n"
                        "precipitation). Boundaries: PNG ADM1 (COD).",
              fontsize=8.5, color="#777", va="bottom", linespacing=1.4)
 
