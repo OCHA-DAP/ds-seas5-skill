@@ -1,4 +1,5 @@
-"""Two slides for Papua New Guinea, published under pages/png-enso/.
+"""Two slides per country (Papua New Guinea, Timor-Leste), published under
+pages/{png,tls}-enso/.
 
 Slide 1 — ERA5 rainfall x ENSO (Nino3.4) teleconnection, pixelwise at the native
 0.25 degree ERA5 grid: the ds-teleconnections page's PARTIAL pass (Nino3.4's
@@ -22,8 +23,9 @@ Data:
   - SEAS5 monthly-by-leadtime COGs via stratus.stack_cogs("seas5", ...).
   - PNG ADM1 from public.polygon (prod DB).
 
-Run:  uv run python analysis/png_enso_slides.py [--skip-era5] [--skip-seas5]
-Writes pages/png-enso/slide{1,2}.png and pages/png-enso/png_enso_slides.pdf.
+Run:  uv run python analysis/png_enso_slides.py [--country png|tls]
+                                                [--skip-era5] [--skip-seas5]
+Writes pages/<key>-enso/slide{1,2}.png and pages/<key>-enso/<key>_enso_slides.pdf.
 """
 
 import argparse
@@ -39,12 +41,28 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy import stats
 
 REPO = Path(__file__).resolve().parents[1]
-OUT_DIR = REPO / "pages" / "png-enso"
 CACHE = REPO / "analysis" / "_png_enso_cache"
 
-# PNG window (covers mainland + Bismarck Archipelago + Bougainville)
-LON = (140.5, 156.75)
-LAT = (0.25, -12.0)  # north, south
+COUNTRIES = {
+    # PNG window covers mainland + Bismarck Archipelago + Bougainville
+    "png": dict(iso3="PNG", name="Papua New Guinea",
+                lon=(140.5, 156.75), lat=(0.25, -12.0)),
+    # TLS window covers the mainland, the Oecusse enclave and Atauro/Jaco
+    "tls": dict(iso3="TLS", name="Timor-Leste",
+                lon=(123.6, 127.8), lat=(-7.6, -10.1)),
+}
+KEY = "png"
+COUNTRY = COUNTRIES[KEY]
+OUT_DIR = REPO / "pages" / f"{KEY}-enso"
+LON, LAT = COUNTRY["lon"], COUNTRY["lat"]   # lat = (north, south)
+
+
+def set_country(key: str) -> None:
+    global KEY, COUNTRY, OUT_DIR, LON, LAT
+    KEY = key
+    COUNTRY = COUNTRIES[key]
+    OUT_DIR = REPO / "pages" / f"{key}-enso"
+    LON, LAT = COUNTRY["lon"], COUNTRY["lat"]
 
 # ds-teleconnections cache of the global ERA5 monthly stack (0.25deg, 1981-2025)
 TELE_CACHE = Path.home() / "OCHA/repos/ds-teleconnections/cache/era5_pixel"
@@ -146,14 +164,15 @@ def tri_month_pairs(tri: str, season_year: int) -> list[tuple[int, int]]:
 
 
 def load_png_adm1() -> gpd.GeoDataFrame:
-    """PNG ADM1 polygons from the prod polygon blob container, cached as GeoJSON."""
-    f = CACHE / "png_adm1.geojson"
+    """ADM1 polygons from the prod polygon blob container, cached as GeoJSON."""
+    iso = COUNTRY["iso3"].lower()
+    f = CACHE / f"{iso}_adm1.geojson"
     if f.exists():
         return gpd.read_file(f)
     import ocha_stratus as stratus
 
     gdf = stratus.load_shp_from_blob(
-        "png_shp.zip", shapefile="png_adm1.shp",
+        f"{iso}_shp.zip", shapefile=f"{iso}_adm1.shp",
         stage="prod", container_name="polygon",
     )
     CACHE.mkdir(parents=True, exist_ok=True)
@@ -164,7 +183,7 @@ def load_png_adm1() -> gpd.GeoDataFrame:
 def load_png_adm0() -> gpd.GeoDataFrame:
     gdf = gpd.read_file(REPO / "analysis" / "_ne_50m_countries.gpkg")
     col = next(c for c in ("iso3", "ISO_A3", "ADM0_A3", "SOV_A3") if c in gdf.columns)
-    return gdf[gdf[col] == "PNG"]
+    return gdf[gdf[col] == COUNTRY["iso3"]]
 
 
 # ── ERA5 monthly stack for the PNG window ───────────────────────────────────────
@@ -172,7 +191,7 @@ def load_png_adm0() -> gpd.GeoDataFrame:
 
 def era5_png_stack() -> tuple[np.ndarray, list[tuple[int, int]], np.ndarray, np.ndarray]:
     """(n_months, ny, nx) mm/day for the PNG window + (year, month) list + coords."""
-    f = CACHE / "era5_png.npz"
+    f = CACHE / f"era5_{KEY}.npz"
     if f.exists():
         z = np.load(f)
         return z["stack"], [tuple(t) for t in z["ym"]], z["x"], z["y"]
@@ -430,7 +449,7 @@ def make_slide1(path_png: Path):
         _map_panel(ax, results[tri]["r"], s, mask, x, y, adm1, adm0, tri,
                    title_size=10)
 
-    fig.text(0.04, 0.955, "Papua New Guinea — ERA5 rainfall × ENSO teleconnection",
+    fig.text(0.04, 0.955, f"{COUNTRY['name']} — ERA5 rainfall × ENSO teleconnection",
              fontsize=19, fontweight="bold", color="#1a1a1a")
     fig.text(0.04, 0.905,
              "Pixelwise partial correlation of trimester rainfall with Niño3.4 — the other "
@@ -466,8 +485,8 @@ def make_slide1(path_png: Path):
              "   (0–3 mo) frozen from the total sweep\n"
              "• Two-tailed p < 0.05, df adjusted for controls\n"
              "• Unlike the global page, all seasons are kept\n"
-             "   (no rainy-season filter): PNG's El Niño drought\n"
-             "   signal peaks in its drier JAS–OND months\n\n"
+             "   (no rainy-season filter), so dry-season ENSO\n"
+             "   signals stay visible\n\n"
              "Negative (brown) = El Niño → drier than normal.",
              fontsize=9.5, color="#333", va="top", linespacing=1.5)
     fig.text(lx, 0.06, "Data: ERA5 monthly precip (0.25°), NOAA PSL\n"
@@ -594,7 +613,7 @@ def load_current_seas5():
     from src.skill_raster import aggregate_seas5_trimester_grid, trimester_lead
     from src.constants import TRIMESTERS as TRI_MONTHS_MAP
 
-    f = CACHE / "seas5_png_current.npz"
+    f = CACHE / f"seas5_{KEY}_current.npz"
     if f.exists():
         z = np.load(f, allow_pickle=True)
         return z["per_tri"].item(), z["x"], z["y"], pd.Timestamp(str(z["issued"]))
@@ -728,7 +747,7 @@ def make_slide2(path_png: Path):
             color="#7B3A1A" if tri == worst else "#1a1a1a",
             fontweight="bold" if tri == worst else "normal")
 
-    fig.text(0.04, 0.945, "Papua New Guinea — current SEAS5 seasonal forecast",
+    fig.text(0.04, 0.945, f"{COUNTRY['name']} — current SEAS5 seasonal forecast",
              fontsize=19, fontweight="bold", color="#1a1a1a")
     fig.text(0.04, 0.895,
              f"Issued {issued:%B %Y} · drought/flood return-period categories vs the "
@@ -823,7 +842,8 @@ def make_slide2(path_png: Path):
              f"(mean {_ordinal(means[worst])} pct).\n"
              f"Niño3.4: {nino_last:+.1f} °C in {nino_when:%b %Y}.",
              fontsize=9, color="#333", va="top", linespacing=1.5)
-    fig.text(lx, 0.015, "Data: ECMWF SEAS5 · Boundaries: PNG ADM1 (COD)",
+    fig.text(lx, 0.015,
+             f"Data: ECMWF SEAS5 · Boundaries: {COUNTRY['iso3']} ADM1 (COD)",
              fontsize=8.5, color="#777", va="bottom")
 
     fig.savefig(path_png, dpi=200, facecolor="white")
@@ -834,7 +854,7 @@ def make_pdf():
     """Assemble the two slide PNGs into a single downloadable PDF."""
     from PIL import Image
 
-    with PdfPages(OUT_DIR / "png_enso_slides.pdf") as pdf:
+    with PdfPages(OUT_DIR / f"{KEY}_enso_slides.pdf") as pdf:
         for name in ("slide1.png", "slide2.png"):
             if not (OUT_DIR / name).exists():
                 print(f"  {name} missing — skipped in PDF")
@@ -850,10 +870,12 @@ def make_pdf():
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
+    ap.add_argument("--country", choices=list(COUNTRIES), default="png")
     ap.add_argument("--skip-era5", action="store_true")
     ap.add_argument("--skip-seas5", action="store_true")
     args = ap.parse_args()
 
+    set_country(args.country)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     if not args.skip_era5:
         make_slide1(OUT_DIR / "slide1.png")
@@ -862,4 +884,4 @@ if __name__ == "__main__":
         make_slide2(OUT_DIR / "slide2.png")
         print("slide2.png written")
     make_pdf()
-    print("png_enso_slides.pdf written")
+    print(f"{KEY}_enso_slides.pdf written")
