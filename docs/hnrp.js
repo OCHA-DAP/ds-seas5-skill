@@ -381,8 +381,11 @@
     const [y, m] = s.split("-").map(Number);
     return new Date(Date.UTC(y, m - 1)).toLocaleString("en", { month: "short", timeZone: "UTC" }) + " " + y;
   };
+  // "Sep–Sep 2025" is a one-month window wearing a range — collapse it. The
+  // IPC payloads bake the range form in; fixing it here covers them all.
+  const fmtWindow = (c) => (c.label ?? "").replace(/^(\w+)–\1 /, "$1 ");
   const comboDesc = (c) => `${c.t}, ${fewsMode() ? "reported" : "exercise"} ` +
-    `${fmtYM(c.a)}, valid ${c.label}` +
+    `${fmtYM(c.a)}, valid ${fmtWindow(c)}` +
     (c.d ? ` — downscaled from admin-${c.d} by population share` : "");  // legacy flag: no longer produced
 
   const IPC_OPT_BASE = { now: "Now", fwd: "Forecast window" };
@@ -406,6 +409,18 @@
     return [...seen.values()].sort((a, b) =>
       (b.c.a ?? "").localeCompare(a.c.a ?? "") || ym(b.c.s) - ym(a.c.s));
   }
+  // Short period-type names for the valid-period buttons: the button row reads
+  // as a sequence (current, then the projections), so the full "first
+  // projection"/"near-term projection" phrasing would only repeat itself.
+  const T_SHORT = {
+    current: "Current",
+    "first projection": "Projection 1",
+    "second projection": "Projection 2",
+    "near-term projection": "Near term",
+    "medium-term projection": "Medium term",
+  };
+  const phaseExSel = document.getElementById("hnrp-phase-ex");
+  const phasePerBtns = document.getElementById("hnrp-phase-periods");
   function updateIpcPeriodUI() {
     const phaseMode = ipcMode() || fewsMode();
     ipcPeriodWrap.hidden = !phaseMode;
@@ -417,54 +432,79 @@
     if (planYrWrap) planYrWrap.hidden = phaseMode;
     const periodLabel = document.getElementById("hnrp-ipc-period-label");
     if (periodLabel) {
-      periodLabel.textContent = fewsMode() ? "FEWS NET estimate" : "IPC estimate";
+      periodLabel.textContent = fewsMode() ? "FEWS NET analysis" : "IPC analysis";
     }
-    if (!phaseMode) return;
+    if (!phaseMode) { phasePerBtns.hidden = true; return; }
     // Explicit periods are only meaningful for one country at a time — across
     // countries the same window belongs to different exercises.
     const keep = ipcPeriodSel.value;
     for (const o of [...ipcPeriodSel.querySelectorAll("option[data-period]")]) o.remove();
-    if (countrySel.value) {
-      const list = ipcPeriodsFor(countrySel.value);
-      const chosen = ipcPeriodOf(
-        (data.rows.find((r) => r.country === countrySel.value) || {}).iso3, "now");
-      for (const { c, units } of list) {
+    const country = countrySel.value;
+    // Two shapes of the same control. World view: one dropdown with the two
+    // auto modes, labelled with the cross-country range they resolve to
+    // (periods differ per country, so nothing finer is honest there). Country
+    // view: an EXERCISE dropdown (which analysis round) plus one button per
+    // validity window of that round — the round is the vintage, the window is
+    // what it classified, and conflating the two in one flat list is what this
+    // replaced.
+    phaseExSel.hidden = !country;
+    phasePerBtns.hidden = !country;
+    ipcPeriodSel.hidden = !!country;
+    if (country) {
+      const list = ipcPeriodsFor(country);
+      // The flat select stays the VALUE HOLDER (renderAll, the URL and every
+      // reader go through ipcPeriodSel.value) — each period still needs an
+      // option to be selectable, even with the control itself hidden.
+      for (const { c } of list) {
         const o = document.createElement("option");
         o.value = periodKey(c);
         o.dataset.period = "1";
-        o.textContent = comboDesc(c)
-          + ` — ${units} unit${units === 1 ? "" : "s"}`
-          + (chosen && periodKey(chosen) === periodKey(c) ? " (current default)" : "");
+        o.textContent = comboDesc(c);
         ipcPeriodSel.appendChild(o);
       }
       if ([...ipcPeriodSel.options].some((o) => o.value === keep)) ipcPeriodSel.value = keep;
       else if (keep !== "now" && keep !== "fwd") ipcPeriodSel.value = "now";
-    } else if (keep !== "now" && keep !== "fwd") {
+      const iso = (data.rows.find((r) => r.country === country) || {}).iso3;
+      // What the map is actually showing: the explicit pick, or whatever the
+      // auto mode resolves to — the buttons mark it either way, so the default
+      // state is never a control with nothing pressed.
+      const resolved = ipcPeriodOf(iso, ipcPeriodSel.value);
+      const resolvedKey = resolved ? periodKey(resolved) : null;
+      const exercises = [...new Set(list.map(({ c }) => c.a))]; // newest first
+      phaseExSel.innerHTML = exercises.map((a, i) =>
+        `<option value="${a}">${fewsMode() ? "Reported" : "Exercised"} ` +
+        `${fmtYM(a)}${i === 0 ? " (latest)" : ""}</option>`).join("");
+      if (resolved && exercises.includes(resolved.a)) phaseExSel.value = resolved.a;
+      const inEx = list.filter(({ c }) => c.a === phaseExSel.value)
+        .sort((x, y) => ym(x.c.s) - ym(y.c.s) || ym(x.c.e) - ym(y.c.e));
+      phasePerBtns.innerHTML = inEx.map(({ c, units }) => {
+        const k = periodKey(c);
+        return `<button type="button" class="seg-btn${k === resolvedKey ? " active" : ""}"` +
+          ` data-key="${k.replace(/"/g, "&quot;")}"` +
+          ` title="${T_SHORT[c.t] ?? c.t} — ${units} unit${units === 1 ? "" : "s"} classified">` +
+          `${T_SHORT[c.t] ?? c.t} · ${fmtWindow(c)}</button>`;
+      }).join("");
+      return;
+    }
+    if (keep !== "now" && keep !== "fwd") {
       ipcPeriodSel.value = "now"; // an explicit period cannot survive "All countries"
     }
-    // The dropdown options ALWAYS state the exercise (analysis) month and validity
-    // window of the numbers each choice resolves to: the concrete analysis when a
-    // country is selected, the cross-country range otherwise (periods differ by
-    // country — the exact one per area is in its tooltip).
+    // The two auto options state the exercise months and validity windows they
+    // resolve to across countries (the exact one per area is in its tooltip).
     const perCountry = (mode) => {
       const per = new Map();
       for (const r of data.rows) {
         if (!combosOf(r) || per.has(r.iso3)) continue;
-        if (countrySel.value && r.country !== countrySel.value) continue;
         const c = ipcComboOf(r, mode);
         if (c) per.set(r.iso3, c);
       }
       return [...per.values()];
     };
     for (const opt of ipcPeriodSel.options) {
-      if (opt.dataset.period) continue; // explicit periods label themselves
+      if (opt.dataset.period) continue;
       const cs = perCountry(opt.value);
       if (!cs.length) {
         opt.textContent = IPC_OPT_BASE[opt.value];
-        continue;
-      }
-      if (countrySel.value) {
-        opt.textContent = `${IPC_OPT_BASE[opt.value]} — ${comboDesc(cs[0])}`;
         continue;
       }
       // "YYYY-MM" strings compare lexicographically = chronologically.
@@ -474,17 +514,34 @@
         `${fewsMode() ? "reported" : "exercises"} ` +
         `${fmtYM(lo("a"))}–${fmtYM(hi("a"))}, valid ${fmtYM(lo("s"))}–${fmtYM(hi("e"))}`;
     }
-    // A projection that is ALSO the latest estimate for now makes the two choices
-    // identical — offering both would imply different data, so hide the redundant one.
-    const fwdOpt = ipcPeriodSel.querySelector('option[value="fwd"]');
-    if (countrySel.value) {
-      const [cn] = perCountry("now"), [cf] = perCountry("fwd");
-      fwdOpt.hidden = !!(cn && cf && cn.t === cf.t && cn.s === cf.s && cn.e === cf.e);
-      if (fwdOpt.hidden && ipcPeriodSel.value === "fwd") ipcPeriodSel.value = "now";
-    } else {
-      fwdOpt.hidden = false;
-    }
+    ipcPeriodSel.querySelector('option[value="fwd"]').hidden = false;
   }
+  // Set an explicit period from the exercise/valid-period controls. The value
+  // must exist as an option before it can be selected.
+  function setPhasePeriod(key) {
+    if (![...ipcPeriodSel.options].some((o) => o.value === key)) {
+      const o = document.createElement("option");
+      o.value = key;
+      o.dataset.period = "1";
+      ipcPeriodSel.appendChild(o);
+    }
+    ipcPeriodSel.value = key;
+    renderAll();
+  }
+  phaseExSel.addEventListener("change", () => {
+    const list = ipcPeriodsFor(countrySel.value)
+      .filter(({ c }) => c.a === phaseExSel.value);
+    if (!list.length) return;
+    // Landing period for a newly picked exercise: its current situation where
+    // it has one, else its earliest window.
+    const pick = list.find(({ c }) => c.t === "current")
+      ?? list.slice().sort((x, y) => ym(x.c.s) - ym(y.c.s))[0];
+    setPhasePeriod(periodKey(pick.c));
+  });
+  phasePerBtns.addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-key]");
+    if (b) setPhasePeriod(b.dataset.key);
+  });
 
   // ── Valid-season selection ───────────────────────────────────────────────────
   // "Worst drought" modes: each unit shows its worst qualifying drought trimester —

@@ -1350,8 +1350,11 @@ def _ipc_lists(df_ipc: pd.DataFrame) -> dict[str, list]:
                 "s": r["s"].strftime("%Y-%m"),
                 "e": r["e"].strftime("%Y-%m"),
                 "a": r["a"].strftime("%Y-%m") if pd.notna(r["a"]) else None,
-                "label": f"{calendar.month_abbr[r['s'].month]}–"
-                         f"{calendar.month_abbr[r['e'].month]} {r['e'].year}",
+                # One-month windows read as "Sep 2025", not "Sep–Sep 2025".
+                "label": (f"{calendar.month_abbr[r['s'].month]}–"
+                          if (r["s"].year, r["s"].month) != (r["e"].year, r["e"].month)
+                          else "")
+                         + f"{calendar.month_abbr[r['e'].month]} {r['e'].year}",
                 "p": [int(r[f"p{ph}"]) for ph in ["1", "2", "3", "4", "5"]],
                 "tot": int(r["pall"]),
             }
