@@ -582,6 +582,20 @@ def load_skill_cube_png(issued_month: int, trimesters: list[str]):
     return out, ds["x"].values, ds["y"].values
 
 
+def country_mean_rp(hist_mm: np.ndarray, current_mm: np.ndarray,
+                    mask: np.ndarray) -> tuple[float, str]:
+    """Weibull RP of the country-mean forecast within the country-mean hindcast
+    (repo convention, src.skill_raster._empirical_rp_grid): RP = (n+1)/rank.
+    Returns (rp_years, 'dry'|'wet') for whichever direction the forecast sits."""
+    cm_hist = np.array([float(np.nanmean(np.where(mask, h, np.nan)))
+                        for h in hist_mm])
+    cm_cur = float(np.nanmean(np.where(mask, current_mm, np.nan)))
+    n = len(cm_hist)
+    rp_dry = (n + 1) / ((cm_hist < cm_cur).sum() + 1)
+    rp_wet = (n + 1) / ((cm_hist > cm_cur).sum() + 1)
+    return (rp_dry, "dry") if rp_dry >= rp_wet else (rp_wet, "wet")
+
+
 def _rp_bin_color(p: float) -> str:
     """Country-mean percentile -> the app's RP category colour (bar chart)."""
     vsev_m, sev_m = 100 / THRESH["vsev_rp"], 100 / THRESH["sev_rp"]
@@ -616,7 +630,10 @@ def load_current_seas5():
     f = CACHE / f"seas5_{KEY}_current.npz"
     if f.exists():
         z = np.load(f, allow_pickle=True)
-        return z["per_tri"].item(), z["x"], z["y"], pd.Timestamp(str(z["issued"]))
+        per_tri = z["per_tri"].item()
+        if all("hist_mm" in d for d in per_tri.values()):
+            return per_tri, z["x"], z["y"], pd.Timestamp(str(z["issued"]))
+        f.unlink()   # cache predates the hist_mm field — rebuild
 
     clip = gpd.GeoDataFrame(geometry=[box(LON[0], LAT[1], LON[1], LAT[0])], crs=4326)
     today = pd.Timestamp.today().normalize().replace(day=1)
@@ -659,6 +676,7 @@ def load_current_seas5():
             "pct": pct.values.astype("float32"),
             "current_mm": current.values.astype("float32"),
             "clim_mm": hist.mean("season_year").values.astype("float32"),
+            "hist_mm": hist.values.astype("float32"),   # (n_hindcast, ny, nx)
             "lead": lead, "n": int(n), "season_year": cur_year,
         }
 
@@ -816,6 +834,15 @@ def make_slide2(path_png: Path):
         if t == worst:
             tick.set_color("#7B3A1A")
             tick.set_fontweight("bold")
+    # overall RP of the country-mean forecast, per trimester (Weibull vs hindcast)
+    for xp, tri in zip(xs_pos, order):
+        rp, side = country_mean_rp(per_tri[tri]["hist_mm"],
+                                   per_tri[tri]["current_mm"], mask)
+        lab = f"1-in-{rp:.0f} {side}" if rp >= 1.5 else "≈ normal"
+        bax.text(xp, -0.21, lab, transform=bax.get_xaxis_transform(),
+                 ha="center", va="top", fontsize=8,
+                 color={"dry": "#7B3A1A", "wet": "#0D40B0"}[side]
+                 if rp >= 1.5 else "#777")
     bax.set_ylim(0, max(clim_means + fc_means) * 1.22)
     bax.tick_params(axis="y", labelsize=8, length=2)
     bax.tick_params(axis="x", length=0)
@@ -826,22 +853,22 @@ def make_slide2(path_png: Path):
     bax.grid(axis="y", color="#EAEAEA", linewidth=0.6, zorder=0)
     bax.set_title("Country-mean rainfall (mm/day)", fontsize=10.5,
                   fontweight="bold", loc="left", pad=10)
-    fig.add_artist(plt.Rectangle((lx + 0.012, 0.172), 0.016, 0.022,
+    fig.add_artist(plt.Rectangle((lx + 0.012, 0.143), 0.016, 0.022,
                                  facecolor=C_CLIM_BAR, transform=fig.transFigure))
-    fig.text(lx + 0.036, 0.176, "hindcast climatology", fontsize=8.5, color="#333")
-    fig.add_artist(plt.Rectangle((lx + 0.145, 0.172), 0.016, 0.022,
+    fig.text(lx + 0.036, 0.147, "hindcast climatology", fontsize=8.5, color="#333")
+    fig.add_artist(plt.Rectangle((lx + 0.145, 0.143), 0.016, 0.022,
                                  facecolor=_rp_bin_color(means[worst]),
                                  edgecolor="#888", linewidth=0.4,
                                  transform=fig.transFigure))
-    fig.text(lx + 0.169, 0.176, "this forecast", fontsize=8.5, color="#333")
+    fig.text(lx + 0.169, 0.147, "this forecast", fontsize=8.5, color="#333")
 
-    fig.text(lx, 0.125,
+    fig.text(lx, 0.112,
              "Categories from the detrended skill cube's forecast\n"
-             "percentile vs the same issued month + leads.\n"
-             f"Driest outlook: {_season_label(worst, per_tri[worst]['season_year'])} "
-             f"(mean {_ordinal(means[worst])} pct).\n"
+             "percentile vs the same issued month + leads. RPs\n"
+             f"under the bars: country mean vs the {per_tri[order[0]]['n']}-yr "
+             "hindcast.\n"
              f"Niño3.4: {nino_last:+.1f} °C in {nino_when:%b %Y}.",
-             fontsize=9, color="#333", va="top", linespacing=1.5)
+             fontsize=9, color="#333", va="top", linespacing=1.4)
     fig.text(lx, 0.015,
              f"Data: ECMWF SEAS5 · Boundaries: {COUNTRY['iso3']} ADM1 (COD)",
              fontsize=8.5, color="#777", va="bottom")
