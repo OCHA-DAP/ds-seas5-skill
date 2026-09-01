@@ -37,6 +37,16 @@ QUARTO_PYTHON=.venv/bin/python quarto render analysis/uganda_hnrp.qmd --to html
 cp analysis/uganda_hnrp.html pages/uganda/index.html
 ```
 
+## The Uganda flood-trigger plan
+
+`pages/uganda-flood-trigger/index.html` is hand-authored HTML (no build step): the
+OND 2026 flood-trigger design plan and options, synthesized from five country
+documents shared Aug 2026 (DTM affected-by-district xlsx, UHF emerging-risk note,
+El Niño impact retrospective, URCS/FAO flood-risk maps, FAO EWS/AA assessment) plus
+the `/uganda/` analysis's FloodScan/SEAS5 layers. The source documents are not
+committed or republished — the page quotes district-level facts only. Edit the HTML
+directly to update.
+
 ## The country ENSO slides (PNG, Timor-Leste)
 
 `pages/png-enso/` and `pages/tls-enso/` each hold two committed slide PNGs plus a 2-page

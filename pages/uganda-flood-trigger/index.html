@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uganda — OND 2026 flood trigger: revised analysis and design options</title>
+<meta name="description" content="Plan and options for an anticipatory-action flood trigger for Uganda's Oct–Dec 2026 season: what the new country documents add, where a trigger can point under the Severity 3+ constraint, and how the design would be validated.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #f5f6f7; color: #1a1a1a;
+         font: 400 15px/1.55 'Roboto', system-ui, sans-serif; }
+  .home-link { display: inline-block; margin: 10px 12px; padding: 6px 12px;
+    font: 500 13px/1 'Roboto', system-ui, sans-serif; color: #1e795f;
+    background: #e9f5f1; border: 1px solid #d4eae4; border-radius: 4px;
+    text-decoration: none; }
+  .home-link:hover { background: #d4eae4; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 16px 56px; }
+  h1 { font-size: 25px; font-weight: 700; margin: 8px 0 4px; }
+  h2 { font-size: 19px; font-weight: 700; margin: 34px 0 8px;
+       border-bottom: 2px solid #d4eae4; padding-bottom: 5px; }
+  h3 { font-size: 15.5px; font-weight: 700; margin: 20px 0 6px; }
+  .sub { color: #555; margin: 2px 0 18px; max-width: 78ch; }
+  p, li { max-width: 82ch; }
+  .callout { background: #fff; border: 1px solid #e2e4e6; border-left: 4px solid #1e795f;
+             border-radius: 4px; padding: 12px 16px; margin: 16px 0; }
+  .callout.warn { border-left-color: #eb6420; }
+  .callout p { margin: 6px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0 6px;
+          background: #fff; border: 1px solid #e2e4e6; font-size: 13.5px; }
+  th, td { padding: 7px 10px; border-bottom: 1px solid #eceeef; text-align: left;
+           vertical-align: top; }
+  th { background: #f0f3f2; font-weight: 500; }
+  tr:last-child td { border-bottom: none; }
+  .tblwrap { overflow-x: auto; }
+  .tag { display: inline-block; font-size: 11.5px; font-weight: 500; padding: 1px 7px;
+         border-radius: 9px; white-space: nowrap; }
+  .tag.a { background: #fdeaea; color: #b8272d; }
+  .tag.b { background: #fdf3e7; color: #b26514; }
+  .tag.c { background: #eceeef; color: #555; }
+  .tag.ok { background: #e9f5f1; color: #16604b; }
+  .opt { background: #fff; border: 1px solid #e2e4e6; border-radius: 6px;
+         padding: 14px 18px; margin: 14px 0; }
+  .opt h3 { margin-top: 0; }
+  .opt .pc { display: flex; flex-wrap: wrap; gap: 4px 26px; margin-top: 8px; }
+  .opt .pc div { flex: 1 1 300px; font-size: 13.5px; }
+  .opt .pc strong { color: #16604b; }
+  .opt .pc .con strong { color: #b8272d; }
+  .meta { color: #777; font-size: 13px; border-top: 1px solid #e2e4e6;
+          padding-top: 14px; margin-top: 40px; }
+  .meta code, p code, li code { background: #eceeef; padding: 1px 5px; border-radius: 3px;
+                                font-size: 12.5px; }
+  a { color: #1e795f; }
+</style>
+</head>
+<body>
+<!-- back to the site landing page — first element inside body -->
+<a class="home-link" href="../">← SEAS5 Precipitation Alerts</a>
+
+<div class="wrap">
+  <h1>Uganda — OND 2026 flood trigger: revised analysis and design options</h1>
+  <p class="sub">A design plan, not yet a trigger. New country documents (impact records,
+     severity classifications, community flood-risk maps) shared in Aug 2026 sharpen
+     the <a href="../uganda/">August drought &amp; flood analysis</a> into a concrete
+     question: what would an anticipatory-action flood trigger for the Oct–Dec 2026
+     season look like, targeting only Severity 3+ locations, with a few days of lead
+     time, in places where this season's flooding is predictable enough to act on —
+     and with the funds spent before the season ends.</p>
+
+  <div class="callout">
+    <p><strong>The season this trigger would run in.</strong> The August 2026 SEAS5
+       issuance forecasts Oct–Dec at the 91st–98th rainfall percentile across Uganda —
+       the wettest OND forecast in SEAS5's own history — with El Niño and a positive
+       IOD both active, the 2015/2023 configuration. The
+       <a href="../uganda/">existing analysis</a> shows wettest-quintile ONDs flood
+       significantly more (Mann-Whitney p&nbsp;=&nbsp;0.018), and Eastern region's flood extent
+       has run near record levels all 2026 on stored water alone. A trigger designed
+       now would be activated into a season with unusually high prior odds — which is
+       exactly the situation the funding constraint (spend by end of season) wants.</p>
+  </div>
+
+  <h2>1 · What the new documents contain</h2>
+
+  <div class="tblwrap"><table>
+    <tr><th>Document</th><th>What it is</th><th>What it contributes here</th></tr>
+    <tr>
+      <td><em>El Niño Impact in Uganda 2023–2025</em> (4&nbsp;pp, for the 4 Jun 2026
+          OPM high-level meeting on EW/AA)</td>
+      <td>Event-by-event impact retrospective: 2024 the worst year on record (78,000+
+          displaced, 413,000+ affected); Rwenzori floods Aug–Sep 2024 (~44,400 affected,
+          ~25,400 displaced); Bulambuli landslides Nov 2024 (49+ deaths); Mt Elgon
+          Aug 2025 (20 deaths, 113 missing); Kampala flash floods Mar 2025.</td>
+      <td>The impact geography: Mt Elgon and Rwenzori sub-regions dominate deaths and
+          displacement. Confirms past AA precedent (URCS flood EAP activated Nov 2023
+          via IFRC DREF).</td>
+    </tr>
+    <tr>
+      <td><em>Emerging Risk: disaster displacement and the 2026 El Niño outlook</em>
+          (UHF strategy note, Aug 2026)</td>
+      <td>JIAF-informed severity read: provisional intersectoral <strong>Severity 3 at
+          verified sites in Kasese and Ntoroko</strong> (tier A); Bulambuli, Kween,
+          Bukwo, Bududa in high-readiness (tier B); Bundibugyo, Bunyangabu, Manafwa,
+          Namisindwa, Sironko as conditional monitoring (tier C). Explicitly recommends
+          a <strong>forecast-triggered anticipatory-action window</strong> with an
+          agreed trigger matrix (DMS-MWE rainfall warnings, river thresholds,
+          soil/slope indicators) and 24–72&nbsp;h release financing.</td>
+      <td>The Severity 3+ constraint made operational: which districts qualify today,
+          which only after verification. Also the institutional ask this trigger
+          design answers.</td>
+    </tr>
+    <tr>
+      <td><em>IOM DTM: affected people by district</em> (xlsx, Oct 2023 – Oct 2025,
+          sourced to 10 published DTM EET reports)</td>
+      <td>District-level flood/landslide affected counts per reporting round.
+          Largest: Kasese 200,000 (Nov–Dec 2024); Pallisa 49,000 and Katakwi 29,735
+          (Sep–Oct 2025); Ntoroko 30,224 (Aug 2024); Otuke 13,560 (Sep–Oct 2024);
+          Moyo 21,091 (Oct–Nov 2023).</td>
+      <td>A second impact record alongside EM-DAT — finer-grained and more recent.
+          Trigger validation requires exactly this (impact record + observational
+          record, not one or the other).</td>
+    </tr>
+    <tr>
+      <td><em>URCS/FAO flood-risk maps</em> (Dec 2023, "10 districts" — 9 unique maps;
+          one page is a duplicate of Mbale, Sironko appears missing)</td>
+      <td>Community-validated hotspot maps for Bulambuli, Butaleja, Bundibugyo, Kasese,
+          Katakwi, Manafwa, Mbale, Ntoroko, Namisindwa: past flood events, elements at
+          risk (schools, health facilities, boreholes), proposed evacuation centres and
+          routes.</td>
+      <td>Sub-district targeting: once a district trigger is activated, these maps say
+          which communities and facilities the money goes to. Also an implicit
+          district shortlist someone already agreed on.</td>
+    </tr>
+    <tr>
+      <td><em>FAO/OPM/DRC/UNHCR EWS &amp; AA needs assessment, refugee-hosting
+          districts</em> (preliminary, Jan 2026)</td>
+      <td>92-respondent survey across 13 refugee-hosting districts: EWS coverage weak,
+          fragmented, rarely reaching households; highest multi-hazard risk in
+          Kiryandongo, Madi-Okollo, Terego, Yumbe, Lamwo; flood exposure flagged in
+          Kiryandongo, Adjumani, Obongi; literacy, network and language the top
+          dissemination barriers.</td>
+      <td>Mostly a caution: in refugee-hosting districts the last mile of any warning
+          is weak, so trigger lead time must budget for slow dissemination. These
+          districts are drought/conflict-dominated and mostly not Severity 3+ flood
+          locations — largely out of scope for <em>this</em> trigger.</td>
+    </tr>
+  </table></div>
+
+  <h2>2 · What this revises in the analysis</h2>
+  <ul>
+    <li><strong>From extent to impact.</strong> The existing analysis showed FloodScan
+        flood-extent recurrence concentrating in the Teso/Lake Kyoga wetlands while
+        EM-DAT impacts concentrate in Kasese and the Mt Elgon corridor. The DTM record
+        confirms and sharpens this: the biggest recent caseloads are Kasese, Pallisa,
+        Katakwi, Ntoroko, Otuke — a mix of both regimes. A trigger indexed on flood
+        <em>extent</em> alone would systematically miss the deadliest locations.</li>
+    <li><strong>The Severity 3+ constraint binds hard.</strong> Only Kasese and Ntoroko
+        carry (provisional, site-level) Severity 3 today. The Teso/Kyoga wetland
+        districts — where flooding is most <em>predictable</em> and recent caseloads are
+        large — are classified only as "trigger-dependent Severity 2–3, requires
+        verification" in the UHF note. The most forecastable flooding and the currently
+        eligible locations only partially overlap; the design has to face that tension
+        rather than average over it (options and an explicit decision below).</li>
+    <li><strong>Sub-district targeting exists now.</strong> The URCS/FAO maps mean an
+        activation does not stop at a district name: hotspot communities, at-risk
+        facilities and evacuation routes are pre-identified for 9 of the candidate
+        districts.</li>
+    <li><strong>Two-track funding logic.</strong> The UHF note separates response for
+        verified current needs from forecast-triggered AA. This page concerns only the
+        second track — which means the trigger does not need to prove current severity;
+        it needs to anticipate flooding <em>in locations already classified 3+</em>.</li>
+    <li><strong>Validation data improved.</strong> DTM gives ten dated impact
+        observations across 2023–2025 at district level to backtest against, in
+        addition to EM-DAT's coarser event list.</li>
+  </ul>
+
+  <h2>3 · Where a trigger can point</h2>
+  <p>Candidate areas, scored against the three requirements (Severity 3+, predictable
+     this season, meaningful lead time possible):</p>
+
+  <div class="tblwrap"><table>
+    <tr><th>Area</th><th>Severity status (UHF note)</th><th>Flood regime</th>
+        <th>Predictability</th><th>Recent impacts (DTM/EM-DAT)</th><th>URCS map</th></tr>
+    <tr>
+      <td><strong>Ntoroko</strong> (Semliki lowlands)</td>
+      <td><span class="tag a">Tier A — Sev 3 verified sites</span></td>
+      <td>Riverine/lakeshore (Semliki river, Lake Albert flats) — slow-onset, recurrent</td>
+      <td><span class="tag ok">Best of the eligible set</span> — riverine, forecastable
+          discharge, wetland signal visible to FloodScan</td>
+      <td>30,224 affected Aug 2024; 13,776 Oct–Nov 2023; 54,000+ affected Aug–Sep 2024
+          (UN)</td><td>Yes</td>
+    </tr>
+    <tr>
+      <td><strong>Kasese</strong> (Nyamwamba/Mubuku/Nyamugasani)</td>
+      <td><span class="tag a">Tier A — Sev 3 verified sites</span></td>
+      <td>Flashy mountain rivers off the Rwenzoris — fast-onset riverine/flash</td>
+      <td>Moderate — short catchment response; needs short-range rainfall or
+          high-frequency gauge forecasts, not seasonal products</td>
+      <td>200,000 affected Nov–Dec 2024 (DTM); 19,508 May 2024; repeated 2023–25</td>
+      <td>Yes</td>
+    </tr>
+    <tr>
+      <td><strong>Mt Elgon corridor</strong> (Bulambuli, Bududa, Sironko, Manafwa,
+          Namisindwa)</td>
+      <td><span class="tag b">Tier B/C — readiness/monitoring, Sev 3 on verification</span></td>
+      <td>Landslides + flash floods on saturated slopes</td>
+      <td>Weakest — landslide timing is not forecastable at useful precision; rainfall
+          proxy only, high false-alarm rate; invisible to 9-km FloodScan</td>
+      <td>Bulambuli Nov 2024: 49+ deaths, 12,000+ displaced; Aug 2025: 20 deaths,
+          15,000 affected</td><td>Yes (4 of 5)</td>
+    </tr>
+    <tr>
+      <td><strong>Teso/Kyoga wetlands</strong> (Katakwi, Pallisa, Butaleja; also Otuke,
+          Apac)</td>
+      <td><span class="tag c">Not tiered — "lakeshore: trigger-dependent Sev 2–3, verify"</span></td>
+      <td>Wetland-extent riverine flooding — the most recurrent regime in the country
+          (parts flood every OND)</td>
+      <td><span class="tag ok">Highest</span> — but eligibility under the Sev 3+ rule
+          is unresolved</td>
+      <td>Pallisa 49,000 + Katakwi 29,735 affected Sep–Oct 2025; 2007 Teso and Dec 2019
+          among worst EM-DAT events</td><td>Yes (Katakwi, Butaleja)</td>
+    </tr>
+  </table></div>
+
+  <div class="callout warn">
+    <p><strong>Decision needed from the working group before design starts:</strong>
+       are Katakwi/Pallisa/Butaleja in scope? They are the most predictable flooding
+       with large 2025 caseloads, but are not currently classified Severity 3+. If the
+       country team can verify severity there in September (the UHF note's own
+       framework allows "trigger-dependent" classification), they become the strongest
+       trigger candidates on the board. If not, the mechanism is Ntoroko + Kasese, with
+       the Elgon corridor as a readiness-only window.</p>
+  </div>
+
+  <h2>4 · Trigger options</h2>
+  <p>All options follow the team's standard shape: return-period-calibrated thresholds,
+     staged windows by lead time (readiness releasing only mobilisation funds ~5%,
+     action releasing the bulk), forecast OR'd with an observational backstop. Given
+     the funds must move this season, thresholds should target a <em>low</em> rarity —
+     roughly 1-in-2 to 1-in-3-year — rather than the usual 1-in-5; in a
+     forecast-record-wet season that puts the combined annual activation probability
+     high, by design.</p>
+
+  <div class="opt">
+    <h3>Option 1 — GloFAS ensemble discharge at selected reaches (riverine core)</h3>
+    <p>GloFAS ensemble forecast discharge exceeding the ~2–3-yr return-period threshold
+       with ≥60% of members, at reaches for the Semliki (Ntoroko), the Kasese rivers,
+       and — if in scope — the Teso/Kyoga inflows and Manafwa river (Butaleja).
+       Action window at 3–7 days lead; the same reaches at 10–15 days serve as the
+       readiness window. This is the team's most-used flood pattern (Nepal, Chad,
+       Bangladesh, South Sudan, Nigeria readiness).</p>
+    <div class="pc">
+      <div><strong>For:</strong> real lead time (3–7 days); 20+ years of reforecasts to
+        calibrate and backtest against; well-trodden methodology.</div>
+      <div class="con"><strong>Against:</strong> skill at small, steep, ungauged
+        catchments (Kasese especially) must be demonstrated, not assumed; GloFAS is
+        weakest exactly where the mountains are.</div>
+    </div>
+  </div>
+
+  <div class="opt">
+    <h3>Option 2 — Google Flood Hub / GRRR gauge consensus (small-river coverage)</h3>
+    <p>Google's operational river gauges publish forecasts to 7 days with pre-computed
+       2/5/20-yr warning levels, and cover smaller rivers than GloFAS resolves. A
+       multi-gauge consensus (N of M gauges over their warning level simultaneously —
+       the design Nigeria's 2026 revision adopted after single-gauge logic proved
+       fragile) across the gauges in each target area.</p>
+    <div class="pc">
+      <div><strong>For:</strong> better small-catchment coverage; thresholds
+        ready-made; consensus damps single-gauge noise; free API.</div>
+      <div class="con"><strong>Against:</strong> short hindcast archive makes a proper
+        backtest harder (validate against 2023–25 DTM events at minimum); gauge
+        availability over the Rwenzori/Elgon rivers must be inventoried first — this is
+        the first task of the design phase.</div>
+    </div>
+  </div>
+
+  <div class="opt">
+    <h3>Option 3 — Short-range extreme-rainfall trigger (flash-flood / landslide corridor)</h3>
+    <p>For Kasese and (if funded) the Elgon corridor, where discharge products are
+       least reliable: ECMWF ensemble 3-day accumulated rainfall over the upslope
+       catchment exceeding its ~3-yr return-period value, at 1–5 days lead, OR'd with a
+       UNMA/DMS-MWE heavy-rainfall advisory for the sub-region. Rainfall is a proxy —
+       antecedent saturation does the real work in landslides — so pair with a simple
+       antecedent-wetness qualifier (e.g. previous 30-day rainfall percentile) to cut
+       false alarms.</p>
+    <div class="pc">
+      <div><strong>For:</strong> the only forecast chain that reaches the deadliest
+        hazard (slope failures); ties the mechanism to the national warning authority,
+        which the UHF note requires anyway.</div>
+      <div class="con"><strong>Against:</strong> the rain→impact link is the noisiest of
+        the three; expect either misses or a high false-alarm ratio, and say so in the
+        trigger report rather than hiding it.</div>
+    </div>
+  </div>
+
+  <div class="opt">
+    <h3>Option 4 — Observational backstop (guarantees the money moves)</h3>
+    <p>An observational trigger that activates on flooding already underway: FloodScan
+       SFED exposure over threshold in the target districts (Uganda is not yet in the
+       team's daily flood-exposure pipeline — adding it is a one-line
+       <code>init_iso3</code> job), a DTM EET report confirming displacement over an
+       agreed count, or a river gauge over its danger level. Zero lead time, so it
+       funds early <em>response</em> rather than anticipation — but under a
+       spend-by-season-end constraint it is the safety net that converts a forecast
+       miss into a fast activation instead of unspent funds.</p>
+    <div class="pc">
+      <div><strong>For:</strong> no forecast risk; catches whatever the forecast
+        windows miss; FloodScan leg is nearly free to stand up.</div>
+      <div class="con"><strong>Against:</strong> no lead time (this is early response,
+        not AA — keep the two framings honest); FloodScan cannot see the Elgon
+        landslide corridor, so the backstop there must be report-based (DTM/OPM), not
+        satellite-based.</div>
+    </div>
+  </div>
+
+  <h3>Recommended shape</h3>
+  <p>A mixed-basis mechanism with windows split by <em>space</em> (the two regimes need
+     different indicators) and staged by <em>time</em> within each:</p>
+  <ul>
+    <li><strong>Riverine window</strong> (Ntoroko; Teso districts if ruled in
+        scope): readiness on GloFAS at 10–15 days (Option 1), action on GloFAS
+        3–7 days OR Flood Hub consensus (Option 2), observational backstop on
+        FloodScan exposure (Option 4).</li>
+    <li><strong>Flash/landslide window</strong> (Kasese; Elgon corridor at
+        readiness-tier funding only): readiness on the same medium-range rainfall
+        signal, action on the 1–5-day extreme-rainfall trigger OR a DMS-MWE advisory
+        (Option 3), backstop on verified displacement reports (Option 4, report-based
+        leg).</li>
+    <li>Calibrate each specific trigger to ~1-in-2 to 1-in-3-yr individually and
+        report the <em>combined</em> RP of the whole mechanism; with two spatial
+        windows and a backstop in a season forecast this wet, combined activation
+        probability should comfortably exceed 80% — appropriate here, and worth
+        stating plainly to the fund.</li>
+  </ul>
+
+  <h2>5 · Design and validation plan</h2>
+  <ol>
+    <li><strong>Trigger spec with the working group (early Sep).</strong> Fix in
+        writing: the target events (which historical events must this trigger have
+        caught — the candidate list is now concrete: Ntoroko Aug 2024, Kasese Nov–Dec
+        2024, Katakwi/Pallisa Sep–Oct 2025, Teso 2007, Dec 2019), the lead time per
+        window, the spatial scope (the Severity 3+ decision above), and the fund's
+        false-alarm tolerance. No analysis before the spec.</li>
+    <li><strong>Indicator inventory (early Sep, parallel).</strong> Enumerate GloFAS
+        reaches and reforecast skill over the target catchments; inventory Google
+        Flood Hub gauges covering them; confirm UNMA/DMS-MWE advisory feed access;
+        add UGA to the FloodScan exposure pipeline.</li>
+    <li><strong>Backtest every specific trigger (mid-Sep).</strong> Run each candidate
+        threshold over the historical record (GloFAS reforecasts / rainfall hindcasts /
+        FloodScan 1998–2025) and list every historical activation <em>as dates</em>,
+        with lead time achieved, against <em>two</em> records: the impact record
+        (EM-DAT + the new DTM table) and the observational record (FloodScan extent,
+        gauge levels). Both links in the chain — forecast→hazard and hazard→impact —
+        get validated separately; validating one proves nothing about the other.</li>
+    <li><strong>Trigger report (late Sep).</strong> Thresholds, full activation
+        conditions (not just thresholds — who verifies, no-objection windows, the
+        24–72&nbsp;h release procedure from the UHF note), per-trigger and combined return
+        periods, the backtest tables, and the pre-agreed activation packages mapped to
+        the URCS hotspot communities.</li>
+    <li><strong>Live monitoring from 1 Oct.</strong> Daily automated checks (the
+        Nigeria monitoring repos are the template), with the readiness window able to
+        activate immediately — the OND rains typically establish from mid-Oct and peak
+        in Nov, leaving Dec for the observational backstop and full spend before
+        season close.</li>
+  </ol>
+
+  <h2>6 · Open questions</h2>
+  <ul>
+    <li>The Severity 3+ scope call on the Teso/Kyoga districts (section 3) — the single
+        biggest fork in the design.</li>
+    <li>Whether Elgon-corridor districts get an action window at all, or readiness-tier
+        funding only until severity verification lands.</li>
+    <li>Google Flood Hub gauge coverage over the Semliki and Kasese rivers — unverified
+        as of this page; determines whether Option 2 is real.</li>
+    <li>Where the operational trigger runs (this repo's pattern would be a scheduled
+        monitoring job; several team frameworks instead run at the national service) —
+        the UHF note's trigger-matrix language suggests co-ownership with DMS-MWE.</li>
+    <li>The missing Sironko map from the URCS set (the shared PDF duplicates Mbale
+        where Sironko should be) — worth requesting from URCS/FAO.</li>
+  </ul>
+
+  <p class="meta">Hand-authored page, Aug 2026. Sources: five country documents shared
+     Aug 2026 (El Niño impact retrospective for the 4 Jun 2026 OPM meeting; UHF
+     emerging-risk strategy note; IOM DTM affected-by-district compilation, from
+     published DTM EET reports; URCS/FAO flood-risk maps, Dec 2023; FAO/OPM/DRC/UNHCR
+     EWS &amp; AA preliminary assessment, Jan 2026), plus this repo's
+     <a href="../uganda/">Uganda drought &amp; flood analysis</a>
+     (<code>analysis/uganda_hnrp.qmd</code>) and its district FloodScan/SEAS5 layers at
+     <code>processed/uga/</code> (dev blob). Severity classifications quoted here are
+     the UHF note's <em>provisional</em>, pre-verification classifications.</p>
+</div>
+</body>
+</html>
