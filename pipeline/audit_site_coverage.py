@@ -37,6 +37,12 @@ NO_PLAN = {
 # Countries with no IPC/CH analysis at all — drawn in IPC mode for their forecast
 # alone (see combine_ipc_view), so an empty IPC chart is likewise correct.
 NO_IPC = {"BFA", "COL", "SLV", "MMR", "SYR", "UKR", "VEN"}
+
+# Countries with no FEWS NET coverage — drawn in FEWS NET mode on their plan
+# units for the forecast alone (see build_fewsnet_view). FEWS NET coverage is
+# USAID-priority-weighted, so this list is longer than NO_IPC.
+NO_FEWS = {"BEN", "BGD", "CPV", "DJI", "DOM", "ECU", "GHA", "GIN", "GMB",
+           "GNB", "LBR", "MMR", "MRT", "NAM", "PSE", "SEN", "SLE", "TZA"}
 # Countries with a plan in earlier cycles but nothing subnational in a given one,
 # for a reason that has been checked. The cycle is named so this cannot silently
 # cover a future year: 2027 data going missing would still be a finding.
@@ -76,6 +82,11 @@ def charts_in_plan_mode(r, year):
 
 def charts_in_ipc_mode(r):
     return any(any(v > 0 for v in c["p"]) for c in (r.get("ipc") or []))
+
+
+def charts_in_fews_mode(r):
+    # FEWS NET carries no populations — a unit renders if any combo has a phase.
+    return any(c.get("ph") is not None for c in (r.get("fews") or []))
 
 
 # Monitored units a country may lose between the mirror and the payload before it
@@ -294,7 +305,12 @@ def audit_national_totals():
 
 def main():
     findings = []
-    for view, path in (("plan", "hnrp_drought_low.json"), ("ipc", "hnrp_drought_ipc.json")):
+    for view, path in (("plan", "hnrp_drought_low.json"),
+                       ("ipc", "hnrp_drought_ipc.json"),
+                       ("fews", "hnrp_drought_fews.json")):
+        if view == "fews" and not (BASE / path).exists():
+            print("fews view: not built yet — skipped")
+            continue
         payload = json.loads((BASE / path).read_text())
         rows = rows_for(payload)
         by_country = {}
@@ -307,6 +323,12 @@ def main():
                 if not any(charts_in_ipc_mode(r) for r in rs) and iso3 not in NO_IPC:
                     findings.append(f"{view}: {name} ({iso3}) has no IPC classification "
                                     f"in {len(rs)} units and is not in NO_IPC")
+                continue
+            if view == "fews":
+                if not any(charts_in_fews_mode(r) for r in rs) and iso3 not in NO_FEWS:
+                    findings.append(f"{view}: {name} ({iso3}) has no FEWS NET "
+                                    f"classification in {len(rs)} units and is not "
+                                    f"in NO_FEWS")
                 continue
             if iso3 in NO_PLAN:
                 continue
