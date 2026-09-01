@@ -1,5 +1,5 @@
-"""Two slides per country (Papua New Guinea, Timor-Leste), published under
-pages/{png,tls}-enso/.
+"""Two slides per country (Papua New Guinea, Timor-Leste, Niger), published
+under pages/{png,tls,ner}-enso/.
 
 Slide 1 — ERA5 rainfall x ENSO (Nino3.4) teleconnection, pixelwise at the native
 0.25 degree ERA5 grid: the ds-teleconnections page's PARTIAL pass (Nino3.4's
@@ -16,14 +16,16 @@ low, grey = off-season). Plus a bar chart of country-mean hindcast climatology
 vs this forecast (mm/day). The tile with the lowest country-mean percentile is
 tagged as the driest.
 
-Data:
-  - ERA5 monthly mm/day COGs (prod raster blob, era5/monthly/processed/) — read
-    from the ds-teleconnections local cache when present, else fetched.
+Data (per methods/reuse-published-stats.md, nothing recomputed that a product
+already publishes):
+  - ERA5 monthly mm/day COGs (prod raster blob) — read from the
+    ds-teleconnections local cache when present, else fetched.
   - Six NOAA PSL climate indices (nino34, dmi, tna, tsa, amm, pdo; cached).
-  - SEAS5 monthly-by-leadtime COGs via stratus.stack_cogs("seas5", ...).
-  - PNG ADM1 from public.polygon (prod DB).
+  - The detrended skill cube (dev blob) for all pixel fields + mm values, and
+    docs/data/forecasts/<issued>.json for country pct/RP — both vintage-checked.
+  - ADM1 from the prod polygon blob container.
 
-Run:  uv run python analysis/png_enso_slides.py [--country png|tls]
+Run:  uv run python analysis/png_enso_slides.py [--country png|tls|ner]
                                                 [--skip-era5] [--skip-seas5]
 Writes pages/<key>-enso/slide{1,2}.png and pages/<key>-enso/<key>_enso_slides.pdf.
 """
@@ -44,12 +46,22 @@ REPO = Path(__file__).resolve().parents[1]
 CACHE = REPO / "analysis" / "_png_enso_cache"
 
 COUNTRIES = {
+    # `leads`: trimester-lead window shown on slide 2 (negative = in-season,
+    # mixed obs+forecast — the cube aggregates those correctly).
+    # `tiles`: the four per-trimester panels on slide 1.
     # PNG window covers mainland + Bismarck Archipelago + Bougainville
     "png": dict(iso3="PNG", name="Papua New Guinea",
-                lon=(140.5, 156.75), lat=(0.25, -12.0)),
+                lon=(140.5, 156.75), lat=(0.25, -12.0),
+                leads=(1, 4), tiles=("DJF", "MAM", "JAS", "OND")),
     # TLS window covers the mainland, the Oecusse enclave and Atauro/Jaco
     "tls": dict(iso3="TLS", name="Timor-Leste",
-                lon=(123.6, 127.8), lat=(-7.6, -10.1)),
+                lon=(123.6, 127.8), lat=(-7.6, -10.1),
+                leads=(1, 4), tiles=("DJF", "MAM", "JAS", "OND")),
+    # NER: single JJA-JAS rainy season, in-season from an Aug issuance —
+    # show the season (leads -2..1) rather than the dry SON-DJF window
+    "ner": dict(iso3="NER", name="Niger",
+                lon=(0.0, 16.2), lat=(23.7, 11.4),
+                leads=(-2, 1), tiles=("JJA", "JAS", "ASO", "SON")),
 }
 KEY = "png"
 COUNTRY = COUNTRIES[KEY]
@@ -443,7 +455,7 @@ def make_slide1(path_png: Path):
                "Unique ENSO signal — strongest significant trimester per pixel",
                title_size=12)
 
-    for k, tri in enumerate(_ANNUAL):
+    for k, tri in enumerate(COUNTRY["tiles"]):
         ax = fig.add_subplot(gs[1, k])
         s = rainy[tri] & np.isfinite(results[tri]["r"]) & (results[tri]["p"] < ALPHA)
         _map_panel(ax, results[tri]["r"], s, mask, x, y, adm1, adm0, tri,
@@ -490,7 +502,7 @@ def make_slide1(path_png: Path):
              "Negative (brown) = El Niño → drier than normal.",
              fontsize=9.5, color="#333", va="top", linespacing=1.5)
     fig.text(lx, 0.06, "Data: ERA5 monthly precip (0.25°), NOAA PSL\n"
-                       "Niño3.4. Bottom row: canonical trimesters.",
+                       "Niño3.4. Bottom row: selected trimesters.",
              fontsize=8.5, color="#777", va="bottom", linespacing=1.4)
 
     fig.savefig(path_png, dpi=200, facecolor="white")
@@ -549,9 +561,18 @@ def _classify_app(P, R, rainy):
     return code
 
 
-def load_skill_cube_png(issued_month: int, trimesters: list[str]):
-    """App inputs for the PNG window from the detrended skill cube (dev blob):
-    per-trimester forecast percentile, skill r, rainy mask + grid coords."""
+def load_issued() -> pd.Timestamp:
+    """The latest issuance, straight from the app's own export."""
+    d = json.loads((REPO / "docs" / "data" / "forecast.json").read_text())
+    return pd.Timestamp(int(d["issued_year"]), int(d["issued_month"]), 1)
+
+
+def load_skill_cube_png(issued: pd.Timestamp):
+    """Everything slide 2 draws, from the detrended skill cube (the same file
+    the app's raster view is exported from): per-trimester forecast percentile,
+    skill r, rainy mask, plus mm-scale climatology and bias-adjusted current
+    forecast (expm1 of the cube's log-space fields). Trimesters selected by the
+    country's lead window; each combo's vintage is asserted against `issued`."""
     import sys
 
     sys.path.insert(0, str(REPO))
@@ -565,19 +586,35 @@ def load_skill_cube_png(issued_month: int, trimesters: list[str]):
         CUBE_PATH.write_bytes(stratus.load_blob_data(
             f"{PROJECT_PREFIX}/processed/raster/skill_stats_grid_detrended.nc",
             stage="dev"))
+    from src.constants import TRIMESTERS as TRI_MONTHS_MAP
+    from src.skill import season_year_for, trimester_lead
     from src.skill_raster import rainy_from_cube
+
+    im = int(issued.month)
+    lo, hi = COUNTRY["leads"]
+    tris = sorted((t for t in TRI_MONTHS_MAP
+                   if lo <= trimester_lead(im, TRI_MONTHS_MAP[t]) <= hi),
+                  key=lambda t: trimester_lead(im, TRI_MONTHS_MAP[t]))
 
     ds = xr.open_dataset(CUBE_PATH).sel(x=slice(*LON), y=slice(*LAT))
     rainy_all = rainy_from_cube(ds, RAINY_TRIMESTER_PCT)
     out = {}
-    for tri in trimesters:
-        sel = dict(issued_month=issued_month, trimester=tri)
-        cfy = float(ds["current_forecast_year"].sel(**sel))
+    for tri in tris:
+        months = TRI_MONTHS_MAP[tri]
+        sel = dict(issued_month=im, trimester=tri)
+        cfy = int(ds["current_forecast_year"].sel(**sel))
+        expect = season_year_for(im, int(issued.year), months)
+        assert cfy == expect, (
+            f"skill cube {tri} holds {cfy}, expected {expect} — "
+            "rerun compute_skill_raster")
         out[tri] = {
             "P": ds["forecast_percentile"].sel(**sel).values,
             "R": ds["pearson_r"].sel(**sel).values,
             "rainy": rainy_all.sel(trimester=tri).values.astype(bool),
-            "forecast_year": int(cfy),
+            "clim_mm": np.expm1(ds["era5_mean"].sel(**sel).values),
+            "current_mm": np.expm1(ds["current_forecast_mean"].sel(**sel).values),
+            "season_year": cfy,
+            "lead": trimester_lead(im, months),
         }
     return out, ds["x"].values, ds["y"].values
 
@@ -606,83 +643,6 @@ def _rp_bin_color(p: float) -> str:
     return "#F5F0EC"
 
 
-def load_current_seas5():
-    """Latest-issuance SEAS5 trimester percentiles for PNG, cached to disk.
-
-    Returns (per_tri, x, y, issued) where per_tri[tri] = dict(pct, current_mm,
-    clim_mm) as (ny, nx) arrays on the SEAS5 native 0.4deg grid, and issued is
-    the issuance Timestamp.
-    """
-    import sys
-
-    sys.path.insert(0, str(REPO))
-    import ocha_stratus as stratus
-    import xarray as xr
-    from shapely.geometry import box
-
-    from src.skill_raster import aggregate_seas5_trimester_grid, trimester_lead
-    from src.constants import TRIMESTERS as TRI_MONTHS_MAP
-
-    f = CACHE / f"seas5_{KEY}_current.npz"
-    if f.exists():
-        z = np.load(f, allow_pickle=True)
-        per_tri = z["per_tri"].item()
-        if all("hist_mm" in d for d in per_tri.values()):
-            return per_tri, z["x"], z["y"], pd.Timestamp(str(z["issued"]))
-        f.unlink()   # cache predates the hist_mm field — rebuild
-
-    clip = gpd.GeoDataFrame(geometry=[box(LON[0], LAT[1], LON[1], LAT[0])], crs=4326)
-    today = pd.Timestamp.today().normalize().replace(day=1)
-
-    # find the newest issuance actually on blob (monthly refresh can lag)
-    da = None
-    for issued in (today, today - pd.DateOffset(months=1)):
-        dates = [d.strftime("%Y-%m-%d")
-                 for d in pd.date_range("1981-01-01", issued, freq="MS")
-                 if d.month == issued.month]
-        try:
-            raw = stratus.stack_cogs("seas5", dates, stage="prod",
-                                     clip_gdf=clip, mode="pipeline")
-            da = raw[list(raw.data_vars)[0]] if isinstance(raw, xr.Dataset) else raw
-            if pd.to_datetime(da["date"].values).max() == issued:
-                break
-            da = None
-        except Exception as e:  # noqa: BLE001
-            print(f"  issuance {issued.date()} not loadable ({e}); trying previous")
-            da = None
-    if da is None:
-        raise RuntimeError("no recent SEAS5 issuance found on blob")
-
-    im = int(issued.month)
-    per_tri = {}
-    for tri, months in TRI_MONTHS_MAP.items():
-        lead = trimester_lead(im, months)
-        if not (1 <= lead <= 4):   # fully-forecast trimesters within the horizon
-            continue
-        fc = aggregate_seas5_trimester_grid(da, im, months)  # (season_year, y, x)
-        if fc is None:
-            continue
-        cur_year = int(fc["season_year"].max())
-        current = fc.sel(season_year=cur_year)
-        hist = fc.sel(season_year=fc["season_year"] < cur_year)
-        n = hist.sizes["season_year"]
-        # repo convention (forecast_metrics_grid): share of hindcast years <= current
-        pct = (100.0 * (hist <= current).sum("season_year") / n)
-        per_tri[tri] = {
-            "pct": pct.values.astype("float32"),
-            "current_mm": current.values.astype("float32"),
-            "clim_mm": hist.mean("season_year").values.astype("float32"),
-            "hist_mm": hist.values.astype("float32"),   # (n_hindcast, ny, nx)
-            "lead": lead, "n": int(n), "season_year": cur_year,
-        }
-
-    x, y = da["x"].values, da["y"].values
-    CACHE.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(f, per_tri=np.array(per_tri, dtype=object),
-                        x=x, y=y, issued=str(issued.date()))
-    return per_tri, x, y, issued
-
-
 def _ordinal(n: float) -> str:
     n = int(round(n))
     suf = "th" if 10 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
@@ -696,19 +656,14 @@ def _season_label(tri: str, season_year: int) -> str:
 
 
 def make_slide2(path_png: Path):
-    per_tri, x, y, issued = load_current_seas5()
+    issued = load_issued()
+    cube, cx, cy = load_skill_cube_png(issued)
     nino = load_nino34().dropna()
     nino_last, nino_when = float(nino.iloc[-1]), nino.index[-1]
     adm1, adm0 = load_png_adm1(), load_png_adm0()
-    mask = land_mask(adm0, x, y)
 
-    order = sorted(per_tri, key=lambda t: per_tri[t]["lead"])
-    cube, cx, cy = load_skill_cube_png(int(issued.month), order)
-    for tri in order:   # vintage guard: cube must hold the same issuance
-        assert cube[tri]["forecast_year"] == per_tri[tri]["season_year"], \
-            f"skill cube {tri} is {cube[tri]['forecast_year']}, " \
-            f"expected {per_tri[tri]['season_year']} — rerun compute_skill_raster"
-    # the cube extends over ocean and neighbouring countries; restrict to PNG
+    order = sorted(cube, key=lambda t: cube[t]["lead"])
+    # the cube extends over ocean and neighbouring countries; restrict to ours
     cmask = land_mask(adm0, cx, cy)
     means = {t: float(np.nanmean(np.where(cmask, cube[t]["P"], np.nan)))
              for t in order}
@@ -725,8 +680,8 @@ def make_slide2(path_png: Path):
 
     for k, tri in enumerate(order):
         ax = fig.add_subplot(gs[k // 2, k % 2])
-        d = per_tri[tri]
-        code = _classify_app(cube[tri]["P"], cube[tri]["R"], cube[tri]["rainy"])
+        d = cube[tri]
+        code = _classify_app(d["P"], d["R"], d["rainy"])
         code[~cmask] = 0   # off-PNG -> transparent/white
 
         img = np.full((*code.shape, 3), 255, dtype="uint8")
@@ -754,9 +709,10 @@ def make_slide2(path_png: Path):
         ax.set_aspect("equal")
         ax.set_axis_off()
         tag = "  ← driest overall" if tri == worst else ""
+        when = f"lead {d['lead']} mo" if d["lead"] >= 1 else "in season"
         ax.set_title(
-            f"{_season_label(tri, d['season_year'])} — lead {d['lead']} mo — "
-            f"mean {_ordinal(means[tri])} pct{tag}",
+            f"{_season_label(tri, d['season_year'])} — {when} — "
+            f"{_ordinal(means[tri])} pct{tag}",
             fontsize=10.5, pad=4,
             color="#7B3A1A" if tri == worst else "#1a1a1a",
             fontweight="bold" if tri == worst else "normal")
@@ -765,7 +721,7 @@ def make_slide2(path_png: Path):
              fontsize=19, fontweight="bold", color="#1a1a1a")
     fig.text(0.04, 0.895,
              f"Issued {issued:%B %Y} · drought/flood return-period categories vs the "
-             f"same-issuance SEAS5 hindcast (1981–{per_tri[order[0]]['season_year'] - 1}) "
+             f"same-issuance SEAS5 hindcast (1981–{cube[order[0]]['season_year'] - 1}) "
              "· skill-shaded · native 0.4° grid · ADM1 boundaries",
              fontsize=11, color="#444")
 
@@ -813,9 +769,9 @@ def make_slide2(path_png: Path):
     C_CLIM_BAR = "#AEB8C2"
     bax = fig.add_axes([lx + 0.012, 0.225, 0.265, 0.175])
     xs_pos = np.arange(len(order))
-    clim_means = [float(np.nanmean(np.where(mask, per_tri[t]["clim_mm"], np.nan)))
+    clim_means = [float(np.nanmean(np.where(cmask, cube[t]["clim_mm"], np.nan)))
                   for t in order]
-    fc_means = [float(np.nanmean(np.where(mask, per_tri[t]["current_mm"], np.nan)))
+    fc_means = [float(np.nanmean(np.where(cmask, cube[t]["current_mm"], np.nan)))
                 for t in order]
     app_vals = load_app_country_forecast(issued)
     fc_colors = [_rp_bin_color(app_vals[t]["pct"]) if app_vals[t]["rainy"]
@@ -857,7 +813,7 @@ def make_slide2(path_png: Path):
                   fontweight="bold", loc="left", pad=10)
     fig.add_artist(plt.Rectangle((lx + 0.012, 0.143), 0.016, 0.022,
                                  facecolor=C_CLIM_BAR, transform=fig.transFigure))
-    fig.text(lx + 0.036, 0.147, "hindcast climatology", fontsize=8.5, color="#333")
+    fig.text(lx + 0.036, 0.147, "climatology (ERA5)", fontsize=8.5, color="#333")
     fig.add_artist(plt.Rectangle((lx + 0.145, 0.143), 0.016, 0.022,
                                  facecolor=_rp_bin_color(means[worst]),
                                  edgecolor="#888", linewidth=0.4,
@@ -868,7 +824,9 @@ def make_slide2(path_png: Path):
              "Categories from the detrended skill cube vs the\n"
              "same issued month + leads. Bar colours + RPs: the\n"
              "app's country-level forecast (* = off-season).\n"
-             f"Niño3.4: {nino_last:+.1f} °C in {nino_when:%b %Y}.",
+             f"Niño3.4: {nino_last:+.1f} °C in {nino_when:%b %Y}."
+             + ("" if min(cube[t]["lead"] for t in order) >= 1
+                else " In season = obs + fcst."),
              fontsize=9, color="#333", va="top", linespacing=1.4)
     fig.text(lx, 0.015,
              f"Data: ECMWF SEAS5 · Boundaries: {COUNTRY['iso3']} ADM1 (COD)",
