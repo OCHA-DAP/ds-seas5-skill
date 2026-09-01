@@ -84,7 +84,7 @@ _TRI_MONTHS = {t: [((e - 3 + i) % 12) + 1 for i in range(3)]
                for t, e in ((t, TRIMESTERS[t]) for t in TRIMESTERS)}
 
 # Discrete 2-bin correlation colours — identical to the teleconnections page
-R_STRONG, R_MIN = 0.45, 0.30
+R_STRONG, R_MIN = 0.50, 0.30   # Cohen large/medium; matches the app's r_high/r_mod
 C_POS_STRONG, C_POS_MOD = "#0D40B0", "#71B3E5"
 C_NEG_MOD, C_NEG_STRONG = "#C8844A", "#7B3A1A"
 C_NOSIG, C_OCEAN, C_OUTLINE = "#E8E8E8", "#FFFFFF", "#9AA3B0"
@@ -981,7 +981,7 @@ def make_slide2(path_png: Path):
             (C_FV, None, None, "Flood — ≥ 10-yr return period"),
         ]),
         ("Other:", [
-            ("#FFFFFF", "///", C_HATCH_GREY, "Roughly normal (mod skill)"),
+            ("#FFFFFF", "///", C_HATCH_GREY, "Mod. skill"),
             ("#FFFFFF", "xxx", C_HATCH_GREY, "Low skill"),
             (C_OFF, None, None, "Outside rainy season"),
         ]),
