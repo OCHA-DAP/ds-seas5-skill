@@ -73,7 +73,7 @@ WINDOW_MARGIN = 0.6    # deg padding around the country bounds
 MIN_W, MIN_H = 3.0, 2.25   # minimum window size (small island states)
 PART_KEEP_DEG = 8.5    # keep territory parts within this of the main landmass
 
-SLIDE1_TILES = ("DJF", "MAM", "JJA", "SON")   # whole-year canonical seasons
+SLIDE1_TILES = ("JFM", "AMJ", "JAS", "OND")   # non-overlapping, whole year
 DPI = 150
 
 TRIMESTERS = {
@@ -546,8 +546,9 @@ def make_slide1(path_png: Path):
         _map_panel(ax, results[tri]["r"], s, mask, x, y, tri, title_size=10)
 
     fig.text(0.04, 0.955,
-             f"{_STATE['name']}: what generally happens during El Niño",
-             fontsize=19, fontweight="bold", color="#1a1a1a")
+             f"{_STATE['name']}: how does El Niño generally affect seasonal "
+             "rainfall?",
+             fontsize=17, fontweight="bold", color="#1a1a1a")
     fig.text(0.04, 0.905,
              "Pixelwise partial correlation of rainfall with Niño3.4 (ENSO), other "
              f"climate modes held constant — ERA5 0.25° grid, {START_YEAR}–{END_YEAR}",
@@ -582,7 +583,7 @@ def make_slide1(path_png: Path):
              "• Two-tailed p < 0.05, df adjusted for controls\n"
              "• All seasons kept (no rainy-season filter)",
              fontsize=9.5, color="#333", va="top", linespacing=1.5)
-    foot = "Data: ERA5 monthly precip (0.25°), NOAA PSL\nNiño3.4. Bottom row: the four canonical seasons."
+    foot = "Data: ERA5 monthly precip (0.25°), NOAA PSL\nNiño3.4. Bottom row: the four quarters of the year."
     if _STATE["clipped"]:
         foot += "\nDistant territories beyond the map edge not shown."
     fig.text(lx, 0.05, foot, fontsize=8.5, color="#777", va="bottom",
@@ -814,7 +815,7 @@ def make_slide2(path_png: Path):
             fontweight="bold" if tri == worst else "normal")
 
     # bar chart in the last grid slot: country-mean climatology vs forecast
-    C_CLIM_BAR = "#AEB8C2"
+    C_CLIM_BAR = "#2B2B2B"
     bax = fig.add_subplot(gs[1, 3])
     xs_pos = np.arange(len(order))
     clim_means = [float(np.nanmean(np.where(cmask, cube[t]["clim_mm"], np.nan)))
@@ -841,11 +842,13 @@ def make_slide2(path_png: Path):
     for spine in ("left", "bottom"):
         bax.spines[spine].set_color("#CCC")
     bax.grid(axis="y", color="#EAEAEA", linewidth=0.6, zorder=0)
-    bax.set_title("Country-mean rainfall (mm/day)\ngrey = normal · coloured = forecast",
+    bax.set_title("Country-mean rainfall (mm/day)\nblack = normal · coloured = forecast",
                   fontsize=9.5, pad=4, linespacing=1.25, color="#1a1a1a")
 
-    fig.text(0.04, 0.945, f"{_STATE['name']}: what's predicted this year",
-             fontsize=19, fontweight="bold", color="#1a1a1a")
+    fig.text(0.04, 0.945,
+             f"{_STATE['name']}: what seasonal rainfall is predicted this year "
+             f"({issued:%B}-issued forecast)?",
+             fontsize=17, fontweight="bold", color="#1a1a1a")
     fig.text(0.04, 0.895,
              f"SEAS5 (issued {issued:%B %Y}) accounts for El Niño and every other "
              "driver · return-period categories vs the 1981–"
