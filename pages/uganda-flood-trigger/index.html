@@ -59,6 +59,9 @@
   .meta code, p code, li code { background: #eceeef; padding: 1px 5px; border-radius: 3px;
                                 font-size: 12.5px; }
   a { color: #1e795f; }
+  h2, h3 { scroll-margin-top: 16px; }
+  .anchor { opacity: 0; text-decoration: none; font-weight: 400; margin-left: 2px; }
+  h2:hover .anchor, h3:hover .anchor, .anchor:focus { opacity: 0.75; }
 </style>
 </head>
 <body>
@@ -87,7 +90,7 @@
        exactly the situation the funding constraint (spend by end of season) wants.</p>
   </div>
 
-  <h2>1 · What the new documents contain</h2>
+  <h2 id="documents">1 · What the new documents contain <a class="anchor" href="#documents" aria-label="Link to this section">#</a></h2>
 
   <div class="tblwrap"><table>
     <tr><th>Document</th><th>What it is</th><th>What it contributes here</th></tr>
@@ -153,7 +156,7 @@
     </tr>
   </table></div>
 
-  <h2>2 · What this revises in the analysis</h2>
+  <h2 id="revisions">2 · What this revises in the analysis <a class="anchor" href="#revisions" aria-label="Link to this section">#</a></h2>
   <ul>
     <li><strong>From extent to impact.</strong> The existing analysis showed FloodScan
         flood-extent recurrence concentrating in the Teso/Lake Kyoga wetlands while
@@ -181,7 +184,7 @@
         addition to EM-DAT's coarser event list.</li>
   </ul>
 
-  <h2>3 · Where a trigger can point</h2>
+  <h2 id="targets">3 · Where a trigger can point <a class="anchor" href="#targets" aria-label="Link to this section">#</a></h2>
   <p>Candidate areas, scored against the three requirements (Severity 3+, predictable
      this season, meaningful lead time possible):</p>
 
@@ -245,7 +248,7 @@
     </tr>
   </table></div>
 
-  <h3>The events a trigger must catch — and how they flooded</h3>
+  <h3 id="events">The events a trigger must catch — and how they flooded <a class="anchor" href="#events" aria-label="Link to this section">#</a></h3>
   <p>Trawling EM-DAT's full Uganda record (47 flood and wet mass-movement events,
      2001–2024) and the CERF allocations dataset (HDX) gives the historical target
      list, with a clear modality split. <strong>Riverine floods drive the affected
@@ -317,7 +320,7 @@
        the Elgon corridor as a readiness-only window.</p>
   </div>
 
-  <h2>4 · Trigger options</h2>
+  <h2 id="options">4 · Trigger options <a class="anchor" href="#options" aria-label="Link to this section">#</a></h2>
   <p>All options follow the team's standard shape: return-period-calibrated thresholds,
      staged windows by lead time (readiness releasing only mobilisation funds ~5%,
      action releasing the bulk), forecast OR'd with an observational backstop. Given
@@ -327,7 +330,7 @@
      high, by design.</p>
 
   <div class="opt">
-    <h3>Option 1 — GloFAS ensemble discharge at selected reaches (riverine core)</h3>
+    <h3 id="option-1-glofas">Option 1 — GloFAS ensemble discharge at selected reaches (riverine core) <a class="anchor" href="#option-1-glofas" aria-label="Link to this section">#</a></h3>
     <p>GloFAS ensemble forecast discharge exceeding the ~2–3-yr return-period threshold
        with ≥60% of members, at reaches for the Semliki (Ntoroko), the Kasese rivers,
        and — if in scope — the Teso/Kyoga inflows and Manafwa river (Butaleja).
@@ -342,14 +345,26 @@
         weakest exactly where the mountains are.</div>
     </div>
     <p class="evline"><strong>Designed for events like:</strong> Teso Aug–Oct 2007
-       (the CERF-responded 718k event), Butaleja May 2021, the Elgon-foothills
-       riverine floods of Aug–Sep 2011, Ntoroko/Semliki Aug 2024, Katakwi–Pallisa
-       Sep–Oct 2025. Weakest for the flashy Nyamwamba floods (Kasese 2013/2020/2024)
-       and blind to the Elgon landslides.</p>
+       (the CERF-responded 718k event), Katakwi–Pallisa Sep–Oct 2025, the
+       Kyoga-system riverine floods. After the verification below: <em>not</em> the
+       Ntoroko/Semliki events, weakest on Butaleja/Manafwa, and blind to the Elgon
+       landslides and the Nyamwamba floods.</p>
+    <p class="evline"><strong>Verified against GloFAS's own skill layers (1 Sep
+       2026):</strong> the reporting points and their published forecast skill
+       (longest lead time with CRPSS &gt; 0.5, from the GloFAS map service's
+       ForecastSkill / HydrologicalModelPerformance layers) are: <strong>Akokorio
+       gauge (Teso, calibrated): 14 days · Kyoga Nile at Masindi Port (calibrated):
+       15 · Kapelebyong: 12</strong> — the Teso/Kyoga window is genuinely strong;
+       <strong>Mpologoma at Budumba (drains Pallisa/Butaleja): 4</strong> — enough
+       for a short action window only; <strong>Magoro/Apapi (Katakwi): 2 · Semliki:
+       0 · Manafwa at Butaleja: 0 (uncalibrated)</strong> — no usable skill; and
+       <strong>no reporting points at all on the Kasese rivers</strong>. So GloFAS
+       carries the Teso/Kyoga leg well, cannot carry Ntoroko's Semliki leg, and the
+       Butaleja leg only marginally via the Mpologoma.</p>
   </div>
 
   <div class="opt">
-    <h3>Option 2 — Google Flood Hub / GRRR gauge consensus (small-river coverage)</h3>
+    <h3 id="option-2-floodhub">Option 2 — Google Flood Hub / GRRR gauge consensus (small-river coverage) <a class="anchor" href="#option-2-floodhub" aria-label="Link to this section">#</a></h3>
     <p>Google's operational river gauges publish forecasts to 7 days with pre-computed
        2/5/20-yr warning levels, and cover smaller rivers than GloFAS resolves. A
        multi-gauge consensus (N of M gauges over their warning level simultaneously —
@@ -371,7 +386,7 @@
   </div>
 
   <div class="opt">
-    <h3>Option 3 — Short-range extreme-rainfall trigger (flash-flood / landslide corridor)</h3>
+    <h3 id="option-3-rainfall">Option 3 — Short-range extreme-rainfall trigger (flash-flood / landslide corridor) <a class="anchor" href="#option-3-rainfall" aria-label="Link to this section">#</a></h3>
     <p>For Kasese and (if funded) the Elgon corridor, where discharge products are
        least reliable: ECMWF ensemble 3-day accumulated rainfall over the upslope
        catchment exceeding its ~3-yr return-period value, at 1–5 days lead, OR'd with a
@@ -395,7 +410,7 @@
   </div>
 
   <div class="opt">
-    <h3>Option 4 — Observational backstop (guarantees the money moves)</h3>
+    <h3 id="option-4-backstop">Option 4 — Observational backstop (guarantees the money moves) <a class="anchor" href="#option-4-backstop" aria-label="Link to this section">#</a></h3>
     <p>An observational trigger that activates on flooding already underway: FloodScan
        SFED exposure over threshold in the target districts (Uganda is not yet in the
        team's daily flood-exposure pipeline — adding it is a one-line
@@ -419,7 +434,7 @@
        The safety net, not the anticipation.</p>
   </div>
 
-  <h3>Which option is built for which event</h3>
+  <h3 id="coverage">Which option is built for which event <a class="anchor" href="#coverage" aria-label="Link to this section">#</a></h3>
   <p>The same mapping as a matrix, across the major historical events. This is
      <strong>designed-for coverage — which window each event type falls under — not a
      claim that the trigger would surely have activated</strong>; whether it actually
@@ -442,7 +457,7 @@
         <td><span class="tag ok">core</span></td><td><span class="tag ok">core</span></td>
         <td>—</td><td><span class="tag ok">core</span></td></tr>
     <tr><td>Aug 2024 · Ntoroko/Semliki (DTM)</td><td>Riverine</td>
-        <td><span class="tag ok">core</span></td><td><span class="tag ok">core</span></td>
+        <td>—<sup>†</sup></td><td><span class="tag ok">core</span></td>
         <td>—</td><td><span class="tag ok">core</span></td></tr>
     <tr><td>Nov–Dec 2024 · Kasese, 200k (DTM)</td><td>Riverine/flash (Nyamwamba)</td>
         <td><span class="tag b">weak</span></td><td><span class="tag ok">core</span></td>
@@ -457,10 +472,10 @@
         <td><span class="tag b">weak</span></td><td><span class="tag ok">core</span></td>
         <td><span class="tag ok">core</span></td><td><span class="tag b">weak</span></td></tr>
     <tr><td>May 2021 · Butaleja, 75k</td><td>Riverine (Manafwa r.)</td>
-        <td><span class="tag ok">core</span></td><td><span class="tag ok">core</span></td>
+        <td><span class="tag b">weak</span><sup>†</sup></td><td><span class="tag ok">core</span></td>
         <td>—</td><td><span class="tag ok">core</span></td></tr>
     <tr><td>Aug–Sep 2011 · Elgon foothills, 63k</td><td>Riverine</td>
-        <td><span class="tag ok">core</span></td><td><span class="tag ok">core</span></td>
+        <td><span class="tag b">weak</span><sup>†</sup></td><td><span class="tag ok">core</span></td>
         <td><span class="tag b">weak</span></td><td><span class="tag ok">core</span></td></tr>
     <tr><td>Feb–Mar 2010 · Nametsi, 388 deaths</td><td>Landslide</td>
         <td>—</td><td>—</td>
@@ -477,6 +492,9 @@
     <tr><td>Nov 2008 · West Nile + Karamoja, 30k</td><td>Riverine</td>
         <td>—</td><td>—</td><td>—</td><td>—</td></tr>
   </table></div>
+  <p><sup>†</sup> Downgraded after checking GloFAS's own skill layers (see Option 1):
+     Semliki 0 days of skillful lead, Manafwa at Butaleja 0 (Mpologoma at Budumba 4),
+     no upper-reach points in the Elgon foothills.</p>
   <p>Two things the matrix makes plain. First, <strong>no single option covers the
      record</strong>: the riverine column and the landslide rows are disjoint, which is
      the case for the two-window recommendation below. Second, <strong>coverage
@@ -485,14 +503,17 @@
      proposed window, whatever the indicator. That is a scope choice to make with eyes
      open, not an oversight: a trigger for everywhere is a trigger for nowhere.</p>
 
-  <h3>Recommended shape</h3>
+  <h3 id="recommended">Recommended shape <a class="anchor" href="#recommended" aria-label="Link to this section">#</a></h3>
   <p>A mixed-basis mechanism with windows split by <em>space</em> (the two regimes need
      different indicators) and staged by <em>time</em> within each:</p>
   <ul>
     <li><strong>Riverine window</strong> (Ntoroko; Teso districts if ruled in
-        scope): readiness on GloFAS at 10–15 days (Option 1), action on GloFAS
-        3–7 days OR Flood Hub consensus (Option 2), observational backstop on
-        FloodScan exposure (Option 4).</li>
+        scope): for Teso/Kyoga, readiness on GloFAS at 10–15 days and action on
+        GloFAS 3–7 days (Akokorio/Kyoga Nile points, both verified skillful at those
+        leads) OR Flood Hub consensus (Option 2); for <strong>Ntoroko the forecast
+        leg cannot be GloFAS</strong> (Semliki: zero skillful lead) — it needs Flood
+        Hub, an observed Semliki level, or catchment rainfall instead; observational
+        backstop on FloodScan exposure (Option 4) in both.</li>
     <li><strong>Flash/landslide window</strong> (Kasese; Elgon corridor at
         readiness-tier funding only): readiness on the same medium-range rainfall
         signal, action on the 1–5-day extreme-rainfall trigger OR a DMS-MWE advisory
@@ -505,7 +526,7 @@
         stating plainly to the fund.</li>
   </ul>
 
-  <h2>5 · Design and validation plan</h2>
+  <h2 id="plan">5 · Design and validation plan <a class="anchor" href="#plan" aria-label="Link to this section">#</a></h2>
   <ol>
     <li><strong>Trigger spec with the working group (early Sep).</strong> Fix in
         writing: the target events (which historical events must this trigger have
@@ -514,10 +535,12 @@
         Nov–Dec 2024, Katakwi/Pallisa Sep–Oct 2025), the lead time per
         window, the spatial scope (the Severity 3+ decision above), and the fund's
         false-alarm tolerance. No analysis before the spec.</li>
-    <li><strong>Indicator inventory (early Sep, parallel).</strong> Enumerate GloFAS
-        reaches and reforecast skill over the target catchments; inventory Google
-        Flood Hub gauges covering them; confirm UNMA/DMS-MWE advisory feed access;
-        add UGA to the FloodScan exposure pipeline.</li>
+    <li><strong>Indicator inventory (early Sep, parallel).</strong> GloFAS is done
+        (Option 1's verification: Teso/Kyoga strong, Semliki and Manafwa zero,
+        Kasese absent — confirm against the CDS reforecasts when thresholds are
+        derived). Remaining: inventory Google Flood Hub gauges over the Semliki and
+        Kasese rivers (now the critical unknown); confirm UNMA/DMS-MWE advisory feed
+        access; add UGA to the FloodScan exposure pipeline.</li>
     <li><strong>Backtest every specific trigger (mid-Sep).</strong> Run each candidate
         threshold over the historical record (GloFAS reforecasts / rainfall hindcasts /
         FloodScan 1998–2025) and list every historical activation <em>as dates</em>,
@@ -537,14 +560,17 @@
         season close.</li>
   </ol>
 
-  <h2>6 · Open questions</h2>
+  <h2 id="questions">6 · Open questions <a class="anchor" href="#questions" aria-label="Link to this section">#</a></h2>
   <ul>
     <li>The Severity 3+ scope call on the Teso/Kyoga districts (section 3) — the single
         biggest fork in the design.</li>
     <li>Whether Elgon-corridor districts get an action window at all, or readiness-tier
         funding only until severity verification lands.</li>
-    <li>Google Flood Hub gauge coverage over the Semliki and Kasese rivers — unverified
-        as of this page; determines whether Option 2 is real.</li>
+    <li>Google Flood Hub gauge coverage over the Semliki and Kasese rivers — still
+        unverified; now the <em>critical</em> gap, since the GloFAS check (Option 1)
+        ruled GloFAS out for exactly those rivers. If Flood Hub has no verified
+        gauges there either, Ntoroko and Kasese have no forecast-discharge leg at
+        all and fall back to rainfall + observational triggers.</li>
     <li>Where the operational trigger runs (this repo's pattern would be a scheduled
         monitoring job; several team frameworks instead run at the national service) —
         the UHF note's trigger-matrix language suggests co-ownership with DMS-MWE.</li>
