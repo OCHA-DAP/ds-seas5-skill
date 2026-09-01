@@ -52,6 +52,8 @@
   .opt .pc div { flex: 1 1 300px; font-size: 13.5px; }
   .opt .pc strong { color: #16604b; }
   .opt .pc .con strong { color: #b8272d; }
+  .opt .evline { font-size: 13px; color: #555; margin: 10px 0 0;
+                 border-top: 1px dashed #e2e4e6; padding-top: 8px; }
   .meta { color: #777; font-size: 13px; border-top: 1px solid #e2e4e6;
           padding-top: 14px; margin-top: 40px; }
   .meta code, p code, li code { background: #eceeef; padding: 1px 5px; border-radius: 3px;
@@ -339,6 +341,11 @@
         catchments (Kasese especially) must be demonstrated, not assumed; GloFAS is
         weakest exactly where the mountains are.</div>
     </div>
+    <p class="evline"><strong>Designed for events like:</strong> Teso Aug–Oct 2007
+       (the CERF-responded 718k event), Butaleja May 2021, the Elgon-foothills
+       riverine floods of Aug–Sep 2011, Ntoroko/Semliki Aug 2024, Katakwi–Pallisa
+       Sep–Oct 2025. Weakest for the flashy Nyamwamba floods (Kasese 2013/2020/2024)
+       and blind to the Elgon landslides.</p>
   </div>
 
   <div class="opt">
@@ -356,6 +363,11 @@
         availability over the Rwenzori/Elgon rivers must be inventoried first — this is
         the first task of the design phase.</div>
     </div>
+    <p class="evline"><strong>Designed for events like:</strong> the small-river
+       floods GloFAS under-resolves — the Nyamwamba through Kasese (May 2013, May
+       2020, Nov–Dec 2024's 200k-affected event), the Nabuyonga through Mbale
+       (Jul–Aug 2022), Kween May 2020 — plus the same large riverine set as Option 1
+       where gauges exist. Still blind to the Elgon landslides.</p>
   </div>
 
   <div class="opt">
@@ -375,6 +387,11 @@
         the three; expect either misses or a high false-alarm ratio, and say so in the
         trigger report rather than hiding it.</div>
     </div>
+    <p class="evline"><strong>Designed for events like:</strong> the ones no discharge
+       product reaches — the Elgon landslides (Nametsi Feb–Mar 2010, Bududa Jun 2019,
+       Bulambuli/Masugu Nov 2024, Mt Elgon Aug 2025), Bundibugyo's Nov–Dec 2019 flash
+       floods, Kween/Kasese May 2020. Not aimed at the slow wetland floods (Teso 2007,
+       Butaleja) — those belong to Options 1–2.</p>
   </div>
 
   <div class="opt">
@@ -395,7 +412,78 @@
         landslide corridor, so the backstop there must be report-based (DTM/OPM), not
         satellite-based.</div>
     </div>
+    <p class="evline"><strong>Designed for events like:</strong> all of the above,
+       once flooding is underway — the FloodScan leg sees the wetland/riverine events
+       (Teso 2007, Butaleja 2021, Katakwi–Pallisa 2025, Ntoroko), the report-based leg
+       catches what the satellite misses (every Elgon landslide, the flash floods).
+       The safety net, not the anticipation.</p>
   </div>
+
+  <h3>Which option is built for which event</h3>
+  <p>The same mapping as a matrix, across the major historical events. This is
+     <strong>designed-for coverage — which window each event type falls under — not a
+     claim that the trigger would surely have activated</strong>; whether it actually
+     would have is exactly what the backtest in section 5 exists to establish.
+     <span class="tag ok">core</span> = the event type the option is built around;
+     <span class="tag b">weak</span> = in scope but where the indicator is least
+     reliable (or, for the backstop, only via the report-based leg);
+     — = not designed for it.</p>
+
+  <div class="tblwrap"><table>
+    <tr><th>Event</th><th>Modality</th>
+        <th>1 · GloFAS</th><th>2 · Flood Hub</th><th>3 · Rainfall</th><th>4 · Backstop</th></tr>
+    <tr><td>Aug–Oct 2007 · Teso, 718k <strong>(CERF)</strong></td><td>Riverine</td>
+        <td><span class="tag ok">core</span></td><td><span class="tag ok">core</span></td>
+        <td>—</td><td><span class="tag ok">core</span></td></tr>
+    <tr><td>Nov–Dec 2019 · Rwenzori + Elgon <strong>(CERF)</strong></td><td>Flash + mixed</td>
+        <td><span class="tag b">weak</span></td><td><span class="tag ok">core</span></td>
+        <td><span class="tag ok">core</span></td><td><span class="tag b">weak</span></td></tr>
+    <tr><td>Sep–Oct 2025 · Katakwi–Pallisa (DTM)</td><td>Riverine/wetland</td>
+        <td><span class="tag ok">core</span></td><td><span class="tag ok">core</span></td>
+        <td>—</td><td><span class="tag ok">core</span></td></tr>
+    <tr><td>Aug 2024 · Ntoroko/Semliki (DTM)</td><td>Riverine</td>
+        <td><span class="tag ok">core</span></td><td><span class="tag ok">core</span></td>
+        <td>—</td><td><span class="tag ok">core</span></td></tr>
+    <tr><td>Nov–Dec 2024 · Kasese, 200k (DTM)</td><td>Riverine/flash (Nyamwamba)</td>
+        <td><span class="tag b">weak</span></td><td><span class="tag ok">core</span></td>
+        <td><span class="tag ok">core</span></td><td><span class="tag b">weak</span></td></tr>
+    <tr><td>May 2013 / May 2020 · Kasese</td><td>Riverine/flash (Nyamwamba)</td>
+        <td><span class="tag b">weak</span></td><td><span class="tag ok">core</span></td>
+        <td><span class="tag ok">core</span></td><td><span class="tag b">weak</span></td></tr>
+    <tr><td>May 2020 · Kween, 100k</td><td>Flash</td>
+        <td><span class="tag b">weak</span></td><td><span class="tag ok">core</span></td>
+        <td><span class="tag ok">core</span></td><td><span class="tag b">weak</span></td></tr>
+    <tr><td>Jul–Aug 2022 · Mbale, 78k</td><td>Flash (Nabuyonga)</td>
+        <td><span class="tag b">weak</span></td><td><span class="tag ok">core</span></td>
+        <td><span class="tag ok">core</span></td><td><span class="tag b">weak</span></td></tr>
+    <tr><td>May 2021 · Butaleja, 75k</td><td>Riverine (Manafwa r.)</td>
+        <td><span class="tag ok">core</span></td><td><span class="tag ok">core</span></td>
+        <td>—</td><td><span class="tag ok">core</span></td></tr>
+    <tr><td>Aug–Sep 2011 · Elgon foothills, 63k</td><td>Riverine</td>
+        <td><span class="tag ok">core</span></td><td><span class="tag ok">core</span></td>
+        <td><span class="tag b">weak</span></td><td><span class="tag ok">core</span></td></tr>
+    <tr><td>Feb–Mar 2010 · Nametsi, 388 deaths</td><td>Landslide</td>
+        <td>—</td><td>—</td>
+        <td><span class="tag ok">core</span></td><td><span class="tag b">weak</span></td></tr>
+    <tr><td>Jun 2019 · Bududa, 130k</td><td>Landslide</td>
+        <td>—</td><td>—</td>
+        <td><span class="tag ok">core</span></td><td><span class="tag b">weak</span></td></tr>
+    <tr><td>Nov 2024 · Bulambuli/Masugu, 141 deaths</td><td>Landslide</td>
+        <td>—</td><td>—</td>
+        <td><span class="tag ok">core</span></td><td><span class="tag b">weak</span></td></tr>
+    <tr><td>Apr–May 2024 · countrywide, 77 deaths</td><td>Mixed</td>
+        <td><span class="tag b">weak</span></td><td><span class="tag b">weak</span></td>
+        <td><span class="tag b">weak</span></td><td><span class="tag ok">core</span></td></tr>
+    <tr><td>Nov 2008 · West Nile + Karamoja, 30k</td><td>Riverine</td>
+        <td>—</td><td>—</td><td>—</td><td>—</td></tr>
+  </table></div>
+  <p>Two things the matrix makes plain. First, <strong>no single option covers the
+     record</strong>: the riverine column and the landslide rows are disjoint, which is
+     the case for the two-window recommendation below. Second, <strong>coverage
+     assumes the proposed geographic scope</strong> — the Nov 2008 West Nile/Karamoja
+     floods and parts of the Apr–May 2024 countrywide event fall outside every
+     proposed window, whatever the indicator. That is a scope choice to make with eyes
+     open, not an oversight: a trigger for everywhere is a trigger for nowhere.</p>
 
   <h3>Recommended shape</h3>
   <p>A mixed-basis mechanism with windows split by <em>space</em> (the two regimes need
