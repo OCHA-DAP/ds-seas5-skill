@@ -33,27 +33,53 @@ UGA_DIR = f"{PROJECT_PREFIX}/processed/uga"
 OUT = Path(__file__).resolve().parent.parent / "pages/uganda-flood-trigger/events_map.png"
 
 # The events: worst of EM-DAT's 47 flood + wet mass-movement records for UGA,
-# by affected or deaths. label = what the map prints; place = manual (lon, lat)
-# for region-level records, else centroid of the districts EM-DAT names.
+# by affected or deaths. Pin placement, most precise available per event:
+#   ("point", lon, lat)  — the record names a village/town with known
+#                          coordinates (comment says which);
+#   ["District", ...]    — representative point of the union of the FIRST-listed
+#                          (worst-hit) districts in EM-DAT's Location field,
+#                          computed from CODAB; scattered multi-region events
+#                          anchor on that lead cluster, flagged in the label.
 MODALITY = {"Riverine flood": "riverine", "Flash flood": "flash",
             "Landslide (wet)": "landslide", "Mudslide": "landslide",
             "Flood (General)": "unspecified"}
 EVENTS = [
-    # disno, label, cerf ($ text or None), manual place or None, label offset
-    ("2007-0408-UGA", "Aug–Oct 2007 · 718k affected", "CERF $4.8M", (33.55, 2.05), (-0.1, 1.0)),
-    ("2019-0625-UGA", "Nov–Dec 2019 · 65k aff., 65 deaths", "CERF $4.0M", (30.35, 0.90), (-1.45, 0.60)),
-    ("2019-0599-UGA", "Nov–Dec 2019 · Bundibugyo", None, (30.05, 0.72), (-1.45, 0.05)),
-    ("2020-0182-UGA", "May 2020 · 100k affected", None, (34.52, 1.44), (0.95, 0.95)),
-    ("2020-0213-UGA", "May 2020 · Kasese, 25k", None, (30.00, 0.32), (-1.35, -0.42)),
-    ("2013-0197-UGA", "May 2013 · Kasese, 25k", None, (30.12, 0.05), (-1.30, -0.95)),
-    ("2011-0376-UGA", "Aug–Sep 2011 · 63k affected", None, (34.32, 1.22), (1.15, 0.35)),
-    ("2008-0527-UGA", "Nov 2008 · 30k aff., 49 deaths", None, (31.85, 3.35), (-1.25, 0.55)),
-    ("2010-0084-UGA", "Feb–Mar 2010 · Bududa, 388 deaths", None, (34.25, 0.88), (1.30, -0.55)),
-    ("2019-0227-UGA", "Jun 2019 · 130k aff., 61 deaths", None, (34.40, 1.02), (1.20, -0.10)),
-    ("2024-0883-UGA", "Nov 2024 · Bulambuli, 141 deaths", None, (34.35, 1.35), (0.90, 1.45)),
-    ("2022-0481-UGA", "Jul–Aug 2022 · Mbale, 78k, 32 deaths", None, (34.15, 1.05), (0.60, -1.30)),
-    ("2021-0240-UGA", "May 2021 · Butaleja, 75k", None, (33.94, 0.90), (-0.35, -1.35)),
-    ("2024-0231-UGA", "Apr–May 2024 · 58k aff., 77 deaths\n(countrywide)", None, (32.30, 0.65), (-0.65, -0.95)),
+    # disno, label, cerf ($ text or None), anchor, label offset
+    # Teso first-listed (Amuria, Bukedea, Kaberamaido, Katakwi, Kumi, Soroti);
+    # the record spans 33 districts to the north and east.
+    ("2007-0408-UGA", "Aug–Oct 2007 · 718k affected\n(Teso shown; 33 districts)", "CERF $4.8M",
+     ["Amuria", "Bukedea", "Kaberamaido", "Katakwi", "Kumi", "Soroti"], (-1.25, 1.35)),
+    # Region-level record ("Rwenzori sub-region, Mount-Elgon sub-region"):
+    # anchored on the Rwenzori cluster, Elgon noted in the label.
+    ("2019-0625-UGA", "Nov–Dec 2019 · 65k aff., 65 deaths\n(Rwenzori shown; also Mt Elgon)", "CERF $4.0M",
+     ["Kasese", "Bundibugyo", "Ntoroko"], (-1.45, 0.75)),
+    # Busaru & Harugale sub-counties, southern Bundibugyo (~0.63N 30.03E).
+    ("2019-0599-UGA", "Nov–Dec 2019 · Bundibugyo", None, ("point", 30.03, 0.63), (-1.40, -0.05)),
+    # Kween first-listed ("Girigiri lower plains"); also Kasese, Kabale.
+    ("2020-0182-UGA", "May 2020 · 100k affected\n(Kween shown; also Kasese, Kabale)", None,
+     ["Kween"], (1.00, 0.90)),
+    # Nyamwamba river through Kilembe / Kasese town (~0.19N 30.03E).
+    ("2020-0213-UGA", "May 2020 · Kasese, 25k", None, ("point", 30.03, 0.19), (-1.35, -0.35)),
+    ("2013-0197-UGA", "May 2013 · Kasese, 25k", None, ("point", 30.08, 0.16), (-1.25, -0.95)),
+    # Bulambuli & Sironko first-listed (Elgon foothills; Kween/Mbale follow).
+    ("2011-0376-UGA", "Aug–Sep 2011 · 63k affected", None,
+     ["Bulambuli", "Sironko"], (1.15, 0.42)),
+    # Adjumani & Moyo first-listed; the record also spans Karamoja.
+    ("2008-0527-UGA", "Nov 2008 · 30k aff., 49 deaths\n(West Nile shown; also Karamoja)", None,
+     ["Adjumani", "Moyo"], (0.60, 0.75)),
+    # Nametsi village, Bududa (the 2010 landslide site, ~1.00N 34.37E).
+    ("2010-0084-UGA", "Feb–Mar 2010 · Bududa (Nametsi),\n388 deaths", None,
+     ("point", 34.37, 1.00), (1.30, -0.60)),
+    ("2019-0227-UGA", "Jun 2019 · 130k aff., 61 deaths", None, ["Bududa"], (1.25, -0.05)),
+    # Masugu village, Buluganya sub-county, eastern Bulambuli (~1.28N 34.40E).
+    ("2024-0883-UGA", "Nov 2024 · Bulambuli (Masugu),\n141 deaths", None,
+     ("point", 34.40, 1.28), (0.95, 1.50)),
+    # Nabuyonga burst through Mbale city (~1.08N 34.18E).
+    ("2022-0481-UGA", "Jul–Aug 2022 · Mbale, 78k, 32 deaths", None,
+     ("point", 34.18, 1.08), (0.55, -1.35)),
+    ("2021-0240-UGA", "May 2021 · Butaleja, 75k", None, ["Butaleja"], (-0.40, -1.30)),
+    ("2024-0231-UGA", "Apr–May 2024 · 58k aff., 77 deaths\n(countrywide)", None,
+     ("point", 32.30, 0.65), (-0.65, -0.95)),
 ]
 MARKER = {"riverine": "o", "flash": "D", "landslide": "v", "unspecified": "s"}
 MNAME = {"riverine": "Riverine flood", "flash": "Flash flood",
@@ -85,11 +111,21 @@ def main() -> None:
     cod2.boundary.plot(ax=ax, color="#c9d2d3", linewidth=0.35, zorder=3)
     cod2.dissolve().boundary.plot(ax=ax, color="#8a9a9c", linewidth=0.9, zorder=4)
 
-    for disno, label, cerf, place, (dx, dy) in EVENTS:
+    placed = []
+    for disno, label, cerf, anchor, (dx, dy) in EVENTS:
         row = em.loc[disno]
         mod = MODALITY[row["Disaster Subtype"]]
-        x, y = place
-        s = size_for(row["Total Affected"])
+        if isinstance(anchor, tuple) and anchor[0] == "point":
+            x, y = anchor[1], anchor[2]
+        else:
+            sel = cod2[cod2["ADM2_EN"].isin(anchor)]
+            assert len(sel) == len(anchor), f"{disno}: unmatched districts {set(anchor) - set(sel['ADM2_EN'])}"
+            x, y = sel.union_all().representative_point().coords[0]
+        placed.append((size_for(row["Total Affected"]), x, y, mod, label, cerf, dx, dy))
+
+    # Big markers first so co-located small ones (Nametsi inside Bududa, the
+    # two Kasese/Nyamwamba events) stay visible on top.
+    for s, x, y, mod, label, cerf, dx, dy in sorted(placed, key=lambda t: -t[0]):
         if cerf:
             ax.scatter(x, y, s=s * 2.6, marker="o", facecolor="none",
                        edgecolor="#b8860b", linewidth=1.8, zorder=6)
