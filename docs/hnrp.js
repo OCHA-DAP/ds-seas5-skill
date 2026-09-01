@@ -472,7 +472,7 @@
       const resolvedKey = resolved ? periodKey(resolved) : null;
       const exercises = [...new Set(list.map(({ c }) => c.a))]; // newest first
       phaseExSel.innerHTML = exercises.map((a, i) =>
-        `<option value="${a}">${fewsMode() ? "Reported" : "Exercised"} ` +
+        `<option value="${a}">${fewsMode() ? "Reported" : "Analysis"} ` +
         `${fmtYM(a)}${i === 0 ? " (latest)" : ""}</option>`).join("");
       if (resolved && exercises.includes(resolved.a)) phaseExSel.value = resolved.a;
       const inEx = list.filter(({ c }) => c.a === phaseExSel.value)
