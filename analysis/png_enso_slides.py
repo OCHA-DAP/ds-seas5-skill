@@ -513,6 +513,105 @@ def _map_panel(ax, r, sig, mask, x, y, title, title_size=11):
     ax.set_title(title, fontsize=title_size, pad=4)
 
 
+# Trimester-clump labels on the main map — a port of the hnrp view's
+# renderTriLabels (docs/hnrp.js): leader clustering in RENDERED-pixel space,
+# seeded by the densest pixel of each (trimester, direction) clump so the label
+# always sits on real signal; threshold backs off while the map is soup; a
+# declutter pass keeps the first label of every key so no season is dropped.
+LABEL_MIN_PX = 95    # same-key labels closer than this merge (display px)
+LABEL_CLEAR_PX = 42  # any-key labels closer than this: weaker one dropped
+MAX_TRI_LABELS = 12  # past this the map is soup whatever the clustering
+LABEL_DENSITY_R = 3.2  # grid-cell radius for the density seeding
+MAX_LABEL_KEYS = 8   # only the largest (trimester, direction) clumps get labels
+MIN_KEY_PIXELS = 4   # a key smaller than this is noise, not a clump
+
+
+def _draw_tri_labels(fig, ax, order, best_t, r_best, has, x, y):
+    from matplotlib import patheffects
+    from scipy.spatial import cKDTree
+
+    rows, cols = np.nonzero(has)
+    if not len(rows):
+        return
+    tri_i = best_t[rows, cols]
+    sign = (r_best[rows, cols] > 0).astype(int)
+    keys = tri_i * 2 + sign
+
+    # unlike the app (whose keys are just seasons), (trimester, direction)
+    # yields up to 24 keys and the first-of-each-key rule then guarantees
+    # soup — so only the biggest clumps get labelled at all
+    uniq, counts = np.unique(keys, return_counts=True)
+    big = uniq[counts >= MIN_KEY_PIXELS]
+    big = big[np.argsort(-counts[np.isin(uniq, big)])][:MAX_LABEL_KEYS]
+    keep = np.isin(keys, big)
+    if not keep.any():
+        return
+    rows, cols, tri_i, sign, keys = (a[keep] for a in
+                                     (rows, cols, tri_i, sign, keys))
+
+    # density of same-key pixels within LABEL_DENSITY_R grid cells (seed rank)
+    dens = np.zeros(len(rows))
+    grid_pts = np.column_stack([rows, cols]).astype(float)
+    for k in np.unique(keys):
+        m = keys == k
+        tree = cKDTree(grid_pts[m])
+        dens[m] = np.array([len(v) for v in
+                            tree.query_ball_point(grid_pts[m], LABEL_DENSITY_R)])
+
+    # rendered display coordinates (needs a draw for final layout)
+    fig.canvas.draw()
+    disp = ax.transData.transform(
+        np.column_stack([x[cols], y[rows]]))
+
+    idx = np.argsort(-dens)
+    pts = [{"key": int(keys[i]), "p": disp[i], "lon": float(x[cols[i]]),
+            "lat": float(y[rows[i]]), "dens": float(dens[i]),
+            "tri": order[int(tri_i[i])], "pos": bool(sign[i])}
+           for i in idx]
+
+    def cluster_at(min_px):
+        out = []
+        for pt in pts:
+            best, best_d = None, np.inf
+            for c in out:
+                if c["key"] != pt["key"]:
+                    continue
+                d = float(np.hypot(*(c["seed"]["p"] - pt["p"])))
+                if d < best_d:
+                    best_d, best = d, c
+            if best is not None and best_d <= min_px:
+                best["n"] += 1
+            else:
+                out.append({"key": pt["key"], "seed": pt, "n": 1})
+        return out
+
+    clusters = cluster_at(LABEL_MIN_PX)
+    px = LABEL_MIN_PX * 2
+    while len(clusters) > MAX_TRI_LABELS and px <= 400:
+        clusters = cluster_at(px)
+        px *= 2
+
+    # declutter, biggest clump first; first label of each key always survives
+    clusters.sort(key=lambda c: -c["n"])
+    placed, shown = [], set()
+    for c in clusters:
+        first = c["key"] not in shown
+        floor = LABEL_CLEAR_PX * (0.55 if first else 1.0)
+        if any(float(np.hypot(*(p["seed"]["p"] - c["seed"]["p"]))) < floor
+               for p in placed):
+            continue
+        placed.append(c)
+        shown.add(c["key"])
+
+    for c in placed:
+        s = c["seed"]
+        ax.text(s["lon"], s["lat"], s["tri"],
+                color="#0D40B0" if s["pos"] else "#5A2A0A",
+                fontsize=8.5, fontweight="bold", ha="center", va="center",
+                zorder=6, path_effects=[
+                    patheffects.withStroke(linewidth=2.2, foreground="white")])
+
+
 def make_slide1(path_png: Path):
     results, analyzable, x, y, mask = compute_enso_correlations()
 
@@ -538,6 +637,7 @@ def make_slide1(path_png: Path):
     _map_panel(ax_main, r_best, has, mask, x, y,
                "Unique ENSO signal — strongest significant trimester per pixel",
                title_size=12)
+    _draw_tri_labels(fig, ax_main, order, best_t, r_best, has, x, y)
 
     for k, tri in enumerate(SLIDE1_TILES):
         ax = fig.add_subplot(gs[1, k])
