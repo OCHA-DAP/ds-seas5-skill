@@ -345,22 +345,55 @@
         weakest exactly where the mountains are.</div>
     </div>
     <p class="evline"><strong>Designed for events like:</strong> Teso Aug–Oct 2007
-       (the CERF-responded 718k event), Katakwi–Pallisa Sep–Oct 2025, the
-       Kyoga-system riverine floods. After the verification below: <em>not</em> the
-       Ntoroko/Semliki events, weakest on Butaleja/Manafwa, and blind to the Elgon
+       (the CERF-responded 718k event) and Katakwi Sep–Oct 2025 — via the Akokorio
+       point. After the verification below: <em>not</em> the Ntoroko/Semliki events,
+       not Butaleja/Manafwa, not the Kyoga Nile itself, and blind to the Elgon
        landslides and the Nyamwamba floods.</p>
     <p class="evline"><strong>Verified against GloFAS's own skill layers (1 Sep
-       2026):</strong> the reporting points and their published forecast skill
-       (longest lead time with CRPSS &gt; 0.5, from the GloFAS map service's
-       ForecastSkill / HydrologicalModelPerformance layers) are: <strong>Akokorio
-       gauge (Teso, calibrated): 14 days · Kyoga Nile at Masindi Port (calibrated):
-       15 · Kapelebyong: 12</strong> — the Teso/Kyoga window is genuinely strong;
-       <strong>Mpologoma at Budumba (drains Pallisa/Butaleja): 4</strong> — enough
-       for a short action window only; <strong>Magoro/Apapi (Katakwi): 2 · Semliki:
-       0 · Manafwa at Butaleja: 0 (uncalibrated)</strong> — no usable skill; and
-       <strong>no reporting points at all on the Kasese rivers</strong>. So GloFAS
-       carries the Teso/Kyoga leg well, cannot carry Ntoroko's Semliki leg, and the
-       Butaleja leg only marginally via the Mpologoma.</p>
+       2026)</strong> — both metrics, because they answer different questions:
+       CRPSS lead time says how far ahead the forecast beats climatology, while the
+       hydrological model performance against the station record (modified KGE and
+       its correlation component) says whether the model reproduces the river at
+       all. A long CRPSS lead over broken hydrology is an artifact, not a trigger.</p>
+    <div class="tblwrap"><table>
+      <tr><th>GloFAS point</th><th>Trigger river</th><th>CRPSS&gt;0.5 lead</th>
+          <th>KGE</th><th>corr</th><th>bias</th><th>Verdict</th></tr>
+      <tr><td>Akokorio at Uganda Gauge (calibrated, 22-yr record)</td><td>Teso — Katakwi/Amuria</td>
+          <td>14 d</td><td>0.11</td><td><strong>0.65</strong></td><td>1.68×</td>
+          <td><span class="tag ok">usable</span> timing is right; the wet bias means
+              thresholds must be set in model space (reforecast RPs), never on
+              observed discharge</td></tr>
+      <tr><td>Kyoga Nile at Masindi Port (calibrated, 28-yr)</td><td>Kyoga outflow</td>
+          <td>15 d</td><td>−0.83</td><td><strong>0.21</strong></td><td>2.50×</td>
+          <td><span class="tag a">not usable</span> the long CRPSS lead is a slow
+              lake-outflow signal beating climatology, on hydrology the model gets
+              wrong (corr 0.21)</td></tr>
+      <tr><td>Kapelebyong</td><td>Akokoro, north Teso</td>
+          <td>12 d</td><td colspan="3">no station evaluation</td>
+          <td><span class="tag b">unvalidated</span> model self-skill only</td></tr>
+      <tr><td>Mpologoma at Budumba</td><td>drains Pallisa/Butaleja</td>
+          <td>4 d</td><td colspan="3">no station evaluation</td>
+          <td><span class="tag b">unvalidated</span>, short lead</td></tr>
+      <tr><td>Magoro/Apapi</td><td>Katakwi east</td>
+          <td>2 d</td><td colspan="3">no station evaluation</td>
+          <td><span class="tag a">not usable</span></td></tr>
+      <tr><td>Semliki</td><td>Ntoroko</td>
+          <td><strong>0 d</strong></td><td colspan="3">no station evaluation</td>
+          <td><span class="tag a">not usable</span></td></tr>
+      <tr><td>Manafwa at Butaleja (uncalibrated, 25-yr)</td><td>Butaleja</td>
+          <td><strong>0 d</strong></td><td>−10.6</td><td>0.37</td><td>12.6×</td>
+          <td><span class="tag a">not usable</span></td></tr>
+      <tr><td colspan="2">Kasese rivers (Nyamwamba, Mubuku)</td>
+          <td colspan="4">no reporting points at all</td>
+          <td><span class="tag a">absent</span></td></tr>
+    </table></div>
+    <p class="evline">Net: <strong>GloFAS offers exactly one defensible trigger
+       point in Uganda — Akokorio, for a Katakwi/Teso window</strong> (decent
+       correlation, two weeks of forecast skill, thresholds derived from the
+       reforecast climatology). Everything else fails on hydrology, is unvalidated
+       against any station, or does not exist. Source: GloFAS map service
+       ForecastSkill + HydrologicalModelPerformance layers (CRPSS lead, modified
+       KGE with corr/bias components, station records to ~34 years).</p>
   </div>
 
   <div class="opt">
@@ -493,8 +526,11 @@
         <td>—</td><td>—</td><td>—</td><td>—</td></tr>
   </table></div>
   <p><sup>†</sup> Downgraded after checking GloFAS's own skill layers (see Option 1):
-     Semliki 0 days of skillful lead, Manafwa at Butaleja 0 (Mpologoma at Budumba 4),
-     no upper-reach points in the Elgon foothills.</p>
+     Semliki 0 days of skillful lead, Manafwa at Butaleja 0 with KGE −10.6 (Mpologoma
+     at Budumba 4 days, unvalidated), no upper-reach points in the Elgon foothills.
+     The Teso/Katakwi rows stay <span class="tag ok">core</span> on the strength of
+     the Akokorio point alone — the Kyoga Nile point's long lead fails the
+     hydrology check (corr 0.21) and does not count.</p>
   <p>Two things the matrix makes plain. First, <strong>no single option covers the
      record</strong>: the riverine column and the landslide rows are disjoint, which is
      the case for the two-window recommendation below. Second, <strong>coverage
@@ -508,9 +544,11 @@
      different indicators) and staged by <em>time</em> within each:</p>
   <ul>
     <li><strong>Riverine window</strong> (Ntoroko; Teso districts if ruled in
-        scope): for Teso/Kyoga, readiness on GloFAS at 10–15 days and action on
-        GloFAS 3–7 days (Akokorio/Kyoga Nile points, both verified skillful at those
-        leads) OR Flood Hub consensus (Option 2); for <strong>Ntoroko the forecast
+        scope): for Katakwi/Teso, readiness on GloFAS at 10–14 days and action on
+        GloFAS 3–7 days at the Akokorio point — the one point that passes both the
+        forecast-skill and hydrology checks, with thresholds derived in model space
+        because of its 1.7× wet bias — OR Flood Hub consensus (Option 2); for
+        <strong>Ntoroko the forecast
         leg cannot be GloFAS</strong> (Semliki: zero skillful lead) — it needs Flood
         Hub, an observed Semliki level, or catchment rainfall instead; observational
         backstop on FloodScan exposure (Option 4) in both.</li>
@@ -536,9 +574,11 @@
         window, the spatial scope (the Severity 3+ decision above), and the fund's
         false-alarm tolerance. No analysis before the spec.</li>
     <li><strong>Indicator inventory (early Sep, parallel).</strong> GloFAS is done
-        (Option 1's verification: Teso/Kyoga strong, Semliki and Manafwa zero,
-        Kasese absent — confirm against the CDS reforecasts when thresholds are
-        derived). Remaining: inventory Google Flood Hub gauges over the Semliki and
+        (Option 1's verification, both metrics: Akokorio is the single point passing
+        forecast skill AND hydrology; Kyoga Nile fails on correlation, Semliki and
+        Manafwa on everything, Kasese absent — confirm against the CDS reforecasts
+        when thresholds are derived). Remaining: inventory Google Flood Hub gauges
+        over the Semliki and
         Kasese rivers (now the critical unknown); confirm UNMA/DMS-MWE advisory feed
         access; add UGA to the FloodScan exposure pipeline.</li>
     <li><strong>Backtest every specific trigger (mid-Sep).</strong> Run each candidate
