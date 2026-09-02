@@ -49,6 +49,7 @@ except Exception:  # noqa: BLE001
 import matplotlib
 
 matplotlib.use("Agg")
+matplotlib.rcParams["svg.fonttype"] = "none"   # real <text>: selectable when inlined
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
@@ -73,7 +74,9 @@ WINDOW_MARGIN = 0.6    # deg padding around the country bounds
 MIN_W, MIN_H = 3.0, 2.25   # minimum window size (small island states)
 PART_KEEP_DEG = 8.5    # keep territory parts within this of the main landmass
 
-SLIDE1_TILES = ("JFM", "AMJ", "JAS", "OND")   # non-overlapping, whole year
+SLIDE1_TILES = ("JFM", "FMA", "MAM", "AMJ", "MJJ", "JJA",
+                "JAS", "ASO", "SON", "OND", "NDJ", "DJF")   # all 12 trimesters
+SLIDE1_TILE_COLS = 6
 DPI = 150
 
 TRIMESTERS = {
@@ -222,9 +225,31 @@ def set_country(iso3: str, name: str) -> None:
         cy_ = (y0 + y1) / 2
         y0, y1 = cy_ - MIN_H / 2, cy_ + MIN_H / 2
 
+    # boundary-drawing copies reduced to what a slide can actually show:
+    # simplified to ~1 rendered pixel and with sub-pixel islands dropped —
+    # RUS/IDN at full 200 m tolerance made 40-100 MB SVGs from coastline and
+    # island rings repeated in all 13 panels. The data masks keep the full
+    # geometry.
+    tol = max(0.002, (x1 - x0) / 1400)
+
+    def _draw_lines(gdf):
+        """Boundary lines for drawing: sub-pixel islands dropped, simplified
+        to ~1 rendered pixel (the threshold is in display degrees — a screen
+        criterion, so plain geographic area is the right measure)."""
+        if not len(gdf):
+            return gdf
+        g = gdf.explode(index_parts=False)
+        g = g[[geom.area >= (2 * tol) ** 2 for geom in g.geometry]]
+        return gpd.GeoDataFrame(geometry=g.geometry.simplify(tol).boundary,
+                                crs=gdf.crs)
+
+    adm1_draw = _draw_lines(adm1)
+    adm0_draw = _draw_lines(adm0)
+
     _STATE.clear()
     _STATE.update(iso3=iso3, name=name, lon=(x0, x1), lat=(y1, y0),  # (N, S)
-                  adm1=adm1, adm0=adm0, clipped=clipped)
+                  adm1=adm1, adm0=adm0, adm1_draw=adm1_draw,
+                  adm0_draw=adm0_draw, clipped=clipped)
 
 
 def LON():
@@ -524,10 +549,9 @@ def _map_panel(ax, r, sig, mask, x, y, title, title_size=11):
     _r_rgb(img, r, sig)
     ax.imshow(img, extent=_extent(x, y), origin="upper",
               interpolation="nearest", zorder=1)
-    if len(_STATE["adm1"]):
-        _STATE["adm1"].boundary.plot(ax=ax, color=C_OUTLINE, linewidth=0.5,
-                                     zorder=3)
-    _STATE["adm0"].boundary.plot(ax=ax, color="#5A6472", linewidth=0.7, zorder=4)
+    if len(_STATE["adm1_draw"]):
+        _STATE["adm1_draw"].plot(ax=ax, color=C_OUTLINE, linewidth=0.5, zorder=3)
+    _STATE["adm0_draw"].plot(ax=ax, color="#5A6472", linewidth=0.7, zorder=4)
     ax.set_xlim(LON())
     ax.set_ylim(LAT()[1], LAT()[0])
     ax.set_aspect("equal")
@@ -634,11 +658,46 @@ def _draw_tri_labels(fig, ax, order, best_t, r_best, has, x, y):
                     patheffects.withStroke(linewidth=2.2, foreground="white")])
 
 
-def compute_slide1_data():
-    return compute_enso_correlations()
+def compute_slide1_data(recompute: bool = False):
+    """The heavy part of slide 1 (partial correlations), cached per country so
+    re-renders (layout tweaks, translations, PDFs) are cheap. The cache only
+    changes when the ERA5 record does — drop it with --recompute."""
+    f = CACHE / f"corr_{_STATE['iso3'].lower()}.npz"
+    if f.exists() and not recompute:
+        z = np.load(f)
+        tris = list(TRIMESTERS)
+        results = {t: {"r": z[f"r_{t}"], "p": z[f"p_{t}"]} for t in tris}
+        analyzable = {t: z[f"a_{t}"].astype(bool) for t in tris}
+        return results, analyzable, z["x"], z["y"], z["mask"].astype(bool)
+    results, analyzable, x, y, mask = compute_enso_correlations()
+    CACHE.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        f, x=x, y=y, mask=mask,
+        **{f"r_{t}": results[t]["r"].astype("float32") for t in TRIMESTERS},
+        **{f"p_{t}": results[t]["p"].astype("float32") for t in TRIMESTERS},
+        **{f"a_{t}": analyzable[t] for t in TRIMESTERS},
+    )
+    return results, analyzable, x, y, mask
 
 
-def make_slide1(path_png: Path, data=None):
+def render_country(iso3: str, data, out_dir: Path | None = None) -> None:
+    """Render both slides, both languages: SVGs + one vector PDF per language."""
+    global LANG
+    out = out_dir or OUT_DIR
+    for lg in LANGS:
+        LANG = lg
+        sfx = "" if lg == "en" else f"_{lg}"
+        f1 = build_slide1_fig(data)
+        f2 = build_slide2_fig()
+        save_svg(f1, out / f"{iso3}_slide1{sfx}.svg")
+        save_svg(f2, out / f"{iso3}_slide2{sfx}.svg")
+        save_pdf([f1, f2], out / f"{iso3}{sfx}.pdf")
+        plt.close(f1)
+        plt.close(f2)
+    LANG = "en"
+
+
+def build_slide1_fig(data=None):
     results, analyzable, x, y, mask = data or compute_enso_correlations()
 
     # Page-style reduce: strongest significant analysable trimester per pixel
@@ -654,11 +713,14 @@ def make_slide1(path_png: Path, data=None):
     r_best = np.where(has, R[best_t, ii, jj], np.nan)
 
     fr = LANG == "fr"
+    ncols = SLIDE1_TILE_COLS
+    nrows = -(-len(SLIDE1_TILES) // ncols)
     fig = plt.figure(figsize=(13.333, 7.5))
     fig.patch.set_facecolor("white")
-    gs = fig.add_gridspec(2, 4, height_ratios=[1.75, 1.0],
-                          left=0.04, right=0.72, top=0.85, bottom=0.05,
-                          hspace=0.18, wspace=0.08)
+    gs = fig.add_gridspec(1 + nrows, ncols,
+                          height_ratios=[1.55] + [0.62] * nrows,
+                          left=0.04, right=0.72, top=0.85, bottom=0.04,
+                          hspace=0.30, wspace=0.06)
 
     ax_main = fig.add_subplot(gs[0, :])
     _map_panel(ax_main, r_best, has, mask, x, y,
@@ -669,10 +731,10 @@ def make_slide1(path_png: Path, data=None):
     _draw_tri_labels(fig, ax_main, order, best_t, r_best, has, x, y)
 
     for k, tri in enumerate(SLIDE1_TILES):
-        ax = fig.add_subplot(gs[1, k])
+        ax = fig.add_subplot(gs[1 + k // ncols, k % ncols])
         sg = (analyzable[tri] & np.isfinite(results[tri]["r"])
               & (results[tri]["p"] < ALPHA))
-        _map_panel(ax, results[tri]["r"], sg, mask, x, y, tri, title_size=10)
+        _map_panel(ax, results[tri]["r"], sg, mask, x, y, tri, title_size=8.5)
 
     fig.text(0.04, 0.955,
              f"{_STATE['name']} : comment El Niño influence-t-il généralement "
@@ -740,20 +802,17 @@ def make_slide1(path_png: Path, data=None):
               "• All seasons kept (no rainy-season filter)"),
              fontsize=9.5, color="#333", va="top", linespacing=1.5)
     foot = ("Données : précip. mensuelles ERA5 (0,25°), Niño3.4\n"
-            "NOAA PSL. Rangée du bas : les quatre trimestres."
+            "NOAA PSL. En bas : les 12 trimestres glissants."
             if fr else
             "Data: ERA5 monthly precip (0.25°), NOAA PSL\n"
-            "Niño3.4. Bottom row: the four quarters of the year.")
+            "Niño3.4. Bottom rows: all 12 rolling trimesters.")
     if _STATE["clipped"]:
         foot += ("\nTerritoires éloignés hors du cadre non représentés."
                  if fr else
                  "\nDistant territories beyond the map edge not shown.")
     fig.text(lx, 0.05, foot, fontsize=8.5, color="#777", va="bottom",
              linespacing=1.4)
-
-    fig.savefig(path_png, dpi=DPI, facecolor="white")
-    plt.close(fig)
-    _quantize(path_png)
+    return fig
 
 
 # ── Slide 2: current SEAS5 forecast, app categories + skill shading ─────────────
@@ -875,6 +934,25 @@ def load_app_country_forecast(issued: pd.Timestamp) -> dict:
     return d["data"][_STATE["iso3"]]
 
 
+def _rp_text_color(v: dict) -> str:
+    """Text colour for a trimester label: the bar's category colour, with the
+    two light fills swapped for their edge variants (legible as text) and the
+    near-normal bin as grey — off-season stays muted."""
+    if not v["rainy"]:
+        return "#999999"
+    p = v["pct"]
+    vsev_m, sev_m = 100 / THRESH["vsev_rp"], 100 / THRESH["sev_rp"]
+    if p <= vsev_m:
+        return C_DV
+    if p <= sev_m:
+        return "#A06030"   # C_DS edge variant
+    if p >= 100 - vsev_m:
+        return C_FV
+    if p >= 100 - sev_m:
+        return "#4A90C8"   # C_FS edge variant
+    return "#777777"
+
+
 def _rp_bin_color(p: float) -> str:
     """Country-mean percentile -> the app's RP category colour (bar chart)."""
     vsev_m, sev_m = 100 / THRESH["vsev_rp"], 100 / THRESH["sev_rp"]
@@ -903,7 +981,7 @@ def _season_label(tri: str, season_year: int) -> str:
     return f"{tri} {season_year}" + (f"/{(season_year + 1) % 100:02d}" if wraps else "")
 
 
-def make_slide2(path_png: Path):
+def build_slide2_fig():
     issued = load_issued()
     cube, cx, cy = load_skill_cube_window(issued)
     app_vals = load_app_country_forecast(issued)
@@ -952,11 +1030,11 @@ def make_slide2(path_png: Path):
                                      "hatch.color": colr}):
                     ax.contourf(cx, cy, m, levels=[0.5, 1.5], colors="none",
                                 hatches=[hatch], zorder=2)
-        if len(_STATE["adm1"]):
-            _STATE["adm1"].boundary.plot(ax=ax, color="#6B7683",
-                                         linewidth=0.5, zorder=3)
-        _STATE["adm0"].boundary.plot(ax=ax, color="#3E4650", linewidth=0.7,
-                                     zorder=4)
+        if len(_STATE["adm1_draw"]):
+            _STATE["adm1_draw"].plot(ax=ax, color="#6B7683", linewidth=0.5,
+                                     zorder=3)
+        _STATE["adm0_draw"].plot(ax=ax, color="#3E4650", linewidth=0.7,
+                                 zorder=4)
         ax.set_xlim(LON())
         ax.set_ylim(LAT()[1], LAT()[0])
         ax.set_aspect("equal")
@@ -969,9 +1047,9 @@ def make_slide2(path_png: Path):
         else:
             when = "en saison" if fr else "in season"
         if not v["rainy"]:
-            sub, scol = ("hors saison" if fr else "off-season"), "#999"
+            sub = "hors saison" if fr else "off-season"
         elif v["rp"] is None or v["rp"] < 1.5:
-            sub, scol = ("≈ normale" if fr else "≈ normal"), "#777"
+            sub = "≈ normale" if fr else "≈ normal"
         else:
             dry_side = v["pct"] < 50
             side = (("sec" if dry_side else "humide") if fr
@@ -979,12 +1057,10 @@ def make_slide2(path_png: Path):
             sub = (f"1-sur-{v['rp']:.0f} {side} · {_ordinal(v['pct'])} centile"
                    if fr else
                    f"1-in-{v['rp']:.0f} {side} · {_ordinal(v['pct'])} pct")
-            scol = "#7B3A1A" if dry_side else "#0D40B0"
+        # label wears the country-level category colour, matching its bar
         ax.set_title(
             f"{_season_label(tri, d['season_year'])} — {when}\n{sub}",
-            fontsize=9.5, pad=3, linespacing=1.25,
-            color=scol if tri == worst else ("#1a1a1a" if v["rainy"] else "#777"),
-            fontweight="bold" if tri == worst else "normal")
+            fontsize=9.5, pad=3, linespacing=1.25, color=_rp_text_color(v))
 
     # bar chart in the last grid slot: country-mean climatology vs forecast
     C_CLIM_BAR = "#2B2B2B"
@@ -1002,9 +1078,7 @@ def make_slide2(path_png: Path):
     bax.set_xticks(xs_pos)
     bax.set_xticklabels([t for t in order], fontsize=7.5)
     for t, tick in zip(order, bax.get_xticklabels()):
-        if t == worst:
-            tick.set_color("#7B3A1A")
-            tick.set_fontweight("bold")
+        tick.set_color(_rp_text_color(app_vals[t]))
     top = max([v for v in clim_means + fc_means if np.isfinite(v)] or [1.0])
     bax.set_ylim(0, top * 1.15)
     bax.tick_params(axis="y", labelsize=7.5, length=2)
@@ -1131,69 +1205,59 @@ def make_slide2(path_png: Path):
                  "\nDistant territories beyond the map edge not shown.")
     fig.text(lx, 0.015, foot, fontsize=8.5, color="#777", va="bottom",
              linespacing=1.4)
-
-    fig.savefig(path_png, dpi=DPI, facecolor="white")
-    plt.close(fig)
-    _quantize(path_png)
+    return fig
 
 
 # ── output helpers ──────────────────────────────────────────────────────────────
 
 
-def _quantize(path_png: Path) -> None:
-    """Palette-quantize the flat-colour slide PNG (60-70% smaller)."""
-    from PIL import Image
+def save_svg(fig, path: Path) -> None:
+    """Vector SVG: text/lines/legends stay vectors; the data grids are embedded
+    at native grid resolution and flagged image-rendering:pixelated, so a zoom
+    shows crisp 0.25/0.4-degree blocks instead of blur."""
+    fig.savefig(path, format="svg", facecolor="white")
+    txt = path.read_text()
+    txt = txt.replace("<image ", '<image image-rendering="pixelated" ')
+    path.write_text(txt)
 
-    img = Image.open(path_png).convert("RGB")
-    img.quantize(colors=256, method=Image.MEDIANCUT,
-                 dither=Image.NONE).save(path_png, optimize=True)
 
+def save_pdf(figs, path: Path) -> None:
+    """One vector PDF, one slide per page."""
+    from matplotlib.backends.backend_pdf import PdfPages
 
-def make_pdf(iso3: str, suffix: str = "") -> None:
-    """Two-page PDF from the slide PNGs (JPEG-in-PDF keeps it small)."""
-    from PIL import Image
-
-    pages = [Image.open(OUT_DIR / f"{iso3}_slide{i}{suffix}.png").convert("RGB")
-             for i in (1, 2)]
-    pages[0].save(OUT_DIR / f"{iso3}{suffix}.pdf", save_all=True,
-                  append_images=pages[1:], resolution=DPI)
+    with PdfPages(path) as pdf:
+        for fig in figs:
+            pdf.savefig(fig, facecolor="white")
 
 
 def write_manifest(reg: dict[str, str]) -> None:
-    """countries.json for the dropdown: only countries whose slides exist."""
+    """countries.json for the dropdown: only countries whose slides exist,
+    plus the issuance the slides were built from (shown on the page)."""
+    issued = load_issued()
     entries = [{"iso3": iso, "name": name}
                for iso, name in sorted(reg.items(), key=lambda kv: kv[1])
-               if (OUT_DIR / f"{iso}_slide1.png").exists()
-               and (OUT_DIR / f"{iso}_slide2.png").exists()]
-    (OUT_DIR.parent / "countries.json").write_text(
-        json.dumps(entries, indent=0) + "\n")
+               if (OUT_DIR / f"{iso}_slide1.svg").exists()
+               and (OUT_DIR / f"{iso}_slide2.svg").exists()]
+    (OUT_DIR.parent / "countries.json").write_text(json.dumps(
+        {"issued": {"en": f"{issued:%B %Y}",
+                    "fr": f"{FR_MONTHS[issued.month - 1]} {issued:%Y}"},
+         "countries": entries}, ensure_ascii=False, indent=0) + "\n")
     print(f"countries.json: {len(entries)} countries")
 
 
 def build_country(iso3: str, name: str, force: bool = False,
-                  skip_era5: bool = False, skip_seas5: bool = False) -> None:
-    global LANG
-    sfx = {lg: ("" if lg == "en" else f"_{lg}") for lg in LANGS}
-    s1 = {lg: OUT_DIR / f"{iso3}_slide1{sfx[lg]}.png" for lg in LANGS}
-    s2 = {lg: OUT_DIR / f"{iso3}_slide2{sfx[lg]}.png" for lg in LANGS}
-    pdf = {lg: OUT_DIR / f"{iso3}{sfx[lg]}.pdf" for lg in LANGS}
-    if not force and all(f.exists() for d in (s1, s2, pdf) for f in d.values()):
+                  recompute: bool = False) -> None:
+    outputs = []
+    for lg_sfx in ("", "_fr"):
+        outputs += [OUT_DIR / f"{iso3}_slide1{lg_sfx}.svg",
+                    OUT_DIR / f"{iso3}_slide2{lg_sfx}.svg",
+                    OUT_DIR / f"{iso3}{lg_sfx}.pdf"]
+    if not force and all(f.exists() for f in outputs):
         print(f"{iso3}: exists, skipping (use --force to rebuild)")
         return
     set_country(iso3, name)
-    if not skip_era5 and (force or not all(f.exists() for f in s1.values())):
-        data = compute_slide1_data()   # the heavy part — compute once,
-        for lg in LANGS:               # render every language from it
-            LANG = lg
-            make_slide1(s1[lg], data)
-    if not skip_seas5 and (force or not all(f.exists() for f in s2.values())):
-        for lg in LANGS:
-            LANG = lg
-            make_slide2(s2[lg])
-    LANG = "en"
-    for lg in LANGS:
-        if s1[lg].exists() and s2[lg].exists():
-            make_pdf(iso3, sfx[lg])
+    data = compute_slide1_data(recompute=recompute)
+    render_country(iso3, data)
     print(f"{iso3} ({name}): done")
 
 
@@ -1201,9 +1265,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--country", default="all",
                     help="ISO3 code, or 'all' for every app country")
-    ap.add_argument("--force", action="store_true")
-    ap.add_argument("--skip-era5", action="store_true")
-    ap.add_argument("--skip-seas5", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="re-render existing countries")
+    ap.add_argument("--recompute", action="store_true",
+                    help="also drop the cached ERA5 correlations")
     args = ap.parse_args()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1216,7 +1281,7 @@ if __name__ == "__main__":
             raise SystemExit(f"{iso}: not in the app's country list")
         try:
             build_country(iso, reg[iso], force=args.force,
-                          skip_era5=args.skip_era5, skip_seas5=args.skip_seas5)
+                          recompute=args.recompute)
         except SkipCountry as e:
             print(f"SKIP {e}")
             failures.append((iso, str(e)))
