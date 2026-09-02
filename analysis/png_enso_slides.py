@@ -104,6 +104,28 @@ PARTIAL_EXCLUDE = {"pdo"}
 EXTRA_NAMES = {"BES": "Bonaire, Sint Eustatius and Saba", "GLP": "Guadeloupe",
                "GUF": "French Guiana", "MTQ": "Martinique"}
 
+# ── slide languages ──────────────────────────────────────────────────────────────
+# Trimester codes are identical in French (janvier-fevrier-mars = JFM, ...), so
+# maps, tiles and clump labels carry over; only titles/legends/notes translate.
+LANG = "en"
+LANGS = ("en", "fr")
+FR_MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
+             "août", "septembre", "octobre", "novembre", "décembre"]
+
+
+def _n(x) -> str:
+    """Format a number for the current language (French decimal comma)."""
+    t = str(x)
+    return t.replace(".", ",") if LANG == "fr" else t
+
+
+def _month_name(ts: pd.Timestamp) -> str:
+    return FR_MONTHS[ts.month - 1] if LANG == "fr" else f"{ts:%B}"
+
+
+def _suffix() -> str:
+    return "" if LANG == "en" else f"_{LANG}"
+
 
 class SkipCountry(Exception):
     pass
@@ -612,8 +634,12 @@ def _draw_tri_labels(fig, ax, order, best_t, r_best, has, x, y):
                     patheffects.withStroke(linewidth=2.2, foreground="white")])
 
 
-def make_slide1(path_png: Path):
-    results, analyzable, x, y, mask = compute_enso_correlations()
+def compute_slide1_data():
+    return compute_enso_correlations()
+
+
+def make_slide1(path_png: Path, data=None):
+    results, analyzable, x, y, mask = data or compute_enso_correlations()
 
     # Page-style reduce: strongest significant analysable trimester per pixel
     order = list(TRIMESTERS)
@@ -627,6 +653,7 @@ def make_slide1(path_png: Path):
     ii, jj = np.indices(mask.shape)
     r_best = np.where(has, R[best_t, ii, jj], np.nan)
 
+    fr = LANG == "fr"
     fig = plt.figure(figsize=(13.333, 7.5))
     fig.patch.set_facecolor("white")
     gs = fig.add_gridspec(2, 4, height_ratios=[1.75, 1.0],
@@ -635,34 +662,49 @@ def make_slide1(path_png: Path):
 
     ax_main = fig.add_subplot(gs[0, :])
     _map_panel(ax_main, r_best, has, mask, x, y,
+               "Signal propre à l'ENSO — trimestre significatif le plus fort par pixel"
+               if fr else
                "Unique ENSO signal — strongest significant trimester per pixel",
                title_size=12)
     _draw_tri_labels(fig, ax_main, order, best_t, r_best, has, x, y)
 
     for k, tri in enumerate(SLIDE1_TILES):
         ax = fig.add_subplot(gs[1, k])
-        s = (analyzable[tri] & np.isfinite(results[tri]["r"])
-             & (results[tri]["p"] < ALPHA))
-        _map_panel(ax, results[tri]["r"], s, mask, x, y, tri, title_size=10)
+        sg = (analyzable[tri] & np.isfinite(results[tri]["r"])
+              & (results[tri]["p"] < ALPHA))
+        _map_panel(ax, results[tri]["r"], sg, mask, x, y, tri, title_size=10)
 
     fig.text(0.04, 0.955,
+             f"{_STATE['name']} : comment El Niño influence-t-il généralement "
+             "les pluies saisonnières ?" if fr else
              f"{_STATE['name']}: how does El Niño generally affect seasonal "
              "rainfall?",
              fontsize=17, fontweight="bold", color="#1a1a1a")
     fig.text(0.04, 0.905,
-             "Pixelwise partial correlation of rainfall with Niño3.4 (ENSO), other "
-             f"climate modes held constant — ERA5 0.25° grid, {START_YEAR}–{END_YEAR}",
+             ("Corrélation partielle, pixel par pixel, des précipitations avec "
+              "Niño3.4 (ENSO), autres modes climatiques maintenus constants — "
+              f"grille ERA5 0,25°, {START_YEAR}–{END_YEAR}") if fr else
+             ("Pixelwise partial correlation of rainfall with Niño3.4 (ENSO), other "
+              f"climate modes held constant — ERA5 0.25° grid, {START_YEAR}–{END_YEAR}"),
              fontsize=11.5, color="#444")
 
     lx = 0.745
-    fig.text(lx, 0.82, "Partial correlation with Niño3.4", fontsize=11,
-             fontweight="bold")
+    fig.text(lx, 0.82,
+             "Corrélation partielle avec Niño3.4" if fr else
+             "Partial correlation with Niño3.4",
+             fontsize=11, fontweight="bold")
+    S, M = _n(R_STRONG), _n(R_MIN)
     legend_rows = [
-        (C_POS_STRONG, f"Positive, strong (r ≥ {R_STRONG})"),
-        (C_POS_MOD, f"Positive, moderate ({R_MIN} ≤ r < {R_STRONG})"),
-        (C_NEG_MOD, f"Negative, moderate (−{R_STRONG} < r ≤ −{R_MIN})"),
-        (C_NEG_STRONG, f"Negative, strong (r ≤ −{R_STRONG})"),
-        (C_NOSIG, "No significant signal (p ≥ 0.05)"),
+        (C_POS_STRONG, f"Positive, forte (r ≥ {S})" if fr
+         else f"Positive, strong (r ≥ {S})"),
+        (C_POS_MOD, f"Positive, modérée ({M} ≤ r < {S})" if fr
+         else f"Positive, moderate ({M} ≤ r < {S})"),
+        (C_NEG_MOD, f"Négative, modérée (−{S} < r ≤ −{M})" if fr
+         else f"Negative, moderate (−{S} < r ≤ −{M})"),
+        (C_NEG_STRONG, f"Négative, forte (r ≤ −{S})" if fr
+         else f"Negative, strong (r ≤ −{S})"),
+        (C_NOSIG, f"Pas de signal significatif (p ≥ {_n(0.05)})" if fr
+         else "No significant signal (p ≥ 0.05)"),
     ]
     for i, (col, lab) in enumerate(legend_rows):
         yy = 0.775 - i * 0.048
@@ -672,20 +714,40 @@ def make_slide1(path_png: Path):
         fig.text(lx + 0.032, yy + 0.007, lab, fontsize=9.5, color="#333")
 
     fig.text(lx, 0.50,
-             "Brown = El Niño years tend to be drier than\n"
-             "normal in that season; blue = wetter.\n\n"
-             "Method (the teleconnections page's partial pass):\n"
-             "• Trimester rainfall means per pixel, all 12\n"
-             "   overlapping 3-month windows, 1981–2025\n"
-             "• Partial r of rainfall vs Niño3.4, holding DMI\n"
-             "   (IOD), TNA, TSA and AMM constant\n"
-             "• Each mode at its per-pixel best lag (0–3 mo)\n"
-             "• Two-tailed p < 0.05, df adjusted for controls\n"
-             "• All seasons kept (no rainy-season filter)",
+             ("Brun = les années El Niño tendent à être plus\n"
+              "sèches que la normale pour cette saison ;\n"
+              "bleu = plus humides.\n\n"
+              "Méthode (passe partielle de la page\n"
+              "téléconnexions) :\n"
+              "• Moyennes trimestrielles par pixel, les 12\n"
+              "   fenêtres glissantes de 3 mois, 1981–2025\n"
+              "• r partiel pluie vs Niño3.4, DMI (IOD), TNA,\n"
+              "   TSA et AMM maintenus constants\n"
+              "• Chaque mode à son meilleur décalage par\n"
+              "   pixel (0–3 mois)\n"
+              "• p < 0,05 bilatéral, ddl ajustés\n"
+              "• Toutes les saisons conservées (pas de\n"
+              "   filtre de saison des pluies)") if fr else
+             ("Brown = El Niño years tend to be drier than\n"
+              "normal in that season; blue = wetter.\n\n"
+              "Method (the teleconnections page's partial pass):\n"
+              "• Trimester rainfall means per pixel, all 12\n"
+              "   overlapping 3-month windows, 1981–2025\n"
+              "• Partial r of rainfall vs Niño3.4, holding DMI\n"
+              "   (IOD), TNA, TSA and AMM constant\n"
+              "• Each mode at its per-pixel best lag (0–3 mo)\n"
+              "• Two-tailed p < 0.05, df adjusted for controls\n"
+              "• All seasons kept (no rainy-season filter)"),
              fontsize=9.5, color="#333", va="top", linespacing=1.5)
-    foot = "Data: ERA5 monthly precip (0.25°), NOAA PSL\nNiño3.4. Bottom row: the four quarters of the year."
+    foot = ("Données : précip. mensuelles ERA5 (0,25°), Niño3.4\n"
+            "NOAA PSL. Rangée du bas : les quatre trimestres."
+            if fr else
+            "Data: ERA5 monthly precip (0.25°), NOAA PSL\n"
+            "Niño3.4. Bottom row: the four quarters of the year.")
     if _STATE["clipped"]:
-        foot += "\nDistant territories beyond the map edge not shown."
+        foot += ("\nTerritoires éloignés hors du cadre non représentés."
+                 if fr else
+                 "\nDistant territories beyond the map edge not shown.")
     fig.text(lx, 0.05, foot, fontsize=8.5, color="#777", va="bottom",
              linespacing=1.4)
 
@@ -829,6 +891,8 @@ def _rp_bin_color(p: float) -> str:
 
 def _ordinal(n: float) -> str:
     n = int(round(n))
+    if LANG == "fr":
+        return "1er" if n == 1 else f"{n}e"
     suf = "th" if 10 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
     return f"{n}{suf}"
 
@@ -898,16 +962,24 @@ def make_slide2(path_png: Path):
         ax.set_aspect("equal")
         ax.set_axis_off()
 
+        fr = LANG == "fr"
         v = app_vals[tri]
-        when = f"lead {d['lead']} mo" if d["lead"] >= 1 else "in season"
-        if not v["rainy"]:
-            sub, scol = "off-season", "#999"
-        elif v["rp"] is None or v["rp"] < 1.5:
-            sub, scol = "≈ normal", "#777"
+        if d["lead"] >= 1:
+            when = f"échéance {d['lead']} mois" if fr else f"lead {d['lead']} mo"
         else:
-            side = "dry" if v["pct"] < 50 else "wet"
-            sub = f"1-in-{v['rp']:.0f} {side} · {_ordinal(v['pct'])} pct"
-            scol = {"dry": "#7B3A1A", "wet": "#0D40B0"}[side]
+            when = "en saison" if fr else "in season"
+        if not v["rainy"]:
+            sub, scol = ("hors saison" if fr else "off-season"), "#999"
+        elif v["rp"] is None or v["rp"] < 1.5:
+            sub, scol = ("≈ normale" if fr else "≈ normal"), "#777"
+        else:
+            dry_side = v["pct"] < 50
+            side = (("sec" if dry_side else "humide") if fr
+                    else ("dry" if dry_side else "wet"))
+            sub = (f"1-sur-{v['rp']:.0f} {side} · {_ordinal(v['pct'])} centile"
+                   if fr else
+                   f"1-in-{v['rp']:.0f} {side} · {_ordinal(v['pct'])} pct")
+            scol = "#7B3A1A" if dry_side else "#0D40B0"
         ax.set_title(
             f"{_season_label(tri, d['season_year'])} — {when}\n{sub}",
             fontsize=9.5, pad=3, linespacing=1.25,
@@ -942,17 +1014,27 @@ def make_slide2(path_png: Path):
     for spine in ("left", "bottom"):
         bax.spines[spine].set_color("#CCC")
     bax.grid(axis="y", color="#EAEAEA", linewidth=0.6, zorder=0)
-    bax.set_title("Country-mean rainfall (mm/day)\nblack = normal · coloured = forecast",
+    bax.set_title("Précipitations moyennes du pays (mm/jour)\n"
+                  "noir = normale · couleur = prévision" if LANG == "fr" else
+                  "Country-mean rainfall (mm/day)\n"
+                  "black = normal · coloured = forecast",
                   fontsize=9.5, pad=4, linespacing=1.25, color="#1a1a1a")
 
+    fr = LANG == "fr"
     fig.text(0.04, 0.945,
-             f"{_STATE['name']}: what seasonal rainfall is predicted this year "
-             f"({issued:%B}-issued forecast)?",
+             (f"{_STATE['name']} : quelles pluies saisonnières sont prévues cette "
+              f"année (prévision émise en {_month_name(issued)}) ?") if fr else
+             (f"{_STATE['name']}: what seasonal rainfall is predicted this year "
+              f"({issued:%B}-issued forecast)?"),
              fontsize=17, fontweight="bold", color="#1a1a1a")
     fig.text(0.04, 0.895,
-             f"SEAS5 (issued {issued:%B %Y}) accounts for El Niño and every other "
-             "driver · return-period categories vs the 1981–"
-             f"{cube[order[0]]['season_year'] - 1} hindcast · skill-shaded · ADM1",
+             (f"SEAS5 (émise en {_month_name(issued)} {issued:%Y}) intègre El Niño "
+              "et tous les autres facteurs · périodes de retour vs rétroprévisions "
+              f"1981–{cube[order[0]]['season_year'] - 1} · ombrage selon "
+              "l'exactitude · ADM1") if fr else
+             (f"SEAS5 (issued {issued:%B %Y}) accounts for El Niño and every other "
+              "driver · return-period categories vs the 1981–"
+              f"{cube[order[0]]['season_year'] - 1} hindcast · skill-shaded · ADM1"),
              fontsize=11, color="#444")
 
     # right column: legend + notes
@@ -972,20 +1054,36 @@ def make_slide2(path_png: Path):
                                      edgecolor="#999", linewidth=0.4,
                                      transform=fig.transFigure))
 
-    legend_groups = [
-        ("Forecast (high skill):", [
-            (C_DV, None, None, "Drought — ≥ 10-yr return period"),
-            (C_DS, None, None, "Drought — 3–10-yr return period"),
-            ("#FFFFFF", None, None, "Roughly normal"),
-            (C_FS, None, None, "Flood — 3–10-yr return period"),
-            (C_FV, None, None, "Flood — ≥ 10-yr return period"),
-        ]),
-        ("Other:", [
-            ("#FFFFFF", "///", C_HATCH_GREY, "Mod. skill"),
-            ("#FFFFFF", "xxx", C_HATCH_GREY, "Low skill"),
-            (C_OFF, None, None, "Outside rainy season"),
-        ]),
-    ]
+    if fr:
+        legend_groups = [
+            ("Prévision (exactitude élevée) :", [
+                (C_DV, None, None, "Sécheresse — période de retour ≥ 10 ans"),
+                (C_DS, None, None, "Sécheresse — période de retour 3–10 ans"),
+                ("#FFFFFF", None, None, "Proche de la normale"),
+                (C_FS, None, None, "Inondation — période de retour 3–10 ans"),
+                (C_FV, None, None, "Inondation — période de retour ≥ 10 ans"),
+            ]),
+            ("Autres :", [
+                ("#FFFFFF", "///", C_HATCH_GREY, "Exactitude mod."),
+                ("#FFFFFF", "xxx", C_HATCH_GREY, "Exactitude faible"),
+                (C_OFF, None, None, "Hors saison des pluies"),
+            ]),
+        ]
+    else:
+        legend_groups = [
+            ("Forecast (high skill):", [
+                (C_DV, None, None, "Drought — ≥ 10-yr return period"),
+                (C_DS, None, None, "Drought — 3–10-yr return period"),
+                ("#FFFFFF", None, None, "Roughly normal"),
+                (C_FS, None, None, "Flood — 3–10-yr return period"),
+                (C_FV, None, None, "Flood — ≥ 10-yr return period"),
+            ]),
+            ("Other:", [
+                ("#FFFFFF", "///", C_HATCH_GREY, "Mod. skill"),
+                ("#FFFFFF", "xxx", C_HATCH_GREY, "Low skill"),
+                (C_OFF, None, None, "Outside rainy season"),
+            ]),
+        ]
     yy = 0.845
     for title, rows in legend_groups:
         fig.text(lx, yy, title, fontsize=10.5, fontweight="bold")
@@ -996,22 +1094,41 @@ def make_slide2(path_png: Path):
             yy -= 0.038
         yy -= 0.012
 
-    notes = ("White hatch on a colour = moderate skill.\n"
-             "Tile subtitles: the country-level return period\n"
-             "and percentile from the alerts app.\n")
-    if worst is not None:
-        v = app_vals[worst]
-        notes += (f"Driest outlook: {_season_label(worst, cube[worst]['season_year'])} "
-                  f"(1-in-{v['rp']:.0f} dry).\n")
-    if min(cube[t]["lead"] for t in order) < 1:
-        notes += "In season = observed months + forecast.\n"
-    notes += f"Niño3.4: {nino_last:+.1f} °C in {nino_when:%b %Y}."
+    if fr:
+        notes = ("Hachures blanches sur couleur = exactitude modérée.\n"
+                 "Sous-titres des cartes : période de retour et\n"
+                 "centile nationaux de l'application d'alertes.\n")
+        if worst is not None:
+            v = app_vals[worst]
+            notes += (f"Saison la plus sèche : "
+                      f"{_season_label(worst, cube[worst]['season_year'])} "
+                      f"(1-sur-{v['rp']:.0f} sec).\n")
+        if min(cube[t]["lead"] for t in order) < 1:
+            notes += "En saison = mois observés + prévision.\n"
+        notes += (f"Niño3.4 : {_n(f'{nino_last:+.1f}')} °C en "
+                  f"{_month_name(nino_when)} {nino_when:%Y}.")
+    else:
+        notes = ("White hatch on a colour = moderate skill.\n"
+                 "Tile subtitles: the country-level return period\n"
+                 "and percentile from the alerts app.\n")
+        if worst is not None:
+            v = app_vals[worst]
+            notes += (f"Driest outlook: "
+                      f"{_season_label(worst, cube[worst]['season_year'])} "
+                      f"(1-in-{v['rp']:.0f} dry).\n")
+        if min(cube[t]["lead"] for t in order) < 1:
+            notes += "In season = observed months + forecast.\n"
+        notes += f"Niño3.4: {nino_last:+.1f} °C in {nino_when:%b %Y}."
     fig.text(lx, 0.40, notes, fontsize=9, color="#333", va="top",
              linespacing=1.45)
 
-    foot = f"Data: ECMWF SEAS5 · Boundaries: {_STATE['iso3']} ADM1 (COD)"
+    foot = (f"Données : ECMWF SEAS5 · Limites : {_STATE['iso3']} ADM1 (COD)"
+            if fr else
+            f"Data: ECMWF SEAS5 · Boundaries: {_STATE['iso3']} ADM1 (COD)")
     if _STATE["clipped"]:
-        foot += "\nDistant territories beyond the map edge not shown."
+        foot += ("\nTerritoires éloignés hors du cadre non représentés."
+                 if fr else
+                 "\nDistant territories beyond the map edge not shown.")
     fig.text(lx, 0.015, foot, fontsize=8.5, color="#777", va="bottom",
              linespacing=1.4)
 
@@ -1032,13 +1149,13 @@ def _quantize(path_png: Path) -> None:
                  dither=Image.NONE).save(path_png, optimize=True)
 
 
-def make_pdf(iso3: str) -> None:
+def make_pdf(iso3: str, suffix: str = "") -> None:
     """Two-page PDF from the slide PNGs (JPEG-in-PDF keeps it small)."""
     from PIL import Image
 
-    pages = [Image.open(OUT_DIR / f"{iso3}_slide{i}.png").convert("RGB")
+    pages = [Image.open(OUT_DIR / f"{iso3}_slide{i}{suffix}.png").convert("RGB")
              for i in (1, 2)]
-    pages[0].save(OUT_DIR / f"{iso3}.pdf", save_all=True,
+    pages[0].save(OUT_DIR / f"{iso3}{suffix}.pdf", save_all=True,
                   append_images=pages[1:], resolution=DPI)
 
 
@@ -1055,18 +1172,28 @@ def write_manifest(reg: dict[str, str]) -> None:
 
 def build_country(iso3: str, name: str, force: bool = False,
                   skip_era5: bool = False, skip_seas5: bool = False) -> None:
-    s1, s2 = OUT_DIR / f"{iso3}_slide1.png", OUT_DIR / f"{iso3}_slide2.png"
-    pdf = OUT_DIR / f"{iso3}.pdf"
-    if not force and s1.exists() and s2.exists() and pdf.exists():
+    global LANG
+    sfx = {lg: ("" if lg == "en" else f"_{lg}") for lg in LANGS}
+    s1 = {lg: OUT_DIR / f"{iso3}_slide1{sfx[lg]}.png" for lg in LANGS}
+    s2 = {lg: OUT_DIR / f"{iso3}_slide2{sfx[lg]}.png" for lg in LANGS}
+    pdf = {lg: OUT_DIR / f"{iso3}{sfx[lg]}.pdf" for lg in LANGS}
+    if not force and all(f.exists() for d in (s1, s2, pdf) for f in d.values()):
         print(f"{iso3}: exists, skipping (use --force to rebuild)")
         return
     set_country(iso3, name)
-    if not skip_era5 and (force or not s1.exists()):
-        make_slide1(s1)
-    if not skip_seas5 and (force or not s2.exists()):
-        make_slide2(s2)
-    if s1.exists() and s2.exists():
-        make_pdf(iso3)
+    if not skip_era5 and (force or not all(f.exists() for f in s1.values())):
+        data = compute_slide1_data()   # the heavy part — compute once,
+        for lg in LANGS:               # render every language from it
+            LANG = lg
+            make_slide1(s1[lg], data)
+    if not skip_seas5 and (force or not all(f.exists() for f in s2.values())):
+        for lg in LANGS:
+            LANG = lg
+            make_slide2(s2[lg])
+    LANG = "en"
+    for lg in LANGS:
+        if s1[lg].exists() and s2[lg].exists():
+            make_pdf(iso3, sfx[lg])
     print(f"{iso3} ({name}): done")
 
 

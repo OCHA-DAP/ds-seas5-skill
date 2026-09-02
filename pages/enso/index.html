@@ -114,8 +114,7 @@
       sub: `Deux diapositives pour chaque pays de
         <a href="../app/">l'application d'alertes SEAS5</a> : le signal pluviométrique
         historique d'El Niño, et ce que dit la prévision actuelle. Choisissez un pays —
-        le lien dans la barre d'adresse se met à jour et peut être partagé directement.
-        Les diapositives elles-mêmes sont en anglais.`,
+        le lien dans la barre d'adresse se met à jour et peut être partagé directement.`,
       h2a: "1 · Ce qui se passe généralement pendant El Niño",
       h2b: "2 · Ce qui est prévu cette année — El Niño et tous les autres facteurs pris en compte",
       cap1: `Corrélation partielle pixel par pixel des précipitations (ERA5 0,25°,
@@ -184,16 +183,17 @@
   function show(iso3) {
     current = iso3;
     sel.value = iso3;
-    $("slide1").src = `slides/${iso3}_slide1.png`;
-    $("slide2").src = `slides/${iso3}_slide2.png`;
-    $("pdf").href = `slides/${iso3}.pdf`;
-    $("pdf").setAttribute("download", `enso_${iso3}.pdf`);
+    const sfx = lang === "fr" ? "_fr" : "";
+    $("slide1").src = `slides/${iso3}_slide1${sfx}.png`;
+    $("slide2").src = `slides/${iso3}_slide2${sfx}.png`;
+    $("pdf").href = `slides/${iso3}${sfx}.pdf`;
+    $("pdf").setAttribute("download", `enso_${iso3}${sfx}.pdf`);
     applyLang();
   }
 
   sel.addEventListener("change", () => { show(sel.value); syncUrl(); });
-  $("lang-en").addEventListener("click", () => { lang = "en"; applyLang(); syncUrl(); });
-  $("lang-fr").addEventListener("click", () => { lang = "fr"; applyLang(); syncUrl(); });
+  $("lang-en").addEventListener("click", () => { lang = "en"; show(current); syncUrl(); });
+  $("lang-fr").addEventListener("click", () => { lang = "fr"; show(current); syncUrl(); });
 
   const params = new URLSearchParams(location.search);
   if ((params.get("lang") || "").toLowerCase() === "fr") lang = "fr";
