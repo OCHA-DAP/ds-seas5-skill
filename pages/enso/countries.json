@@ -1,4 +1,9 @@
-[
+{
+"issued": {
+"en": "August 2026",
+"fr": "août 2026"
+},
+"countries": [
 {
 "iso3": "AFG",
 "name": "Afghanistan"
@@ -149,7 +154,7 @@
 },
 {
 "iso3": "CIV",
-"name": "C\u00f4te d'Ivoire"
+"name": "Côte d'Ivoire"
 },
 {
 "iso3": "COD",
@@ -505,7 +510,7 @@
 },
 {
 "iso3": "STP",
-"name": "S\u00e3o Tom\u00e9 and Principe"
+"name": "São Tomé and Principe"
 },
 {
 "iso3": "TZA",
@@ -600,3 +605,4 @@
 "name": "eSwatini"
 }
 ]
+}

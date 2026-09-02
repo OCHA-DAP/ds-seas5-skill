@@ -8,8 +8,15 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="preload" href="fonts/DejaVuSans.woff" as="font" type="font/woff" crossorigin>
+<link rel="preload" href="fonts/DejaVuSans-Bold.woff" as="font" type="font/woff" crossorigin>
 <style>
   :root { color-scheme: light; }
+  /* the exact faces matplotlib laid the slides out with, subsetted */
+  @font-face { font-family: "DejaVu Sans"; font-weight: 400; font-display: swap;
+    src: url("fonts/DejaVuSans.woff") format("woff"); }
+  @font-face { font-family: "DejaVu Sans"; font-weight: 700; font-display: swap;
+    src: url("fonts/DejaVuSans-Bold.woff") format("woff"); }
   body { margin: 0; background: #f5f6f7; color: #1a1a1a;
          font: 400 15px/1.55 'Roboto', system-ui, sans-serif; }
   .home-link { display: inline-block; margin: 10px 12px; padding: 6px 12px;
@@ -39,6 +46,12 @@
   figure { margin: 0 0 8px; background: #fff; border: 1px solid #e2e4e6;
            border-radius: 6px; padding: 10px; }
   figure img { display: block; width: 100%; height: auto; border-radius: 3px; }
+  .slidebox svg { display: block; width: 100%; height: auto; border-radius: 3px; }
+  .slidebox { min-height: 120px; position: relative; }
+  .slidebox.loading::after { content: attr(data-loading);
+    position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; color: #98a0a8; font-size: 14px; }
+  .issued { color: #777; font-size: 13px; margin: -12px 0 16px; }
   figcaption { color: #666; font-size: 13px; padding: 10px 6px 2px; max-width: 110ch; }
   .meta { color: #777; font-size: 13px; border-top: 1px solid #e2e4e6;
           padding-top: 14px; margin-top: 24px; }
@@ -61,16 +74,17 @@
     </span>
   </header>
   <p class="sub" id="sub"></p>
+  <p class="issued" id="issued"></p>
 
   <h2 id="h2a"></h2>
   <figure>
-    <img id="slide1" src="" alt="Pixelwise partial correlation of ERA5 rainfall with the Niño3.4 index over the selected country: brown areas tend to be drier than normal in El Niño years, blue areas wetter, by season.">
+    <div id="slide1" class="slidebox" role="img" aria-label="Pixelwise partial correlation of ERA5 rainfall with the Niño3.4 index over the selected country: brown areas tend to be drier than normal in El Niño years, blue areas wetter, by season."></div>
     <figcaption id="cap1"></figcaption>
   </figure>
 
   <h2 id="h2b"></h2>
   <figure>
-    <img id="slide2" src="" alt="The current SEAS5 seasonal forecast for the selected country: drought and flood return-period categories with skill shading for every valid trimester of the latest issuance, with ADM1 boundaries and a country-mean rainfall bar chart.">
+    <div id="slide2" class="slidebox" role="img" aria-label="The current SEAS5 seasonal forecast for the selected country: drought and flood return-period categories with skill shading for every valid trimester of the latest issuance, with ADM1 boundaries and a country-mean rainfall bar chart."></div>
     <figcaption id="cap2"></figcaption>
   </figure>
 
@@ -107,6 +121,8 @@
       countryLabel: "Country",
       titleSuffix: "ENSO & the seasonal forecast",
       pageTitle: "ENSO & the seasonal forecast, by country",
+      issued: (d) => `Current forecast issued ${d}. Slides refresh with the app's monthly issuance.`,
+      loading: "Loading…",
     },
     fr: {
       home: "← Alertes précipitations SEAS5",
@@ -137,6 +153,8 @@
       countryLabel: "Pays",
       titleSuffix: "ENSO et la prévision saisonnière",
       pageTitle: "ENSO et la prévision saisonnière, par pays",
+      issued: (d) => `Prévision actuelle émise en ${d}. Les diapositives suivent l'émission mensuelle de l'application.`,
+      loading: "Chargement…",
     },
   };
 
@@ -145,7 +163,8 @@
   let lang = "en";
   let current = null;
 
-  const countries = await (await fetch("countries.json")).json();
+  const manifest = await (await fetch("countries.json")).json();
+  const countries = manifest.countries || manifest;
   for (const c of countries) {
     const o = document.createElement("option");
     o.value = c.iso3;
@@ -166,6 +185,8 @@
     $("cap2").innerHTML = t.cap2;
     $("pdf").textContent = t.pdf;
     $("meta").innerHTML = t.meta;
+    const iss = manifest.issued;
+    $("issued").textContent = iss ? t.issued(iss[lang] || iss.en) : "";
     sel.setAttribute("aria-label", t.countryLabel);
     $("lang-en").setAttribute("aria-pressed", String(lang === "en"));
     $("lang-fr").setAttribute("aria-pressed", String(lang === "fr"));
@@ -180,12 +201,32 @@
     history.replaceState(null, "", `${location.pathname}?${q.toString()}`);
   }
 
+  // SVGs are INLINED (not <img>) so the slide text is selectable like normal
+  // HTML. A generation token guards against out-of-order fetches on fast
+  // country/language switching.
+  let gen = 0;
+  async function inline(el, url) {
+    const g = String(++gen);
+    el.dataset.gen = g;
+    el.dataset.loading = STR[lang].loading;
+    el.classList.add("loading");
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(String(r.status));
+      const svg = await r.text();
+      if (el.dataset.gen === g) el.innerHTML = svg;
+    } catch {
+      if (el.dataset.gen === g) el.innerHTML = "";
+    } finally {
+      if (el.dataset.gen === g) el.classList.remove("loading");
+    }
+  }
   function show(iso3) {
     current = iso3;
     sel.value = iso3;
     const sfx = lang === "fr" ? "_fr" : "";
-    $("slide1").src = `slides/${iso3}_slide1${sfx}.png`;
-    $("slide2").src = `slides/${iso3}_slide2${sfx}.png`;
+    inline($("slide1"), `slides/${iso3}_slide1${sfx}.svg`);
+    inline($("slide2"), `slides/${iso3}_slide2${sfx}.svg`);
     $("pdf").href = `slides/${iso3}${sfx}.pdf`;
     $("pdf").setAttribute("download", `enso_${iso3}${sfx}.pdf`);
     applyLang();
