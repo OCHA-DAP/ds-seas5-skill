@@ -18,3 +18,7 @@ pipeline/.checkpoint_uga/
 # Rendered Quarto output — the tracked copy lives at pages/uganda/index.html
 analysis/uganda_hnrp.html
 analysis/uganda_hnrp_files/
+
+# ENSO slides live on the prod blob (pipeline/sync_enso_slides.py); the deploy downloads them
+pages/enso/slides/
+pages/enso/countries.json

@@ -139,8 +139,10 @@ class SkipCountry(Exception):
 _STATE: dict = {}   # current country: iso3, name, lon, lat, adm1, adm0, clipped
 
 
-def registry() -> dict[str, str]:
-    """{iso3: display name} for every country in the app's current export."""
+def registry() -> dict[str, dict]:
+    """{iso3: {en, fr}} display names for every country in the app's export.
+    English from the app's countries.geojson; French from Natural Earth
+    NAME_FR + UN short names (analysis/country_names_fr.json)."""
     issued = load_issued()
     data = json.loads(
         (REPO / "docs" / "data" / "forecasts" / f"{issued:%Y-%m}.json").read_text()
@@ -150,7 +152,9 @@ def registry() -> dict[str, str]:
                  (REPO / "docs" / "data" / "countries.geojson").read_text()
              )["features"]}
     names.update(EXTRA_NAMES)
-    return {iso: names.get(iso, iso) for iso in sorted(data)}
+    fr = json.loads((REPO / "analysis" / "country_names_fr.json").read_text())
+    return {iso: {"en": names.get(iso, iso), "fr": fr.get(iso, names.get(iso, iso))}
+            for iso in sorted(data)}
 
 
 def _load_adm_geoms(iso3: str):
@@ -186,7 +190,12 @@ def _load_adm_geoms(iso3: str):
     return adm0.iloc[0:0].copy(), adm0   # empty adm1 -> no interior lines
 
 
-def set_country(iso3: str, name: str) -> None:
+def country_name() -> str:
+    n = _STATE["name"]
+    return n[LANG] if isinstance(n, dict) else n
+
+
+def set_country(iso3: str, name) -> None:
     """Resolve geometry, trim far-flung territories, derive the map window."""
     from shapely.geometry import MultiPolygon
 
@@ -737,9 +746,9 @@ def build_slide1_fig(data=None):
         _map_panel(ax, results[tri]["r"], sg, mask, x, y, tri, title_size=8.5)
 
     fig.text(0.04, 0.955,
-             f"{_STATE['name']} : comment El Niño influence-t-il généralement "
+             f"{country_name()} : comment El Niño influence-t-il généralement "
              "les pluies saisonnières ?" if fr else
-             f"{_STATE['name']}: how does El Niño generally affect seasonal "
+             f"{country_name()}: how does El Niño generally affect seasonal "
              "rainfall?",
              fontsize=17, fontweight="bold", color="#1a1a1a")
     fig.text(0.04, 0.905,
@@ -1096,9 +1105,9 @@ def build_slide2_fig():
 
     fr = LANG == "fr"
     fig.text(0.04, 0.945,
-             (f"{_STATE['name']} : quelles pluies saisonnières sont prévues cette "
+             (f"{country_name()} : quelles pluies saisonnières sont prévues cette "
               f"année (prévision émise en {_month_name(issued)}) ?") if fr else
-             (f"{_STATE['name']}: what seasonal rainfall is predicted this year "
+             (f"{country_name()}: what seasonal rainfall is predicted this year "
               f"({issued:%B}-issued forecast)?"),
              fontsize=17, fontweight="bold", color="#1a1a1a")
     fig.text(0.04, 0.895,
@@ -1234,8 +1243,8 @@ def write_manifest(reg: dict[str, str]) -> None:
     """countries.json for the dropdown: only countries whose slides exist,
     plus the issuance the slides were built from (shown on the page)."""
     issued = load_issued()
-    entries = [{"iso3": iso, "name": name}
-               for iso, name in sorted(reg.items(), key=lambda kv: kv[1])
+    entries = [{"iso3": iso, "name": nm["en"], "name_fr": nm["fr"]}
+               for iso, nm in sorted(reg.items(), key=lambda kv: kv[1]["en"])
                if (OUT_DIR / f"{iso}_slide1.svg").exists()
                and (OUT_DIR / f"{iso}_slide2.svg").exists()]
     (OUT_DIR.parent / "countries.json").write_text(json.dumps(
@@ -1258,7 +1267,7 @@ def build_country(iso3: str, name: str, force: bool = False,
     set_country(iso3, name)
     data = compute_slide1_data(recompute=recompute)
     render_country(iso3, data)
-    print(f"{iso3} ({name}): done")
+    print(f"{iso3} ({name['en'] if isinstance(name, dict) else name}): done")
 
 
 if __name__ == "__main__":

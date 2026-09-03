@@ -14,6 +14,12 @@ name: Deploy pages site to GitHub Pages
 #
 # This repo's Pages previously served main:/docs directly (legacy build). configure-pages with
 # enablement: true switches the site to workflow builds on first run.
+#
+# The ENSO slides (~700 MB of per-country SVGs/PDFs) are NOT in git: they live on the
+# dev projects blob (see pipeline/sync_enso_slides.py) and are downloaded into the
+# artifact here — the KB's "Pages artifact storage" modality with blob as the durable
+# store. Re-rendering locally + `sync_enso_slides.py upload` + a dispatch of this
+# workflow publishes a new bundle.
 
 on:
   push:
@@ -46,12 +52,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download ENSO slides from blob
+        env:
+          DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS }}
+        run: |
+          pip install --quiet ocha-stratus
+          python pipeline/sync_enso_slides.py download
       - name: Assemble site (landing at /, app at /app/)
         run: |
           mkdir -p site
           rsync -a pages/ site/
           rsync -a docs/ site/app/
           test -f site/index.html && test -f site/app/index.html && test -f site/uganda/index.html
+          test -f site/enso/index.html && test -f site/enso/countries.json
+          test -f site/enso/slides/NER_slide1.svg && test -f site/enso/slides/NER_fr.pdf
       - uses: actions/configure-pages@v5
         with:
           enablement: true
