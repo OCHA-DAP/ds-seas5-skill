@@ -167,7 +167,6 @@
   const countries = manifest.countries || manifest;
   const cname = (c) => (lang === "fr" && c.name_fr) ? c.name_fr : c.name;
   function fillDropdown() {
-    const cur = sel.value;
     sel.innerHTML = "";
     const sorted = [...countries].sort((a, b) =>
       cname(a).localeCompare(cname(b), lang));
@@ -177,7 +176,7 @@
       o.textContent = cname(c);
       sel.appendChild(o);
     }
-    if (cur) sel.value = cur;
+    if (current) sel.value = current;
   }
   const valid = new Set(countries.map((c) => c.iso3));
 
