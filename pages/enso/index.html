@@ -165,11 +165,19 @@
 
   const manifest = await (await fetch("countries.json")).json();
   const countries = manifest.countries || manifest;
-  for (const c of countries) {
-    const o = document.createElement("option");
-    o.value = c.iso3;
-    o.textContent = c.name;
-    sel.appendChild(o);
+  const cname = (c) => (lang === "fr" && c.name_fr) ? c.name_fr : c.name;
+  function fillDropdown() {
+    const cur = sel.value;
+    sel.innerHTML = "";
+    const sorted = [...countries].sort((a, b) =>
+      cname(a).localeCompare(cname(b), lang));
+    for (const c of sorted) {
+      const o = document.createElement("option");
+      o.value = c.iso3;
+      o.textContent = cname(c);
+      sel.appendChild(o);
+    }
+    if (cur) sel.value = cur;
   }
   const valid = new Set(countries.map((c) => c.iso3));
 
@@ -190,8 +198,9 @@
     sel.setAttribute("aria-label", t.countryLabel);
     $("lang-en").setAttribute("aria-pressed", String(lang === "en"));
     $("lang-fr").setAttribute("aria-pressed", String(lang === "fr"));
-    const name = countries.find((c) => c.iso3 === current)?.name;
-    document.title = name ? `${name} — ${t.titleSuffix}` : t.pageTitle;
+    fillDropdown();
+    const c = countries.find((x) => x.iso3 === current);
+    document.title = c ? `${cname(c)} — ${t.titleSuffix}` : t.pageTitle;
   }
 
   function syncUrl() {
