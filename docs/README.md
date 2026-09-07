@@ -109,6 +109,44 @@ Notes:
 - **Skill pixels are stable.** Skill is a fixed hindcast statistic, so `raster/skill/` only changes
   when the cube is fully recomputed; it can usually be skipped between forecasts.
 
+## Full monthly checklist (everything the site shows)
+
+The `monthly-refresh.yml` cron (7th, 03:00 UTC) covers only the country-level part: it runs
+`compute_skill.py`, the static/history exports, the Forecast × HNRP exports (against whatever
+adm1/adm2 stats are in the blob) and `plan_caseloads.json`, then merges a data PR. Everything
+below is **manual** after each issuance, because it is too heavy for a runner or lives outside
+`docs/data/`. Check the prerequisites first (`SELECT max(valid_date) FROM public.era5` must be
+the month before the issuance; SEAS5 COGs `precip_em_i<YYYY-MM>-01_lt*.tif` present):
+
+```bash
+# 1. Subnational skill stats (the HNRP tab's inputs; ~40 min + ~10 min)
+uv run python pipeline/compute_skill_adm1.py
+uv run python pipeline/compute_skill_adm2.py
+for L in 1 2 3 low ipc fews; do uv run python pipeline/export_hnrp_drought.py --level $L; done
+
+# 2. Pixel raster (latest issuance only; merge into the blob cube if you keep it current)
+uv run python pipeline/compute_skill_raster.py --issued-months <M> --no-upload
+uv run python pipeline/export_raster_site.py
+uv run python pipeline/verify_site_data.py --strict-raster --strict-hnrp
+
+# 3. CMA mirror (only when a new PREC.6m.CMME.<YYYYMM> file has landed on the dev blob)
+uv run python pipeline/compute_skill_cma.py --reaggregate
+CMA_SITE_PASSWORD=... uv run python pipeline/export_cma_site.py
+
+# 4. ENSO slides (needs the current cube at /tmp/skill_stats_grid_detrended.nc; ~30 min)
+uv run python analysis/png_enso_slides.py --country all --force
+uv run python pipeline/sync_enso_slides.py upload
+
+# 5. Uganda district stats (feeds analysis/uganda_hnrp.qmd; the page is re-rendered by hand)
+uv run python pipeline/compute_uga_district_stats.py
+uv run python pipeline/compute_skill_uga_adm2.py
+
+uv run python pipeline/audit_site_coverage.py    # every selectable country renders
+```
+
+Commit `docs/data/`, `docs/raster/`, `docs/cma/data/` via a PR (main is branch-protected); the
+Pages deploy fires on merge and pulls the ENSO slide bundle from the blob.
+
 ## GitHub Pages
 The app is live at **https://ocha-dap.github.io/ds-seas5-skill/app/** — under `/app/`, not at the
 root. The root serves the landing page in `pages/`, which links to the app and to the country
