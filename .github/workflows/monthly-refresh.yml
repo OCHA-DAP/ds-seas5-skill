@@ -90,6 +90,15 @@ jobs:
       - name: Combine per-country lowest-level view (hnrp_drought_low.json)
         run: uv run python pipeline/export_hnrp_drought.py --level low
 
+      # The two third-party severity sources on the same tab (added after the
+      # workflow was written and missing from it until 2026-09): IPC/CH phases
+      # and FEWS NET phases, both from the dev-DB mirrors.
+      - name: Export Forecast × HNRP IPC-phase data (hnrp_drought_ipc.json)
+        run: uv run python pipeline/export_hnrp_drought.py --level ipc
+
+      - name: Export Forecast × HNRP FEWS NET data (hnrp_drought_fews.json)
+        run: uv run python pipeline/export_hnrp_drought.py --level fews
+
       # Country-level plan headline caseloads straight from the public HPC API —
       # the admin-level mirror lags the plan cycle, this does not.
       - name: Export plan headline caseloads (plan_caseloads.json)
@@ -99,6 +108,8 @@ jobs:
       # trimesters present, exporters numerically consistent, raster honest).
       # Fails the run BEFORE anything is committed — a refresh that raced the
       # ERA5 upload must be rerun later, not shipped without in-season data.
+      # The HNRP payloads may lag one issuance (their adm1/adm2 stats are manual);
+      # that is a WARN here, a FAIL if they lag further or disagree.
       - name: Verify payload vintages & consistency
         run: uv run python pipeline/verify_site_data.py
 

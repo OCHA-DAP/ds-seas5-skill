@@ -34,6 +34,7 @@ import argparse
 import json
 import re
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -93,6 +94,8 @@ C_NEG_MOD, C_NEG_STRONG = "#C8844A", "#7B3A1A"
 C_NOSIG, C_OCEAN, C_OUTLINE = "#E8E8E8", "#FFFFFF", "#9AA3B0"
 
 # Same index set + partial-control convention as the teleconnections page.
+INDEX_CACHE_MAX_AGE_S = 7 * 24 * 3600
+
 INDEX_SOURCES = {
     "nino34": "https://psl.noaa.gov/data/correlation/nina34.anom.data",
     "dmi":    "https://psl.noaa.gov/gcos_wgsp/Timeseries/Data/dmi.had.long.data",
@@ -306,7 +309,9 @@ def load_indices() -> pd.DataFrame:
     out = {}
     for name, url in INDEX_SOURCES.items():
         f = CACHE / f"{name}.data"
-        if not f.exists():
+        # NOAA appends a month at a time; a cache older than a week would pin the
+        # slide's "Niño3.4 in <month>" annotation to a stale month.
+        if not f.exists() or time.time() - f.stat().st_mtime > INDEX_CACHE_MAX_AGE_S:
             f.write_text(requests.get(url, timeout=60).text)
         out[name] = _parse_psl(f.read_text())
     return pd.DataFrame(out).loc[f"{START_YEAR}":]

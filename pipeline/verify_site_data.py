@@ -8,8 +8,14 @@ Aug-2025 issuance when ERA5 July was late, and a botched commit shipped July
 pixels under an August-labelled site. Neither was detectable by eye.
 
 Checks (exit 1 on any failure):
-1. forecast.json, forecasts/index.json's latest, forecasts/<latest>.json and
-   every hnrp_drought*.json agree on issued (year, month).
+1. forecast.json, forecasts/index.json's latest and forecasts/<latest>.json
+   agree on issued (year, month).
+1b. Every hnrp_drought*.json (Forecast x HNRP payloads; they depend on the
+   MANUAL adm1/adm2 skill computes, so they may legitimately lag): WARN if a
+   payload is exactly one issuance behind the country data (the tab labels
+   its own issuance honestly), FAIL if it is further behind, ahead, or the
+   payloads disagree with each other. --strict-hnrp makes any lag a failure
+   (use right after refreshing the adm1/adm2 stats).
 2. The latest issuance carries ALL expected trimesters (leads -2..4, seven of
    them) in BOTH forecast.json and forecasts/<latest>.json — a missing
    in-season trimester means the refresh ran before ERA5's elapsed month
@@ -24,6 +30,7 @@ Checks (exit 1 on any failure):
 
 Run:  uv run python pipeline/verify_site_data.py            # CI: after exports, before commit
       uv run python pipeline/verify_site_data.py --strict-raster   # after a raster refresh
+      uv run python pipeline/verify_site_data.py --strict-raster --strict-hnrp  # full manual refresh
 """
 
 import argparse
@@ -63,6 +70,9 @@ def main():
     ap.add_argument("--strict-raster", action="store_true",
                     help="a stale raster is a failure, not a warning (use right after "
                          "the manual raster refresh)")
+    ap.add_argument("--strict-hnrp", action="store_true",
+                    help="a lagging hnrp_drought*.json is a failure, not a warning (use "
+                         "right after refreshing the adm1/adm2 skill stats)")
     args = ap.parse_args()
 
     fc = json.loads((DOCS / "data" / "forecast.json").read_text())
@@ -111,6 +121,36 @@ def main():
         if n_diff > 5:
             fail(f"... and {n_diff - 5} more pct mismatches (of {n_cmp} compared)")
         print(f"forecast.json vs {hist_path.name}: {n_cmp} values compared, {n_diff} mismatches")
+
+    # 1b. Forecast x HNRP payloads: they carry their own issuance (the tab prints
+    # it), so a one-issuance lag is honest and tolerated (WARN) unless --strict-hnrp;
+    # anything else — further behind, ahead, or payloads disagreeing with each
+    # other — means the exports ran against mixed vintages and must not ship.
+    hnrp_paths = sorted((DOCS / "data").glob("hnrp_drought*.json"))
+    if not hnrp_paths:
+        warn("no hnrp_drought*.json payloads found")
+    hnrp_vintages = {}
+    for hp in hnrp_paths:
+        h = json.loads(hp.read_text())
+        h_iy, h_im = h.get("issued_year"), h.get("issued_month")
+        if h_iy is None or h_im is None:
+            fail(f"{hp.name} carries no issued_year/issued_month")
+            continue
+        hnrp_vintages[hp.name] = (h_iy, h_im)
+        lag = (iy * 12 + im) - (h_iy * 12 + h_im)
+        if lag == 0:
+            continue
+        msg = (f"{hp.name} is issuance {h_iy}-{h_im:02d}, country data is {iy}-{im:02d} "
+               f"({lag:+d} month{'s' if abs(lag) != 1 else ''})")
+        if lag == 1 and not args.strict_hnrp:
+            warn(msg + " — refresh compute_skill_adm1/adm2 + export_hnrp_drought")
+        else:
+            fail(msg)
+    if len(set(hnrp_vintages.values())) > 1:
+        fail(f"hnrp_drought*.json payloads disagree on issuance: {hnrp_vintages}")
+    elif hnrp_vintages:
+        v = next(iter(hnrp_vintages.values()))
+        print(f"hnrp_drought*.json ({len(hnrp_vintages)} payloads): issued {v[0]}-{v[1]:02d}")
 
     # 4. Raster meta: honest labelling and internal completeness.
     meta_path = DOCS / "raster" / "data" / "meta.json"
