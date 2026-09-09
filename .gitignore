@@ -22,3 +22,7 @@ analysis/uganda_hnrp_files/
 # ENSO slides live on the prod blob (pipeline/sync_enso_slides.py); the deploy downloads them
 pages/enso/slides/
 pages/enso/countries.json
+
+# Plaintext sources of the password-gated stories (pages/<slug>/ holds the encrypted page;
+# durable copy on the dev projects blob — see pages/README.md)
+analysis/_stories/

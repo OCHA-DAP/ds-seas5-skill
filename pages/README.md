@@ -72,6 +72,32 @@ gh workflow run deploy-pages.yml
 Add `--recompute` only if the ERA5 record itself moved (new year of data).
 `pages/{png,tls,ner}-enso/` are redirect stubs kept so shared links survive.
 
+## Hidden, password-protected stories
+
+`pages/chad-2026/index.html` ("Three Alarms Over Chad", the public-audience story of the 2026
+Chad drought anticipatory action) is **unlisted** (no card on the landing page, `noindex`) and
+**password-gated**: the whole story document is AES-256-GCM encrypted (PBKDF2-SHA256 key, same
+construction as the CMA mirror) and embedded in a small shell that decrypts in-browser. Like the
+CMA gate this is a share-by-link courtesy gate, not hard security — the repo is public.
+
+The **plaintext source is not in git** (`analysis/_stories/` is gitignored — a committed copy
+would defeat the gate). The durable copy lives on the dev `projects` blob at
+`ds-seas5-skill/processed/stories/chad_2026.html`. The password is not in the repo either (ask
+the CHD data science team). To edit the story:
+
+```bash
+uv run python -c "import ocha_stratus as s; open('analysis/_stories/chad_2026.html','wb').write(
+  s.load_blob_data('ds-seas5-skill/processed/stories/chad_2026.html', stage='dev', container_name='projects'))"
+# edit analysis/_stories/chad_2026.html, then re-encrypt and re-upload the source:
+PAGE_PASSWORD=... uv run python pipeline/encrypt_page.py analysis/_stories/chad_2026.html \
+    pages/chad-2026/index.html --title "Three Alarms Over Chad"
+uv run python -c "import ocha_stratus as s; s.upload_blob_data(open('analysis/_stories/chad_2026.html','rb').read(),
+  'ds-seas5-skill/processed/stories/chad_2026.html', stage='dev', container_name='projects')"
+```
+
+Changing the password = re-running `encrypt_page.py` with the new one. Any other self-contained
+HTML document can be gated the same way (`pipeline/encrypt_page.py --help`).
+
 ## Checking locally
 
 ```bash
