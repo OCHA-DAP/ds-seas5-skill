@@ -124,6 +124,11 @@ uv run python pipeline/compute_skill_adm1.py
 uv run python pipeline/compute_skill_adm2.py
 for L in 1 2 3 low ipc fews; do uv run python pipeline/export_hnrp_drought.py --level $L; done
 
+# 1b. HDX-signal inputs (dev-notes/hdx-signal-data.md): climatology only when the unit set
+#     changed; the signal tables every issuance (~5 min each; adm2 ~15 min)
+for L in 0 1 2; do uv run python pipeline/compute_monthly_clim.py --level $L; done   # optional
+for L in 0 1 2; do uv run python pipeline/build_hdx_signal_inputs.py --level $L; done
+
 # 2. Pixel raster (latest issuance only; merge into the blob cube if you keep it current)
 uv run python pipeline/compute_skill_raster.py --issued-months <M> --no-upload
 uv run python pipeline/export_raster_site.py

@@ -12,8 +12,11 @@ analysis/_png_enso_cache/
 
 # local credentials
 .env
-pipeline/.checkpoint_adm2/
-pipeline/.checkpoint_uga/
+# resumable-run checkpoints of the compute_skill*.py pipelines (deleted on success)
+pipeline/.checkpoint*/
+
+# marimo's per-notebook session cache
+analysis/__marimo__/
 
 # Rendered Quarto output — the tracked copy lives at pages/uganda/index.html
 analysis/uganda_hnrp.html

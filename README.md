@@ -17,8 +17,14 @@ below-/above-normal seasons where the forecast is skilful.
 
 ## Layout
 
-- `src/` — the method: `skill.py` (country level), `skill_raster.py` (per-pixel), `constants.py`.
-- `pipeline/` — batch jobs: `compute_skill.py` / `compute_skill_raster.py` (compute stats to blob),
+- `src/` — the method: `skill.py` (country level), `skill_raster.py` (per-pixel), `season.py`
+  (the in-season / rainy-trimester rule), `hdx_signal.py` (the HDX signal's unit condition and
+  country roll-up), `constants.py`.
+- `pipeline/` — batch jobs: `compute_skill.py` / `compute_skill_adm1.py` / `compute_skill_adm2.py` /
+  `compute_skill_raster.py` (compute stats to blob at admin-0/1/2 and per pixel),
+  `compute_monthly_clim.py` (ERA5 monthly climatology per admin level),
+  `build_hdx_signal_inputs.py` (one tidy table per admin level for the HDX signal —
+  see [`docs/dev-notes/hdx-signal-data.md`](docs/dev-notes/hdx-signal-data.md)),
   `export_static_site.py` / `export_raster_site.py` (build the static-site data in `docs/`),
   `compute_skill_cma.py` / `export_cma_site.py` (the same, for the CMA CMME mirror at `docs/cma/`).
 - `analysis/` — the marimo app (`prob_alerts.py`) and other exploratory notebooks.
