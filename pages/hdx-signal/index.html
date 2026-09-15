@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HDX signal for SEAS5 — data hand-over</title>
+<meta name="description" content="Where every input for the SEAS5 HDX signal lives (exact blob paths), how each was processed, what it covers, the caveats, and how to refresh it after a new issuance.">
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #f5f6f7; color: #1a1a1a;
+         font: 400 15px/1.55 'Roboto', system-ui, sans-serif; }
+  .home-link { display: inline-block; margin: 10px 12px; padding: 6px 12px;
+    font: 500 13px/1 'Roboto', system-ui, sans-serif; color: #1e795f;
+    background: #e9f5f1; border: 1px solid #d4eae4; border-radius: 4px;
+    text-decoration: none; }
+  .home-link:hover { background: #d4eae4; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 16px 56px; }
+  .status { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .08em;
+            text-transform: uppercase; color: #b26514; background: #fdf3e7;
+            border: 1px solid #f6dcc0; border-radius: 10px; padding: 2px 9px; margin: 14px 0 0; }
+  h1 { font-size: 25px; font-weight: 700; margin: 8px 0 4px; }
+  h2 { font-size: 19px; font-weight: 700; margin: 34px 0 8px;
+       border-bottom: 2px solid #d4eae4; padding-bottom: 5px; }
+  h3 { font-size: 15.5px; font-weight: 700; margin: 20px 0 6px; }
+  .sub { color: #555; margin: 2px 0 18px; max-width: 78ch; }
+  p, li { max-width: 82ch; }
+  ol, ul { padding-left: 22px; }
+  li { margin-bottom: 5px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13.5px; margin: 0 0 6px; }
+  nav.toc a { text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+  .params { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;
+            margin: 16px 0 6px; }
+  .param { background: #fff; border: 1px solid #e2e4e6; border-radius: 6px; padding: 12px 14px; }
+  .param .k { font: 500 12px/1 'Roboto Mono', ui-monospace, monospace; color: #5e6a6b; }
+  .param .v { font-size: 28px; font-weight: 700; color: #1e795f; margin: 6px 0 4px;
+              font-variant-numeric: tabular-nums; }
+  .param .d { font-size: 13px; color: #555; }
+  .callout { background: #fff; border: 1px solid #e2e4e6; border-left: 4px solid #1e795f;
+             border-radius: 4px; padding: 12px 16px; margin: 16px 0; }
+  .callout.warn { border-left-color: #eb6420; }
+  .callout p { margin: 6px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0 6px;
+          background: #fff; border: 1px solid #e2e4e6; font-size: 13.5px; }
+  th, td { padding: 7px 10px; border-bottom: 1px solid #eceeef; text-align: left;
+           vertical-align: top; }
+  th { background: #f0f3f2; font-weight: 500; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+  th.num { text-align: right; }
+  .tblwrap { overflow-x: auto; }
+  code, pre { font-family: 'Roboto Mono', ui-monospace, Menlo, monospace; }
+  p code, li code, td code, .param code, .callout code { background: #eceeef; padding: 1px 5px;
+       border-radius: 3px; font-size: 12.5px; }
+  td code { white-space: nowrap; }
+  pre { background: #eceeef; border-radius: 4px; padding: 12px 14px; overflow-x: auto;
+        font-size: 12.5px; line-height: 1.5; margin: 10px 0 16px; }
+  .tag { display: inline-block; font-size: 11.5px; font-weight: 500; padding: 1px 7px;
+         border-radius: 9px; white-space: nowrap; }
+  .tag.dry { background: #fdf3e7; color: #b26514; }
+  .tag.wet { background: #e6eef8; color: #1f4f8a; }
+  .meta { color: #777; font-size: 13px; border-top: 1px solid #e2e4e6;
+          padding-top: 14px; margin-top: 40px; }
+  a { color: #1e795f; }
+  h2, h3 { scroll-margin-top: 16px; }
+</style>
+</head>
+<body>
+<!-- back to the site landing page — first element inside body -->
+<a class="home-link" href="../">← SEAS5 Precipitation Alerts</a>
+
+<div class="wrap">
+  <span class="status">In development</span>
+  <h1>HDX signal for SEAS5 — data hand-over</h1>
+  <p class="sub">Where every input for the signal lives (exact blob paths), how each was
+     processed, what it covers, the caveats to read before drawing a conclusion, and how to
+     refresh it after a new issuance. Written September 2026 for the analyst taking the signal
+     design forward. The repo copy is
+     <a href="https://github.com/OCHA-DAP/ds-seas5-skill/blob/main/docs/dev-notes/hdx-signal-data.md"><code>docs/dev-notes/hdx-signal-data.md</code></a>.</p>
+  <nav class="toc" aria-label="Sections">
+    <a href="#signal">1 The signal</a><a href="#raw">2 Raw sources</a><a href="#method">3 Method</a>
+    <a href="#files">4 Files in the blob</a><a href="#load">5 Loading</a><a href="#eval">6 Evaluating</a>
+    <a href="#caveats">7 Coverage &amp; caveats</a><a href="#refresh">8 Refreshing</a>
+  </nav>
+
+  <h2 id="signal">1. The signal, as currently specified</h2>
+  <p>Per country, per issuance, per target trimester: <strong>issue a signal when at least a
+     fraction <code>frac</code> of the country's admin-1 units each satisfy all three of</strong></p>
+  <ol>
+    <li>SEAS5 forecasts the trimester at a <strong>return period ≥ <code>rp</code> years</strong>.
+        Dry and wet are two separate signals, one per tail.</li>
+    <li>The forecast has <strong>skill ≥ <code>r_min</code></strong> for that unit × issue month ×
+        trimester (detrended Pearson r of the hindcast against ERA5).</li>
+    <li>The trimester is <strong>in season</strong> for that unit: its share of the unit's annual
+        rainfall is ≥ <code>season_share</code>.</li>
+  </ol>
+  <div class="params">
+    <div class="param"><div class="k">frac</div><div class="v">0.60</div>
+      <div class="d">fraction of the country's admin-1 units that must qualify</div></div>
+    <div class="param"><div class="k">rp</div><div class="v">5 yr</div>
+      <div class="d">Weibull return period of the forecast in the unit's own hindcast
+        (<code>dry_rp</code> / <code>wet_rp</code>)</div></div>
+    <div class="param"><div class="k">r_min</div><div class="v">0.30</div>
+      <div class="d">minimum detrended Pearson r; the app's "moderate skill" cut</div></div>
+    <div class="param"><div class="k">season_share</div><div class="v">0.25</div>
+      <div class="d">trimester's share of annual rain. 0.25 = above a flat climatology. The app
+        uses the looser 0.15.</div></div>
+  </div>
+  <p>All four are free. Everything they threshold is a <strong>column</strong> in the input
+     tables, so the whole space can be swept without touching a pipeline. Ethiopia, or any
+     country with a bimodal climatology, can be run at admin-2 instead: the admin-2 table has
+     identical columns.</p>
+  <p>The starting rule is implemented once, in <code>src/hdx_signal.py</code>
+     (<code>unit_condition</code>, <code>country_signal</code>); see section 6.</p>
+
+  <h2 id="raw">2. Where the raw numbers come from</h2>
+  <p>Nothing here touches rasters. Everything starts from the <strong>zonal statistics</strong>
+     that the team's <code>ds-raster-stats</code> Databricks jobs write to the prod rasterstats
+     Postgres DB (<code>chd-rasterstats-prod.postgres.database.azure.com</code>, reached with
+     <code>ocha_stratus.get_engine("prod")</code>).</p>
+  <div class="tblwrap"><table>
+    <thead><tr><th>Table</th><th>What</th><th>Key columns</th><th>Record</th></tr></thead>
+    <tbody>
+    <tr><td><code>public.seas5</code></td>
+        <td>ECMWF SEAS5 ensemble-mean monthly precipitation, zonal mean per admin unit, one row per issued month × valid month</td>
+        <td><code>pcode, iso3, adm_level, issued_date, valid_date, leadtime (0–6), mean</code> + median/min/max/count/sum/std</td>
+        <td>issued 1981-01 → 2026-09 (5th of each month; hindcast 1981–2016 + operational)</td></tr>
+    <tr><td><code>public.era5</code></td>
+        <td>ERA5 monthly precipitation, zonal mean per admin unit</td>
+        <td><code>pcode, iso3, adm_level, valid_date, mean</code></td>
+        <td>1981-01 → 2026-08 (lands about the 6th of the next month)</td></tr>
+    <tr><td><code>public.polygon</code></td>
+        <td>The admin units (COD boundaries via fieldmaps.io): name, level, area, pixel-coverage counts</td>
+        <td><code>pcode, iso3, adm_level, name, seas5_n_intersect_raw_pixels, …</code></td>
+        <td>admin 0/1 for 153 countries; admin 2 for a subset</td></tr>
+    </tbody></table></div>
+  <p>Units are <strong>mm/day</strong> (monthly mean rate). <code>leadtime</code> 0 is the issue
+     month itself; SEAS5's horizon is 7 monthly steps. Units smaller than one SEAS5 pixel (about
+     0.4°) get a NULL mean and are dropped downstream. The upstream job is documented in the
+     team knowledge base at <code>pipelines/raster-stats.md</code>.</p>
+  <p>Admin-1 pcodes are the COD ones (<code>ET01</code> Tigray, <code>NE005</code> Tahoua).
+     Admin-0 pcodes are mostly the ISO3 but not always: join on <code>iso3</code> at country
+     level and on <code>pcode</code> below it.</p>
+
+  <h2 id="method">3. What this repo computes from them</h2>
+  <p><code>src/skill.py:run_all_combinations</code> runs once per admin unit, for all 12 issue
+     months × 12 trimesters = 144 combinations:</p>
+  <ol>
+    <li><strong>Aggregate to trimester means.</strong> SEAS5: the three valid months of one
+        issuance, averaged. ERA5: the same three months, complete seasons only. For
+        <strong>in-season trimesters</strong> (issue month inside the trimester, leads −1 and −2)
+        the months already elapsed at issuance come from ERA5 and only the rest from SEAS5, each
+        forecast month bias-corrected per calendar month. That is why in-season skill is high by
+        construction.</li>
+    <li><strong>log1p</strong>, then <strong>normalise</strong> SEAS5 to ERA5's mean and standard
+        deviation over the overlap years, so forecast and observation share a scale.</li>
+    <li><strong>Detrend</strong> both series (linear fit over the overlap, re-centred). The
+        detrended variant is what the site, the HNRP tab and the signal tables use. The raw
+        variant is in the blob too.</li>
+    <li><strong>Skill</strong> = Pearson r between the normalised forecast and ERA5 over the
+        overlap years (<code>n_years</code>, typically 45–46; NaN below 10).</li>
+    <li><strong>Position of a forecast in its own hindcast:</strong> percentile (<code>pct</code>,
+        share of hindcast forecasts ≤ it) and two <strong>Weibull return periods</strong>,
+        <code>dry_rp = (n+1)/rank</code> with rank counted from the dry end and <code>wet_rp</code>
+        from the wet end. The hindcast distribution is the years with both a forecast and an
+        observation; the live forecast is ranked against it and past years are ranked in-sample.
+        Both describe how unusual the <em>forecast</em> is, not how much rain is missing.</li>
+  </ol>
+  <p>Only trimesters at signed lead −2 … 4 are kept (complete trimesters with at least one
+     forecast month inside the horizon): 7 trimesters per issuance.</p>
+  <p>The in-season rule (<code>src/season.py</code>) is separate: the ERA5 monthly climatology
+     per unit (mean of every January, every February, … over 1981–present), the trimester's share
+     <code>3 × mean(3 months) / sum(12 months)</code>, thresholded.</p>
+
+  <h2 id="files">4. Files in the blob</h2>
+  <p>Storage account <strong><code>imb0chd0dev</code></strong> (the team's dev stage), container
+     <strong><code>projects</code></strong>. All paths below are under
+     <strong><code>ds-seas5-skill/processed/</code></strong>. Everything was rebuilt for the
+     September 2026 issuance (2026-09-07; Ethiopia admin-2, the climatologies and the signal
+     tables on 2026-09-15).</p>
+
+  <h3>4a. Ready-made signal inputs (start here)</h3>
+  <div class="tblwrap"><table>
+    <thead><tr><th>Path</th><th>Level</th><th class="num">Rows</th><th class="num">Units</th><th class="num">Countries</th></tr></thead>
+    <tbody>
+    <tr><td><code>hdx_signal/signal_inputs_adm1.parquet</code></td><td>admin-1, all issuances 1981 → 2026-09</td><td class="num">8,741,535</td><td class="num">2,283</td><td class="num">150</td></tr>
+    <tr><td><code>hdx_signal/signal_inputs_adm1_latest.parquet</code></td><td>admin-1, current issuance only</td><td class="num">15,935</td><td class="num">2,283</td><td class="num">150</td></tr>
+    <tr><td><code>hdx_signal/units_adm1.parquet</code></td><td>one row per admin-1 unit with a climatology</td><td class="num">2,307</td><td></td><td class="num">152</td></tr>
+    <tr><td><code>hdx_signal/signal_inputs_adm2.parquet</code></td><td>admin-2, all issuances</td><td class="num">19,704,795</td><td class="num">5,146</td><td class="num">24</td></tr>
+    <tr><td><code>hdx_signal/signal_inputs_adm2_latest.parquet</code></td><td>admin-2, current issuance</td><td class="num">35,920</td><td class="num">5,146</td><td class="num">24</td></tr>
+    <tr><td><code>hdx_signal/units_adm2.parquet</code></td><td>one row per admin-2 unit</td><td class="num">5,146</td><td></td><td class="num">24</td></tr>
+    <tr><td><code>hdx_signal/signal_inputs.parquet</code>, <code>…_latest.parquet</code>, <code>hdx_signal/units.parquet</code></td><td>admin-0, for comparison</td><td class="num">576,000 / 1,050 / 152</td><td class="num">150</td><td class="num">150</td></tr>
+    </tbody></table></div>
+  <p>One row per <strong>unit × issuance (year, month) × trimester</strong>, built by
+     <code>pipeline/build_hdx_signal_inputs.py</code> from the three products in 4b.</p>
+  <div class="tblwrap"><table>
+    <thead><tr><th>Column</th><th>Meaning</th></tr></thead>
+    <tbody>
+    <tr><td><code>pcode, iso3, name, adm_level</code></td><td>the unit (name from <code>public.polygon</code>)</td></tr>
+    <tr><td><code>issued_year, issued_month</code></td><td>the SEAS5 issuance (first of the month)</td></tr>
+    <tr><td><code>trimester</code></td><td><code>JFM … DJF</code> (<code>src/constants.py:TRIMESTERS</code>)</td></tr>
+    <tr><td><code>lead</code></td><td>signed months from issue month to the trimester's first month, −2 … 4. Negative = in season (blend of observed and forecast months)</td></tr>
+    <tr><td><code>season_year</code></td><td>the year the trimester is anchored on (NDJ and DJF anchor on December's year)</td></tr>
+    <tr><td><code>pearson_r, n_years</code></td><td>detrended hindcast skill of this unit × issue month × trimester; NaN = no skill available</td></tr>
+    <tr><td><code>forecast_mean_log, obs_mean_log</code></td><td>the normalised, detrended trimester means in log1p(mm/day) space; <code>obs_mean_log</code> is NaN for the live forecast</td></tr>
+    <tr><td><code>in_sample</code></td><td>True for hindcast years (an observation exists), False for the live forecast</td></tr>
+    <tr><td><code>pct</code></td><td>forecast percentile within the unit's hindcast forecasts (0 driest ever forecast, 100 wettest)</td></tr>
+    <tr><td><code>dry_rp, wet_rp</code></td><td>Weibull return period of the forecast from the dry and the wet end; maximum n+1, about 47</td></tr>
+    <tr><td><code>tri_share_annual</code></td><td>the trimester's share of the unit's annual ERA5 rainfall (climatology)</td></tr>
+    <tr><td><code>tri_mean_mm_day</code></td><td>the trimester's climatological mean, mm/day</td></tr>
+    <tr><td><code>in_season_flat</code></td><td><code>tri_share_annual ≥ 0.25</code>, the starting rule</td></tr>
+    <tr><td><code>in_season_app</code></td><td><code>tri_share_annual ≥ 0.15</code>, what the app and site call "rainy"</td></tr>
+    </tbody></table></div>
+  <p><code>units_adm*.parquet</code>: <code>pcode, iso3, name, adm_level, n_units_in_country,
+     has_skill</code>. Use <code>n_units_in_country</code> as the denominator for <code>frac</code>
+     when a unit drops out for lack of data.</p>
+
+  <h3>4b. The processed products the signal tables are built from</h3>
+  <div class="tblwrap"><table>
+    <thead><tr><th>Path</th><th>Level</th><th>Content</th></tr></thead>
+    <tbody>
+    <tr><td><code>skill_stats_detrended.parquet</code><br><code>skill_stats_detrended_adm1.parquet</code><br><code>skill_stats_detrended_adm2.parquet</code></td><td>0 / 1 / 2</td>
+        <td>one row per unit × issue month × trimester: <code>pearson_r, n_years, rmse, sigma, era5_mean, era5_std, lower_tercile_mm, current_forecast_year, current_forecast_mean, is_predictive, prob_lower_tercile, forecast_rp</code> (dry), <code>flood_rp</code> (wet), <code>prob_rp, forecast_percentile</code>. Latest forecast only. 1.2 / 17 / 36 MB</td></tr>
+    <tr><td><code>paired_yearly_detrended.parquet</code><br><code>…_adm1.parquet</code><br><code>…_adm2.parquet</code></td><td>0 / 1 / 2</td>
+        <td>one row per unit × issue month × trimester × year: <code>season_year, forecast_mean, obs_mean, hist_prob</code> (log space). The full hindcast; everything per-year derives from it. 17 / 258 / 562 MB</td></tr>
+    <tr><td><code>skill_stats*.parquet</code>, <code>paired_yearly*.parquet</code> without <code>_detrended</code></td><td>0 / 1 / 2</td><td>the same, raw variant</td></tr>
+    <tr><td><code>monthly_clim.parquet</code><br><code>monthly_clim_adm1.parquet</code><br><code>monthly_clim_adm2.parquet</code></td><td>0 / 1 / 2</td>
+        <td>ERA5 monthly climatology: <code>pcode, iso3, name, adm_level, month, mean_mm_day</code>, 12 rows per unit</td></tr>
+    </tbody></table></div>
+  <p>Producers, in order: <code>pipeline/compute_skill.py</code> (admin-0, about 30 min, also
+     run by the monthly cron), <code>compute_skill_adm1.py</code> (about 40 min),
+     <code>compute_skill_adm2.py</code> (scope = <code>ADM2_ISO3S</code> in that file),
+     <code>compute_monthly_clim.py --level N</code>, <code>build_hdx_signal_inputs.py --level N</code>.</p>
+  <p>Other things under <code>processed/</code> (<code>raster/</code>, <code>enso_slides/</code>,
+     <code>uga/</code>, <code>stories/</code>, <code>cma/</code>, <code>forecast_site.parquet</code>,
+     <code>pop_adm3_worldpop.parquet</code>) belong to other products of this repo.
+     <code>rainy_pairs.parquet</code> and <code>roc_auc_stats.parquet</code> (May 2026) are orphans
+     of an earlier iteration; nothing reads them.</p>
+
+  <h2 id="load">5. Loading</h2>
+<pre>import ocha_stratus as stratus
+
+P = "ds-seas5-skill/processed/hdx_signal/"
+latest = stratus.load_parquet_from_blob(P + "signal_inputs_adm1_latest.parquet", stage="dev")
+units  = stratus.load_parquet_from_blob(P + "units_adm1.parquet", stage="dev")</pre>
+  <p>The full-history admin-1 table is about 9 M rows (fine in pandas, about 1.5 GB). The admin-2
+     one is about 20 M rows: read it through Arrow with column pruning and a country filter.</p>
+<pre>import io, pyarrow.parquet as pq
+cc = stratus.get_container_client(stage="dev", container_name="projects")
+buf = io.BytesIO(cc.download_blob(P + "signal_inputs_adm2.parquet").readall())
+eth = pq.read_table(buf, filters=[("iso3", "=", "ETH")],
+                    columns=["pcode", "issued_year", "issued_month", "trimester", "lead",
+                             "pearson_r", "dry_rp", "wet_rp", "tri_share_annual"]).to_pandas()</pre>
+  <p>Credentials: the usual <code>DSCI_AZ_BLOB_DEV_SAS</code> (read) in the environment. The DB
+     is only needed if you go back to <code>public.seas5</code> / <code>public.era5</code>
+     yourself.</p>
+
+  <h2 id="eval">6. Evaluating the signal</h2>
+<pre>from src.hdx_signal import country_signal, unit_condition
+
+dry = country_signal(latest, direction="dry", frac=0.60, rp=5, r_min=0.30, season_share=0.25)
+wet = country_signal(latest, direction="wet")            # same defaults
+dry[dry["signal"]][["iso3", "trimester", "lead", "n_units", "n_qualifying", "frac_qualifying"]]</pre>
+  <p><code>country_signal</code> returns one row per country × issuance × trimester with
+     <code>n_units</code>, <code>n_qualifying</code>, <code>frac_qualifying</code>,
+     <code>signal</code>. Two denominators are offered: <code>"all"</code> (every unit with data,
+     the literal "fraction of the admin-1s") and <code>"in_season"</code> (only units for which
+     the trimester is in season, so a country's arid half cannot dilute its rainy half). Which
+     one the signal should use is an open design choice. The same call on the full-history table
+     backtests every issuance since 1981 (hindcast RPs are in-sample, see section 7).</p>
+  <p>To sweep, the four parameters are plain keyword arguments; the per-row condition
+     <code>unit_condition(df, direction, rp, r_min, season_share)</code> is there for a different
+     roll-up, for example population-weighted.</p>
+  <p>Smoke test on the current issuance, admin-1, starting parameters:
+     <span class="tag dry">dry</span> Niger fires on JAS and ASO (8 of 8 units), Ethiopia on JAS
+     (12 of 13) and ASO (11 of 13); <span class="tag wet">wet</span> fires nowhere in either. Read
+     the first caveat below before taking that at face value.</p>
+
+  <h2 id="caveats">7. Coverage and caveats</h2>
+  <ul>
+    <li><strong>Coverage.</strong> The admin-1 signal table has 2,283 units in 150 countries, of
+        which 2,260 have skill. The skill file itself lists 2,330 units in 152 countries; the 47
+        extra are micro-units (Caribbean and Pacific islands, one Botswana town) that miss every
+        SEAS5 pixel and so have no forecast at all. Dominica and St Lucia drop out entirely. Every
+        other country in <code>public.polygon</code> is present except Sint Maarten. 23 units have
+        no ERA5 rows either, hence no climatology (<code>tri_share_annual</code> NaN; they never
+        qualify). Admin-2 skill exists for 24 countries: the 23 HNRP/IPC-scope countries with
+        admin-2 boundaries in the DB plus Ethiopia (92 zones), added for this work. Kenya, for
+        instance, has no admin-2 in <code>public.polygon</code>; extending admin-2 means first
+        getting boundaries and zonal stats into the rasterstats DB, then adding the ISO3 to
+        <code>ADM2_ISO3S</code> and running <code>compute_skill_adm2.py --iso3 XXX</code>.</li>
+  </ul>
+  <div class="callout warn">
+    <p><strong>The September 2026 issuance sits at hindcast extremes</strong> almost everywhere:
+       JAS and ASO (in-season, leads −2/−1) come out at percentile 0 / RP about 47 across the
+       whole Sahel and much of East Africa. With the starting parameters that fires a dry signal
+       for Niger, Ethiopia and most of the Sahel on JAS/ASO. We believe this is at least partly an
+       artefact of the in-season blend (an ERA5/SEAS5 mismatch in July–August 2026), not an
+       assessed drought. Treat the in-season leads of this issuance as suspect and do not quote
+       them publicly. A full-forecast lead (0–4) signal is on much firmer ground, and backtests
+       over earlier issuances are unaffected.</p>
+  </div>
+  <ul>
+    <li><strong>In-season leads have high skill by construction</strong> (1–2 of the 3 months are
+        observations). If the signal is meant to be anticipatory, restrict to <code>lead ≥ 0</code>
+        or at least report leads separately.</li>
+    <li><strong>Hindcast RPs are in-sample</strong>: for 1981–2025 the year's own forecast is part
+        of the distribution it is ranked in (the live year is not). A leave-one-out variant is a
+        20-line change in <code>build_hdx_signal_inputs.py:position_metrics</code> if a backtest
+        needs it.</li>
+    <li><strong>Vintage.</strong> The pipelines run after the 5th (SEAS5) and after ERA5's previous
+        month has landed. If a compute ran before that month's ERA5 arrived, the in-season
+        trimesters at that issue month silently carry the previous year's forecast. For these
+        tables, check <code>issued_year</code> on the <code>_latest</code> file and that its
+        in-season rows have <code>in_sample == False</code>.</li>
+    <li><strong>RP is not magnitude.</strong> A 47-year dry RP in a marginal season can be a few
+        millimetres. <code>tri_mean_mm_day</code> (climatology) and <code>forecast_mean_log</code> /
+        <code>obs_mean_log</code> (expm1 → mm/day) pair the anomaly with an amount.</li>
+    <li><strong>Countries are unequal in unit count</strong> (Niger 8 admin-1 units, DR Congo 26,
+        Ethiopia 13, or 92 zones). A 60 % threshold means different things across them;
+        <code>n_units_in_country</code> is in the units table.</li>
+  </ul>
+
+  <h2 id="refresh">8. Refreshing after a new issuance</h2>
+  <p>SEAS5 arrives on the 5th; ERA5 for the previous month around the 6th. The monthly cron
+     (<code>.github/workflows/monthly-refresh.yml</code>, 7th 03:00 UTC) refreshes admin-0 only.
+     The rest is manual, from the repo (<code>uv sync</code> first; needs the blob write SAS and
+     prod DB read credentials):</p>
+<pre>uv run python pipeline/compute_skill_adm1.py                 # ~40 min, 8 workers
+uv run python pipeline/compute_skill_adm2.py                 # all ADM2_ISO3S
+for L in 0 1 2; do uv run python pipeline/build_hdx_signal_inputs.py --level $L; done
+# only if units were added or changed (new boundaries, new admin-2 country):
+for L in 0 1 2; do uv run python pipeline/compute_monthly_clim.py --level $L; done</pre>
+  <p>Adding a country at admin-2: add its ISO3 to <code>ADM2_ISO3S</code> in
+     <code>compute_skill_adm2.py</code>, then <code>compute_skill_adm2.py --iso3 XXX</code> (merges
+     into the existing files), <code>compute_monthly_clim.py --level 2</code>,
+     <code>build_hdx_signal_inputs.py --level 2</code>.</p>
+
+  <p class="meta">Related: the app's <a href="../app/#hnrp">Forecast × HNRP</a> tab uses the same
+     skill files with the looser 0.15 in-season rule. Method code:
+     <a href="https://github.com/OCHA-DAP/ds-seas5-skill/blob/main/src/skill.py"><code>src/skill.py</code></a>.
+     Source: <a href="https://github.com/OCHA-DAP/ds-seas5-skill">OCHA-DAP/ds-seas5-skill</a>.</p>
+</div>
+</body>
+</html>

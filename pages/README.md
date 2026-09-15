@@ -27,6 +27,14 @@ copy an existing `<a class="k">` block and change the href, title, blurb and foo
 this site is auth-gated; keep it that way or gate deliberately (see the geospatial repo's
 README for the encrypted-page pattern).
 
+## The HDX-signal hand-over — `/hdx-signal/`
+
+`pages/hdx-signal/index.html` is the hand-written Pages rendering of
+`docs/dev-notes/hdx-signal-data.md` (the in-repo, markdown source of the same text). It sits under
+the landing page's **In development** section — work not yet a product. When the data or the
+signal definition changes, edit both; the counts in the tables come from the
+`build_hdx_signal_inputs.py` run logs.
+
 ## The Uganda analysis
 
 `pages/uganda/index.html` is the **rendered** output of `analysis/uganda_hnrp.qmd`

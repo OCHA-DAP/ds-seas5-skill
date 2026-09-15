@@ -28,12 +28,14 @@ from shapely.geometry import MultiPolygon, Polygon, box
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.constants import PROJECT_PREFIX, TRIMESTERS
+from src.season import APP_MONTH_SHARE, APP_TRIMESTER_SHARE
+from src.season import compute_rainy_set as _compute_rainy_set
 from src.skill import trimester_lead
 
 # Defaults mirror the marimo app's out-of-the-box controls.
 USE_DETRENDED = True  # app default "Forecast version: Detrended"
-RAINY_TRIMESTER_PCT = 0.15  # trimester_pct_sl default
-RAINY_MONTH_PCT = 0.00  # month_pct_sl default (no per-month minimum)
+RAINY_TRIMESTER_PCT = APP_TRIMESTER_SHARE  # 0.15, trimester_pct_sl default (src/season.py)
+RAINY_MONTH_PCT = APP_MONTH_SHARE  # 0.0, month_pct_sl default (no per-month minimum)
 THRESHOLDS = {"sev_rp": 3, "vsev_rp": 10, "r_mod": 0.3, "r_high": 0.5}
 
 DOCS_DATA = Path(__file__).resolve().parent.parent / "docs" / "data"
@@ -97,25 +99,11 @@ def _default_tri(valid_tris: list[str], im: int) -> str:
 
 
 def compute_rainy_set(monthly_clim: pd.DataFrame) -> set[tuple[str, str]]:
-    """Port of the app's rainy-season cell (analysis/prob_alerts.py:65-82)."""
-    mc = monthly_clim.copy()
-    annual = mc.groupby("pcode")["mean_mm_day"].sum().rename("annual")
-    mc = mc.merge(annual.reset_index(), on="pcode")
-    mc["pct_annual"] = mc["mean_mm_day"] / mc["annual"]
-    rainy = set()
-    for tri, months in TRIMESTERS.items():
-        tri_mc = mc[mc["month"].isin(months)]
-        tri_mean = tri_mc.groupby("pcode")["mean_mm_day"].mean()
-        tri_annual = annual.reindex(tri_mean.index)
-        tri_ok = 3 * tri_mean / tri_annual >= RAINY_TRIMESTER_PCT
-        month_ok = (
-            tri_mc.groupby("pcode")["pct_annual"].min().reindex(tri_ok.index, fill_value=0)
-            >= RAINY_MONTH_PCT
-        )
-        for pcode, is_rainy in (tri_ok & month_ok).items():
-            if bool(is_rainy):
-                rainy.add((pcode, tri))
-    return rainy
+    """App / static-site rainy flag: thin wrapper over src.season.compute_rainy_set at
+    the site's thresholds (kept here because every exporter imports it from this module)."""
+    return _compute_rainy_set(
+        monthly_clim, trimester_share=RAINY_TRIMESTER_PCT, month_share=RAINY_MONTH_PCT
+    )
 
 
 # Leadtime rows for the skill heatmap = months from issue to the trimester's first month.
