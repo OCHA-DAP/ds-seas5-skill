@@ -130,13 +130,25 @@ h1 { font-family: var(--hdx-font-display); font-size: 1.3rem; margin: 0 0 2px; }
 .ctl[hidden] { display: none; }
 .lock-note { font-size: 0.78rem; color: #888; font-style: italic; margin: 8px 0 0; }
 
-/* Map title overlay (CBPF standalone page) */
+/* In-frame map furniture (mapframe.js; also the CBPF page's title) */
 .map-title {
   background: rgba(255,255,255,0.92); padding: 7px 12px; border-radius: 5px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.2); max-width: 60vw;
 }
 .map-title .mt-title { font-weight: 700; font-size: 1rem; color: var(--ink); }
 .map-title .mt-sub { font-size: 0.82rem; color: #555; margin-top: 2px; }
+.map-title .mt-sub .in-season-tag { color: var(--hdx-neutral-5); font-weight: 600; }
+.map-source {
+  font-size: 0.7rem; color: var(--muted); background: rgba(255,255,255,0.85);
+  padding: 2px 6px; border-radius: 3px; margin: 0 4px 4px 0;
+}
+/* Small-country dots: a hairline halo so they read against same-coloured neighbours */
+.small-country-dot { paint-order: stroke; }
+@media (max-width: 640px) {
+  .map-title { max-width: 70vw; padding: 5px 8px; }
+  .map-title .mt-title { font-size: 0.85rem; }
+  .map-title .mt-sub { font-size: 0.72rem; }
+}
 
 /* Country-set toggles (CBPF page) — their own little section under the selectors */
 #country-sets {

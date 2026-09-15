@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Merriweather:wght@700&display=swap" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="../style.css?v=20260807a" />
+  <link rel="stylesheet" href="../style.css?v=20260910b" />
 </head>
 <body>
   <div id="gate">
@@ -268,7 +268,12 @@
     <p>Data: CMA CMME (forecast) &amp; ERA5 (climatology). OCHA Centre for Humanitarian Data.</p>
   </footer>
 
-  <script>window.SITE_GEO = "../data/countries.geojson";</script>
+  <script>
+    window.SITE_GEO = "../data/countries.geojson";
+    // In-frame title/source (mapframe.js) name the model this mirror actually shows.
+    window.SITE_MODEL_LABEL = "CMA CMME";
+    window.SITE_SOURCE = "CMA CMME and ERA5";
+  </script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     // Password gate. The data JSONs under data/ are AES-256-GCM encrypted at rest
@@ -322,7 +327,7 @@
 
       function boot() {
         document.getElementById("gate").remove();
-        for (const src of ["../app.js", "../skillmap.js", "../skill.js"]) {
+        for (const src of ["../mapframe.js?v=20260910b", "../app.js?v=20260910b", "../skillmap.js?v=20260910b", "../skill.js"]) {
           const s = document.createElement("script");
           s.src = src;
           s.async = false;  // preserve execution order (skillmap needs app's tab registry)

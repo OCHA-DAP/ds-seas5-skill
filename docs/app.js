@@ -238,8 +238,10 @@ Promise.all([
     curTriKey = t.key;
     const inSeason = triLead(t.key) < 0;
     triSlider.classList.toggle("in-season", inSeason);
-    triLabel.innerHTML = `${t.key} (${t.label})` +
-      (inSeason ? ` <span class="in-season-tag">· in season</span>` : "");
+    const tag = inSeason ? ` <span class="in-season-tag">· in season</span>` : "";
+    triLabel.innerHTML = `${t.key} (${t.label})` + tag;
+    frame.setSub(`Issued ${fc.issued_label} · Valid ` +
+      MapFrame.validText(t, fc.issued_year, fc.issued_month) + tag);
   };
 
   // ── Map ──────────────────────────────────────────────────────────────────────
@@ -249,7 +251,9 @@ Promise.all([
     // Leaflet defaults for scroll (whole-level snap, default wheel speed) — feels responsive.
     // The flush initial fit uses a temporary zoomSnap: 0 below, then restores to 1.
   });
-  L.control.zoom({ position: "topleft" }).addTo(map);
+  // In-frame title (trimester spelled out) and data-source line.
+  const frame = MapFrame.addTitle(map, `${MapFrame.MODEL} precipitation seasonal forecast`);
+  MapFrame.addSource(map);
 
   // Grey country outlines: the basemap under the pixel grid (and reference everywhere).
   const outlineLayer = L.geoJSON(geo, {
@@ -309,6 +313,16 @@ Promise.all([
   });
   // Legend hover state: a predicate over full category names (null = no highlight).
   let hlMatch = null;
+  // Dots for countries too small to see at the current zoom (Country mode only).
+  const dotLayer = MapFrame.dots(map, {
+    features: geo.features,
+    hasData: (iso3) => !!fc.data[iso3],
+    tooltip: tooltipHtml,
+    colour: (f) => {
+      const cat = catOf(f, currentTri(), seasonalityOn());
+      return { fill: fillFor[cat], stroke: STYLE[cat][1], dim: hlMatch && !hlMatch(cat) };
+    },
+  });
   function renderAdm() {
     const tri = currentTri(), rainyOn = seasonalityOn();
     admLayer.eachLayer((layer) => {
@@ -321,6 +335,7 @@ Promise.all([
       el.setAttribute("stroke", STYLE[cat][1]);
       el.setAttribute("stroke-opacity", dim ? "0.25" : "1");
     });
+    dotLayer.render();
   }
   // Legend hover → highlight matching areas, dim the rest (both views).
   function setHighlight(key) {
@@ -436,7 +451,7 @@ Promise.all([
       renderAdm();
     } else {
       setControlsEnabled(false);   // pixel layer exists only for the latest issuance
-      map.removeLayer(admLayer);
+      map.removeLayer(admLayer); dotLayer.clear();
       outlineLayer.addTo(map); rasterLayer.addTo(map);
       loadPixelGrid();
     }

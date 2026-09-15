@@ -20,6 +20,16 @@ much higher. **Pixel layers cover leads 0–4 / fully-forecast trimesters only**
 combos are country-level; the JS shows a note instead of a broken overlay.
 - **Methodology** — static prose.
 
+Both maps share `mapframe.js`: an in-frame title card (top-left) that spells out the valid
+trimester (`Jul–Aug–Sep 2026 (JAS)`), a small `Source: ECMWF SEAS5 and ERA5` line
+(bottom-right), and **zoom-aware dots for small countries** — a monitored country whose
+on-screen footprint is smaller than about a dot gets one at its largest polygon's centroid,
+recomputed on every zoom so the dots disappear once the country itself is legible (dots that
+would overlap a larger country's dot are culled until you zoom in). The /cma mirror sets
+`window.SITE_MODEL_LABEL` / `window.SITE_SOURCE` before loading it so the title and source
+name CMME instead. When editing these scripts bump the `?v=` on the script/style tags in
+`index.html` and `cma/index.html`.
+
 There are also **unlisted** standalone pages sharing `cbpf.js` — the country forecast map (all
 countries shown) that outlines membership sets, with non-member countries paler, per-set show/hide
 toggles, and dashed/interleaved outlines where a country is in several sets:

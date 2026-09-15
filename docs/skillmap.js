@@ -71,6 +71,8 @@
       leadLbl.innerHTML = l < 0
         ? `${MON[issuedMonth()]} <span class="in-season-tag">(${leadText(l)})</span>`
         : `${MON[issuedMonth()]} (${leadText(l)})`;
+      frame.setSub(`Valid ${MapFrame.validText(t)} · issued ${MON[issuedMonth()]}` +
+        (l < 0 ? ` <span class="in-season-tag">(${leadText(l)})</span>` : ` (${leadText(l)})`));
     }
 
     // ── Map ───────────────────────────────────────────────────────────────────
@@ -78,7 +80,8 @@
       crs: L.CRS.EPSG4326, minZoom: 1, maxZoom: 8,
       attributionControl: false, zoomControl: false, maxBoundsViscosity: 1.0,
     });
-    L.control.zoom({ position: "topleft" }).addTo(map);
+    const frame = MapFrame.addTitle(map, `${MapFrame.MODEL} hindcast skill (Pearson r vs ERA5)`);
+    MapFrame.addSource(map);
     const outlineLayer = L.geoJSON(geo, {
       interactive: false,
       style: { color: "#5a5a5a", weight: OUTLINE_W, fillOpacity: 0, opacity: 0.95 },
@@ -132,20 +135,27 @@
       style: () => ({ weight: OUTLINE_W, color: "#5a5a5a", fillOpacity: 1, opacity: 1 }),
       onEachFeature: (f, layer) => layer.bindTooltip(() => admTooltip(f), { sticky: true }),
     });
+    const fillOf = (iso3) => {
+      const r = rOf(iso3);
+      if (r == null) return NODATA;
+      if (!seasonalityOn() && !isRainy(iso3)) return OFF_SEASON;
+      return catFor(r).color;
+    };
+    // Dots for countries too small to see at the current zoom (Country mode only).
+    const dotLayer = MapFrame.dots(map, {
+      features: geo.features,
+      hasData: (iso3) => !!sm.countries[iso3],
+      tooltip: admTooltip,
+      colour: (f) => ({ fill: fillOf(f.properties.iso3), stroke: "#5a5a5a" }),
+    });
     function renderAdm() {
-      const rainyOn = seasonalityOn();
       admLayer.eachLayer((layer) => {
-        const iso3 = layer.feature.properties.iso3;
-        const r = rOf(iso3);
         const el = layer._path;
         if (!el) return;
-        let fill;
-        if (r == null) fill = NODATA;
-        else if (!rainyOn && !isRainy(iso3)) fill = OFF_SEASON;
-        else fill = catFor(r).color;
-        el.setAttribute("fill", fill);
+        el.setAttribute("fill", fillOf(layer.feature.properties.iso3));
         el.setAttribute("fill-opacity", "1");
       });
+      dotLayer.render();
     }
 
     // ── Pixel layer (baked RGBA overlay + off-season cover) ──────────────────────
@@ -202,7 +212,7 @@
         admLayer.addTo(map);
         renderAdm();
       } else {
-        map.removeLayer(admLayer);
+        map.removeLayer(admLayer); dotLayer.clear();
         outlineLayer.addTo(map);
         showPixel();
       }
