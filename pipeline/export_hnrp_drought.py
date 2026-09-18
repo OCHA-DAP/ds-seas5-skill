@@ -1537,9 +1537,12 @@ def combine_ipc_view() -> None:
 def _fews_lists() -> tuple[dict[str, list], pd.DataFrame]:
     """FEWS NET classifications per FNID + the unit registry, from ds-fewsnet-mirror.
 
-    From fewsnet.classification (FDW ipcphase): the published-map series only —
-    assistance = false (verified against the package shapefiles, which ARE the
-    rendered map), subnational units (FEWS NET's own geography: livelihood-zone x
+    From fewsnet.classification (FDW ipcphase): every published row at its
+    mapped phase — the `assistance` flag is FEWS NET's "!" marker (phase held
+    down by humanitarian assistance) on the ONE row per unit x scenario x
+    round, not a parallel series, so it is not filtered on (filtering
+    assistance = false dropped the "!" units; verified against the Oct 2016 ZW
+    package shapefiles' HA0/HA1/HA2 fields) — subnational units (FEWS NET's own geography: livelihood-zone x
     admin intersections and admin units — IDP camps are points and national parks
     are sentinels, neither drawable as a choropleth), the map scales (the FAOB's
     national "IPC Highest Household" series is a different product). Recency
@@ -1557,8 +1560,7 @@ def _fews_lists() -> tuple[dict[str, list], pd.DataFrame]:
     SELECT fnid, iso3, scenario, projection_start, projection_end,
            reporting_date, phase
     FROM fewsnet.classification
-    WHERE assistance = false
-      AND unit_type IN ('fsc_admin', 'fsc_admin_lhz')
+    WHERE unit_type IN ('fsc_admin', 'fsc_admin_lhz')
       AND scale <> 'IPC Highest Household'
       AND projection_end >= '2025-01-01'
       AND phase BETWEEN 1 AND 5
