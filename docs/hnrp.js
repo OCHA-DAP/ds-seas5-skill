@@ -167,8 +167,8 @@
   const fillFor = buildPatterns();
   const fillOf = (cat) => fillFor[cat];
   // FEWS NET's "!" — phase held down by humanitarian assistance — is part of the
-  // FILL, as on FEWS NET's own maps: the phase colour under a white diagonal
-  // hatch (the same 5px hatch the fixed admin levels use for skill), so it reads
+  // FILL, as on FEWS NET's own maps: the phase colour under a black diagonal
+  // hatch (the same 5px hatch geometry the fixed admin levels use for skill), so it reads
   // at every zoom without icons on top of the map.
   const HA_COLORS = ["#cdfacd", "#fae61e", "#e67800", "#c80000", "#640000"];
   const haFillFor = (() => {
@@ -190,8 +190,10 @@
       bg.setAttribute("width", "5"); bg.setAttribute("height", "5"); bg.setAttribute("fill", fill);
       const ln = document.createElementNS(NS, "line");
       ln.setAttribute("x1", 0); ln.setAttribute("y1", 0); ln.setAttribute("x2", 0); ln.setAttribute("y2", 5);
-      ln.setAttribute("stroke", i >= 3 ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.85)");
-      ln.setAttribute("stroke-width", 1.4);
+      // Black, as FEWS NET draws its "!" hatch; lighter on the two dark phases so
+      // the colour still shows through.
+      ln.setAttribute("stroke", i >= 3 ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.75)");
+      ln.setAttribute("stroke-width", 1.2);
       pat.append(bg, ln);
       defs.appendChild(pat);
       out[i + 1] = `url(#${id})`;
@@ -2028,7 +2030,8 @@
       haBlock = document.createElement("div");
       haBlock.className = "legend-block";
       const haCell = `<span class="ls-cell" style="background:${HA_COLORS[2]};` +
-        `background-image:${hatchBg("white")};width:38px;flex:0 0 38px"></span>`;
+        `background-image:repeating-linear-gradient(45deg,rgba(0,0,0,.75) 0 1.2px,transparent 1.2px 5px);` +
+        `width:38px;flex:0 0 38px"></span>`;
       haBlock.innerHTML = `<span class="lb-title">\u00a0</span>` +
         `<div class="legend-strip"><span class="ls-seg" style="width:auto;flex-direction:row;` +
         `align-items:center;gap:6px">${haCell}` +
