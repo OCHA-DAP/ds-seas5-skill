@@ -945,7 +945,12 @@
       if (fewsMode()) {
         const c = ipcComboOf(r);
         if (c) rows += `<div class="muted">${comboDesc(c)}</div>`;
-        else if (r.fews) {
+        if (c && c.ha) {
+          rows += `<div class="muted"><b>!</b> would likely be at least one phase ` +
+            `worse without current or programmed humanitarian assistance ` +
+            `(FEWS NET's own marker)</div>`;
+        }
+        if (!c && r.fews) {
           rows += `<div class="muted">not classified for the selected estimate</div>`;
         }
         // The forecast belongs to the COD admin unit this FEWS NET unit sits
@@ -1518,6 +1523,10 @@
     return b;
   };
   const triLabels = L.layerGroup().addTo(map);
+  // FEWS NET's "!" markers: units whose phase is held down by humanitarian
+  // assistance. FEWS NET prints the glyph on the unit; so do we, at the unit's
+  // usable centre, for the period on screen.
+  const haMarks = L.layerGroup().addTo(map);
   // Categories whose trimester code is not worth printing on the map.
   //
   // The map label floats alone over the area with no category text beside it, so
@@ -1550,6 +1559,28 @@
   const LABEL_MIN_PX = 80;   // how close two labels of the same season may sit
   const LABEL_CLEAR_PX = 34; // ...and of any season, once they are placed
   const MAX_TRI_LABELS = 45; // past this the map is soup whatever the clustering
+  function renderHaMarks() {
+    haMarks.clearLayers();
+    if (!fewsMode() || ADM !== "low") return;
+    const sel = countrySel.value;
+    layer.eachLayer((l) => {
+      const r = byPcode.get(l.feature.properties.pcode);
+      if (!r || !r.fews) return;
+      if (sel && r.country !== sel) return;
+      const c = ipcComboOf(r);
+      if (!c || !c.ha) return;
+      const lb = usableBounds(l);
+      if (!lb) return;
+      const dimmed = isDimmed(catOf(r), sevClassOf(r), r);
+      haMarks.addLayer(L.marker(lb.getCenter(), {
+        interactive: false, keyboard: false, opacity: dimmed ? 0.15 : 1,
+        icon: L.divIcon({
+          className: "ha-mark-wrap", iconSize: null,
+          html: `<span class="ha-mark" title="Would likely be at least one phase worse without humanitarian assistance">!</span>`,
+        }),
+      }));
+    });
+  }
   function renderTriLabels() {
     triLabels.clearLayers();
     const sel = countrySel.value;
@@ -1760,6 +1791,7 @@
     if (pinnedPcode && !byPcode.has(pinnedPcode)) pinnedPcode = null;
     renderPinHalo();
     renderTriLabels();
+    renderHaMarks();
     const sel = countrySel.value;
     layer.eachLayer((l) => {
       const el = l._path;
@@ -1844,7 +1876,7 @@
   const activeOf = (dim) => (hover && hover.dim === dim
     ? new Set(pinned[dim]).add(hover.val) : pinned[dim]);
   const anyPinned = () => HL_DIMS.some((d) => pinned[d].size > 0);
-  let clearChip = null, respBlock = null;
+  let clearChip = null, respBlock = null, haBlock = null;
   function refreshLegendDim() {
     document.querySelectorAll("#hnrp-legend .ls-seg[data-hl-dim]").forEach((seg) => {
       const { hlDim: dim, hlVal: v } = seg.dataset;
@@ -1978,6 +2010,16 @@
           border: c <= 2, dim: "cls", val: c,
         }))],
         38).querySelector(".lb-title").id = "hnrp-sev-strip-title";
+      // FEWS NET's "!" — not a class and not a filter, so it is a note beside
+      // the strip, shown only when the source is FEWS NET (renderAll toggles it).
+      haBlock = document.createElement("div");
+      haBlock.className = "legend-block";
+      haBlock.innerHTML = `<span class="lb-title">\u00a0</span>` +
+        `<div class="legend-strip"><span class="ls-seg" style="width:auto">` +
+        `<span class="ls-lbl" style="text-align:left"><span class="ha-mark ha-mark-legend">!</span>` +
+        ` would likely be at least one phase worse without humanitarian assistance ` +
+        `(FEWS NET's own marker)</span></span></div>`;
+      root.appendChild(haBlock);
     }
     // Targeting and priority have no place on the map's own encoding — the fill
     // is severity and the boundary is the forecast — so these two entries exist
@@ -2856,6 +2898,7 @@
       respBlock.querySelectorAll('[data-hl-val="prio"]').forEach(
         (el) => { el.hidden = !okP; });
       respBlock.hidden = !(okT || okP);
+      if (haBlock) haBlock.hidden = !fewsMode();
     }
     refreshLegendDim();
     syncCountryHit();

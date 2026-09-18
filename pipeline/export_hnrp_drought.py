@@ -1558,7 +1558,7 @@ def _fews_lists() -> tuple[dict[str, list], pd.DataFrame]:
     engine = stratus.get_engine("dev")
     q = """
     SELECT fnid, iso3, scenario, projection_start, projection_end,
-           reporting_date, phase
+           reporting_date, phase, assistance
     FROM fewsnet.classification
     WHERE unit_type IN ('fsc_admin', 'fsc_admin_lhz')
       AND scale <> 'IPC Highest Household'
@@ -1603,6 +1603,10 @@ def _fews_lists() -> tuple[dict[str, list], pd.DataFrame]:
                          + f"{calendar.month_abbr[r['projection_end'].month]} "
                            f"{r['projection_end'].year}",
                 "ph": int(r["phase"]),
+                # FEWS NET's "!" — the phase would likely be at least one worse
+                # without current or programmed humanitarian assistance. Drawn on
+                # the map exactly as FEWS NET draws it; omitted when false.
+                **({"ha": True} if bool(r["assistance"]) else {}),
             }
             for _, r in g.iterrows()
         ]
