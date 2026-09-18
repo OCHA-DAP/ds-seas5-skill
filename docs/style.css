@@ -424,11 +424,3 @@ footer p { margin: 4px 0; }
    without hiding the country outlines the user is still oriented by. */
 #hnrp-map { transition: opacity 0.15s ease; }
 #hnrp-map.swapping { opacity: 0.55; }
-
-/* FEWS NET's "!" marker (phase held down by humanitarian assistance) */
-.ha-mark-wrap { background: none; border: none; }
-.ha-mark { display: inline-block; transform: translate(-50%, -50%); width: 14px; height: 14px;
-  border-radius: 50%; background: #ffffff; border: 1.5px solid #1d2021; color: #1d2021;
-  font: 700 10px/12px system-ui, sans-serif; text-align: center; pointer-events: none;
-  box-shadow: 0 0 0 1px rgba(255,255,255,.8); }
-.ha-mark-legend { transform: none; vertical-align: middle; margin-right: 6px; }

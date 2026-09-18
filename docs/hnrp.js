@@ -166,6 +166,41 @@
   // app.js already registered the pattern defs, duplicate ids resolve to the first.
   const fillFor = buildPatterns();
   const fillOf = (cat) => fillFor[cat];
+  // FEWS NET's "!" — phase held down by humanitarian assistance — is part of the
+  // FILL, as on FEWS NET's own maps: the phase colour under a white diagonal
+  // hatch (the same 5px hatch the fixed admin levels use for skill), so it reads
+  // at every zoom without icons on top of the map.
+  const HA_COLORS = ["#cdfacd", "#fae61e", "#e67800", "#c80000", "#640000"];
+  const haFillFor = (() => {
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("width", "0"); svg.setAttribute("height", "0");
+    svg.style.position = "absolute";
+    const defs = document.createElementNS(NS, "defs");
+    svg.appendChild(defs);
+    const out = {};
+    HA_COLORS.forEach((fill, i) => {
+      const id = `pat-ha-${i + 1}`;
+      const pat = document.createElementNS(NS, "pattern");
+      pat.setAttribute("id", id);
+      pat.setAttribute("patternUnits", "userSpaceOnUse");
+      pat.setAttribute("width", "5"); pat.setAttribute("height", "5");
+      pat.setAttribute("patternTransform", "rotate(45)");
+      const bg = document.createElementNS(NS, "rect");
+      bg.setAttribute("width", "5"); bg.setAttribute("height", "5"); bg.setAttribute("fill", fill);
+      const ln = document.createElementNS(NS, "line");
+      ln.setAttribute("x1", 0); ln.setAttribute("y1", 0); ln.setAttribute("x2", 0); ln.setAttribute("y2", 5);
+      ln.setAttribute("stroke", i >= 3 ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.85)");
+      ln.setAttribute("stroke-width", 1.4);
+      pat.append(bg, ln);
+      defs.appendChild(pat);
+      out[i + 1] = `url(#${id})`;
+    });
+    document.body.appendChild(svg);
+    return out;
+  })();
+  // Is this unit drawn with FEWS NET's "!" for the period on screen?
+  const haOf = (r) => fewsMode() && !!(ipcComboOf(r)?.ha);
   let byPcode = new Map(data.rows.map((r) => [r.pcode, r]));
   const mapEl = document.getElementById("hnrp-map");
 
@@ -812,8 +847,11 @@
           ` switch to this country</div>` : "");
     }
     // Inside the selected country the readout lives in the sidebar, which has the
-    // room to lay it out; the tooltip would only cover the map with a duplicate.
-    return `<div class="name">${dispName(r)}</div>`;
+    // room to lay it out; the tooltip would only cover the map with a duplicate —
+    // except FEWS NET's "!", which the hatch encodes and the hover should name.
+    return `<div class="name">${dispName(r)}</div>` +
+      (haOf(r) ? `<div class="cat" style="color:#9db1b3">! at least one phase worse ` +
+        `without humanitarian assistance</div>` : "");
   };
   // ── Detail body, shared by the sidebar's unit and country readouts ───────────
   // One renderer for both, because the country view is the same measurements
@@ -1523,10 +1561,6 @@
     return b;
   };
   const triLabels = L.layerGroup().addTo(map);
-  // FEWS NET's "!" markers: units whose phase is held down by humanitarian
-  // assistance. FEWS NET prints the glyph on the unit; so do we, at the unit's
-  // usable centre, for the period on screen.
-  const haMarks = L.layerGroup().addTo(map);
   // Categories whose trimester code is not worth printing on the map.
   //
   // The map label floats alone over the area with no category text beside it, so
@@ -1559,28 +1593,6 @@
   const LABEL_MIN_PX = 80;   // how close two labels of the same season may sit
   const LABEL_CLEAR_PX = 34; // ...and of any season, once they are placed
   const MAX_TRI_LABELS = 45; // past this the map is soup whatever the clustering
-  function renderHaMarks() {
-    haMarks.clearLayers();
-    if (!fewsMode() || ADM !== "low") return;
-    const sel = countrySel.value;
-    layer.eachLayer((l) => {
-      const r = byPcode.get(l.feature.properties.pcode);
-      if (!r || !r.fews) return;
-      if (sel && r.country !== sel) return;
-      const c = ipcComboOf(r);
-      if (!c || !c.ha) return;
-      const lb = usableBounds(l);
-      if (!lb) return;
-      const dimmed = isDimmed(catOf(r), sevClassOf(r), r);
-      haMarks.addLayer(L.marker(lb.getCenter(), {
-        interactive: false, keyboard: false, opacity: dimmed ? 0.15 : 1,
-        icon: L.divIcon({
-          className: "ha-mark-wrap", iconSize: null,
-          html: `<span class="ha-mark" title="Would likely be at least one phase worse without humanitarian assistance">!</span>`,
-        }),
-      }));
-    });
-  }
   function renderTriLabels() {
     triLabels.clearLayers();
     const sel = countrySel.value;
@@ -1791,7 +1803,6 @@
     if (pinnedPcode && !byPcode.has(pinnedPcode)) pinnedPcode = null;
     renderPinHalo();
     renderTriLabels();
-    renderHaMarks();
     const sel = countrySel.value;
     layer.eachLayer((l) => {
       const el = l._path;
@@ -1824,6 +1835,8 @@
         // class — never the forecast category, which lives on the inset ring).
         // cat==null (no forecast for the selected season) stays fully muted.
         fill = !cat ? HNRP_MUTED.fill : cls ? sevColors()[cls - 1] : HNRP_MUTED.fill;
+        // FEWS NET's "!": same phase, hatched — the assistance caveat is in the fill.
+        if (cat && cls && haOf(r)) fill = haFillFor[cls];
         el.setAttribute("fill", fill);
         el.setAttribute("stroke", "#000000"); // true admin boundary
         el.setAttribute("stroke-width", 0.4);
@@ -2014,11 +2027,13 @@
       // the strip, shown only when the source is FEWS NET (renderAll toggles it).
       haBlock = document.createElement("div");
       haBlock.className = "legend-block";
+      const haCell = `<span class="ls-cell" style="background:${HA_COLORS[2]};` +
+        `background-image:${hatchBg("white")};width:38px;flex:0 0 38px"></span>`;
       haBlock.innerHTML = `<span class="lb-title">\u00a0</span>` +
-        `<div class="legend-strip"><span class="ls-seg" style="width:auto">` +
-        `<span class="ls-lbl" style="text-align:left"><span class="ha-mark ha-mark-legend">!</span>` +
-        ` would likely be at least one phase worse without humanitarian assistance ` +
-        `(FEWS NET's own marker)</span></span></div>`;
+        `<div class="legend-strip"><span class="ls-seg" style="width:auto;flex-direction:row;` +
+        `align-items:center;gap:6px">${haCell}` +
+        `<span class="ls-lbl" style="text-align:left">hatched: would likely be at least ` +
+        `one phase worse without humanitarian assistance (FEWS NET's "!")</span></span></div>`;
       root.appendChild(haBlock);
     }
     // Targeting and priority have no place on the map's own encoding — the fill
