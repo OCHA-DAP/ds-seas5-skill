@@ -210,6 +210,8 @@
     <tr><td><code>in_sample</code></td><td>True for hindcast years (an observation exists), False for the live forecast</td></tr>
     <tr><td><code>pct</code></td><td>forecast percentile within the unit's hindcast forecasts (0 driest ever forecast, 100 wettest)</td></tr>
     <tr><td><code>dry_rp, wet_rp</code></td><td>Weibull return period of the forecast from the dry and the wet end; maximum n+1, about 47</td></tr>
+    <tr><td><code>forecast_mm</code></td><td>the row's forecast as a trimester total in mm: <code>expm1(forecast_mean_log)</code> (mm/day, normalised to ERA5 and detrended, the value the RP is computed from) × the trimester's calendar days (89–92)</td></tr>
+    <tr><td><code>hist_mean_mm</code></td><td>the "normal" to read <code>forecast_mm</code> against: mean of the hindcast observations of this unit × issue month × trimester (<code>expm1(obs_mean_log)</code> over the in-sample years), as a trimester total in mm</td></tr>
     <tr><td><code>tri_share_annual</code></td><td>the trimester's share of the unit's annual ERA5 rainfall (climatology)</td></tr>
     <tr><td><code>tri_mean_mm_day</code></td><td>the trimester's climatological mean, mm/day</td></tr>
     <tr><td><code>in_season_flat</code></td><td><code>tri_share_annual ≥ 0.25</code>, the starting rule</td></tr>
@@ -318,8 +320,9 @@ dry[dry["signal"]][["iso3", "trimester", "lead", "n_units", "n_qualifying", "fra
         tables, check <code>issued_year</code> on the <code>_latest</code> file and that its
         in-season rows have <code>in_sample == False</code>.</li>
     <li><strong>RP is not magnitude.</strong> A 47-year dry RP in a marginal season can be a few
-        millimetres. <code>tri_mean_mm_day</code> (climatology) and <code>forecast_mean_log</code> /
-        <code>obs_mean_log</code> (expm1 → mm/day) pair the anomaly with an amount.</li>
+        millimetres. <code>forecast_mm</code> and <code>hist_mean_mm</code> (trimester totals, same
+        scale as the RP) pair the anomaly with an amount; <code>tri_mean_mm_day</code> is the raw
+        ERA5 climatology in mm/day.</li>
     <li><strong>Countries are unequal in unit count</strong> (Niger 8 admin-1 units, DR Congo 26,
         Ethiopia 13, or 92 zones). A 60 % threshold means different things across them;
         <code>n_units_in_country</code> is in the units table.</li>

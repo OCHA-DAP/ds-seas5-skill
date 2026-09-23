@@ -117,6 +117,8 @@ One row per **unit × issuance (year, month) × trimester**, 1981 → September 
 | `in_sample` | True for hindcast years (an observation exists), False for the live forecast |
 | `pct` | forecast percentile within the unit's hindcast forecasts (0 = driest ever forecast, 100 = wettest) |
 | `dry_rp, wet_rp` | Weibull return period of the forecast from the dry and the wet end; max = n+1 ≈ 47 |
+| `forecast_mm` | the row's forecast as a trimester total in mm: `expm1(forecast_mean_log)` (mm/day, normalised to ERA5 and detrended — the value the RP is computed from) × the trimester's calendar days (89–92) |
+| `hist_mean_mm` | the "normal" to read `forecast_mm` against: mean of the hindcast observations of this unit × issue month × trimester (`expm1(obs_mean_log)` over the in-sample years), as a trimester total in mm |
 | `tri_share_annual` | the trimester's share of the unit's annual ERA5 rainfall (climatology) |
 | `tri_mean_mm_day` | the trimester's climatological mean, mm/day |
 | `in_season_flat` | `tri_share_annual ≥ 0.25` — the starting rule |
@@ -225,8 +227,8 @@ roll-up (e.g. population-weighted).
   guards the site; for the tables here, check `issued_year` on the `_latest` file and that the
   in-season rows have `in_sample == False`.
 - **RP is not magnitude.** A 47-year dry RP in a marginal season can be a few millimetres.
-  `tri_mean_mm_day` (climatology) and `forecast_mean_log`/`obs_mean_log` (expm1 → mm/day) are
-  there to pair the anomaly with an amount.
+  `forecast_mm` and `hist_mean_mm` (trimester totals, same scale as the RP) pair the anomaly
+  with an amount; `tri_mean_mm_day` is the raw ERA5 climatology in mm/day.
 - **Countries are unequal in unit count** (Niger 8 admin-1 units, DR Congo 26, Ethiopia 13 /
   92 zones). A 60 % threshold means different things across them; `n_units_in_country` is in
   the units table.

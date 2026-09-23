@@ -14,9 +14,10 @@ Joins, per admin level, the three processed products this repo already maintains
 
 with, per row: the signed leadtime, skill (pearson_r, n_years), the forecast's position
 in its own hindcast distribution (pct, dry_rp, wet_rp — Weibull, computed in-sample for
-hindcast years exactly as the site does), the trimester's share of annual rainfall and
-the two in-season flags. Everything the signal's four parameters need, nothing that has
-to be recomputed. See src/hdx_signal.py for the roll-up and
+hindcast years exactly as the site does), the same forecast and its hindcast mean as
+trimester totals in mm (forecast_mm, hist_mean_mm), the trimester's share of annual
+rainfall and the two in-season flags. Everything the signal's four parameters need,
+nothing that has to be recomputed. See src/hdx_signal.py for the roll-up and
 docs/dev-notes/hdx-signal-data.md for the column reference.
 
 Detrended variant only (what the site and every export use). Leads −2..4 only — the
@@ -30,6 +31,7 @@ Run:  uv run python pipeline/build_hdx_signal_inputs.py --level 1
 """
 
 import argparse
+import calendar
 import io
 import sys
 from pathlib import Path
@@ -51,13 +53,17 @@ from export_static_site import issued_year_for_season  # noqa: E402
 SUFFIX = {0: "", 1: "_adm1", 2: "_adm2"}
 OUT_PREFIX = f"{PROJECT_PREFIX}/processed/hdx_signal"
 MIN_LEAD, MAX_LEAD = -2, 4
+# Calendar days per trimester (non-leap year): the mm/day -> mm factor.
+TRIMESTER_DAYS = {
+    t: sum(calendar.monthrange(2001, m)[1] for m in months) for t, months in TRIMESTERS.items()
+}
 
 COLUMNS = [
     "pcode", "iso3", "name", "adm_level",
     "issued_year", "issued_month", "trimester", "lead", "season_year",
     "pearson_r", "n_years",
     "forecast_mean_log", "obs_mean_log", "in_sample",
-    "pct", "dry_rp", "wet_rp",
+    "pct", "dry_rp", "wet_rp", "forecast_mm", "hist_mean_mm",
     "tri_share_annual", "tri_mean_mm_day", "in_season_flat", "in_season_app",
 ]
 
@@ -78,13 +84,20 @@ def read_parquet_blob(path: str, columns: list[str] | None = None,
 
 
 def position_metrics(paired: pd.DataFrame) -> pd.DataFrame:
-    """Per (pcode, issued_month, trimester, season_year): pct, dry_rp, wet_rp, in_sample.
+    """Per (pcode, issued_month, trimester, season_year): pct, dry_rp, wet_rp, in_sample,
+    forecast_mm, hist_mean_mm.
 
     The hindcast distribution of a combo = the years with BOTH a forecast and an
     observation (so the live forecast year is excluded from it, hindcast years are
     ranked in-sample — the same convention as src.skill / the site's history export).
     Weibull: RP = (n + 1) / rank, rank = 1 + number of hindcast values strictly more
     extreme in the given direction; pct = share of hindcast values ≤ the forecast.
+
+    Amounts: forecast_mm is the row's own forecast (the value the RP is computed from:
+    normalised to ERA5, detrended) back-transformed with expm1 and scaled from mm/day to
+    the trimester total; hist_mean_mm is the mean of the combo's hindcast observations
+    (obs_mean, same back-transform) scaled the same way — the "normal" the forecast is
+    to be read against.
     """
     p = paired.dropna(subset=["forecast_mean"])
     p = p.sort_values(["pcode", "issued_month", "trimester", "forecast_mean"])
@@ -95,7 +108,9 @@ def position_metrics(paired: pd.DataFrame) -> pd.DataFrame:
     gid = grp.ngroup().to_numpy()
     starts = np.r_[0, np.flatnonzero(np.diff(gid)) + 1, len(p)]
 
+    obs_mm_day = np.expm1(p["obs_mean"].to_numpy())
     n_hist = np.empty(len(p)); n_lt = np.empty(len(p)); n_le = np.empty(len(p)); n_gt = np.empty(len(p))
+    hist_mean = np.full(len(p), np.nan)
     for a, b in zip(starts[:-1], starts[1:]):
         f = fc[a:b]
         h = f[in_sample[a:b]]  # sorted because f is sorted
@@ -106,12 +121,16 @@ def position_metrics(paired: pd.DataFrame) -> pd.DataFrame:
         lt = np.searchsorted(h, f, side="left")
         le = np.searchsorted(h, f, side="right")
         n_lt[a:b], n_le[a:b], n_gt[a:b] = lt, le, n - le
+        hist_mean[a:b] = obs_mm_day[a:b][in_sample[a:b]].mean()
     ok = n_hist > 0
     out = p[keys + ["season_year", "forecast_mean", "obs_mean"]].copy()
     out["in_sample"] = in_sample
     out["pct"] = np.where(ok, 100.0 * n_le / np.maximum(n_hist, 1), np.nan)
     out["dry_rp"] = np.where(ok, (n_hist + 1) / (n_lt + 1), np.nan)
     out["wet_rp"] = np.where(ok, (n_hist + 1) / (n_gt + 1), np.nan)
+    days = p["trimester"].astype(str).map(TRIMESTER_DAYS).to_numpy(dtype=float)
+    out["forecast_mm"] = np.expm1(fc) * days
+    out["hist_mean_mm"] = hist_mean * days
     return out.rename(columns={"forecast_mean": "forecast_mean_log", "obs_mean": "obs_mean_log"})
 
 
