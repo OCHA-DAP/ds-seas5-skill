@@ -87,8 +87,8 @@ per unit (mean of every January, every February, … over 1981–present), the t
 Storage account **`imb0chd0dev`** (the team's *dev* stage), container **`projects`**. Load with
 `ocha_stratus.load_parquet_from_blob(path, stage="dev")` — see §5 for the large ones. All
 paths below are under **`ds-seas5-skill/processed/`**. Everything was rebuilt for the
-**September 2026 issuance** (2026-09-07; Ethiopia admin-2 and the climatology/signal tables
-2026-09-15).
+**September 2026 issuance** (2026-09-07; Ethiopia admin-2 and the climatologies 2026-09-15; the
+signal tables 2026-09-23, with `forecast_mm` / `hist_mean_mm`).
 
 ### 4a. Ready-made signal inputs (start here)
 
