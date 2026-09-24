@@ -1,3 +1,5 @@
+import calendar
+
 PROJECT_PREFIX = "ds-seas5-skill"
 
 MIN_YEARS: int = 10
@@ -21,3 +23,10 @@ TRIMESTERS: dict[str, list[int]] = {
     "DJF": [12, 1, 2],
 }
 
+
+# Calendar days per trimester in a non-leap year: the mm/day -> seasonal-total factor
+# every mm export uses (HNRP tab, HDX signal tables). Feb trimesters are 1 day short in
+# leap season_years (~1.1 %), accepted so the same normal reads the same everywhere.
+TRIMESTER_DAYS: dict[str, int] = {
+    t: sum(calendar.monthrange(2001, m)[1] for m in months) for t, months in TRIMESTERS.items()
+}

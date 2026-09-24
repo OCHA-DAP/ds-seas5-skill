@@ -88,7 +88,7 @@ Storage account **`imb0chd0dev`** (the team's *dev* stage), container **`project
 `ocha_stratus.load_parquet_from_blob(path, stage="dev")` — see §5 for the large ones. All
 paths below are under **`ds-seas5-skill/processed/`**. Everything was rebuilt for the
 **September 2026 issuance** (2026-09-07; Ethiopia admin-2 and the climatologies 2026-09-15; the
-signal tables 2026-09-23, with `forecast_mm` / `hist_mean_mm`).
+signal tables 2026-09-24, with `forecast_mm` / `hist_mean_mm`).
 
 ### 4a. Ready-made signal inputs (start here)
 
@@ -117,8 +117,8 @@ One row per **unit × issuance (year, month) × trimester**, 1981 → September 
 | `in_sample` | True for hindcast years (an observation exists), False for the live forecast |
 | `pct` | forecast percentile within the unit's hindcast forecasts (0 = driest ever forecast, 100 = wettest) |
 | `dry_rp, wet_rp` | Weibull return period of the forecast from the dry and the wet end; max = n+1 ≈ 47 |
-| `forecast_mm` | the row's forecast as a trimester total in mm: `expm1(forecast_mean_log)` (mm/day, normalised to ERA5 and detrended — the value the RP is computed from) × the trimester's calendar days (89–92) |
-| `hist_mean_mm` | the "normal" to read `forecast_mm` against: mean of the hindcast observations of this unit × issue month × trimester (`expm1(obs_mean_log)` over the in-sample years), as a trimester total in mm |
+| `forecast_mm` | the row's forecast as a trimester total in mm: `expm1(forecast_mean_log)` (mm/day, normalised to ERA5 and detrended — the value the RP is computed from), clipped at 0, × the trimester's calendar days (`TRIMESTER_DAYS`, non-leap, 89–92; Feb trimesters are 1 day short in leap years, ~1 %) |
+| `hist_mean_mm` | the "normal" to read `forecast_mm` against: `expm1` of the **mean of `obs_mean_log`** over every observed year (1981→) of this unit × issue month × trimester, clipped at 0, × the same days. This is `era5_mean` of the skill file, so the number is identical to the "normal" the Forecast × HNRP tab shows next to the same forecast. A log-space mean, not the arithmetic mean of the mm values, which sits above the median for skewed rain and would read a median forecast (`pct` 50) as below normal. Constant across the years of a combo; NaN only where the combo has no hindcast (`pct` / RPs NaN too) |
 | `tri_share_annual` | the trimester's share of the unit's annual ERA5 rainfall (climatology) |
 | `tri_mean_mm_day` | the trimester's climatological mean, mm/day |
 | `in_season_flat` | `tri_share_annual ≥ 0.25` — the starting rule |
@@ -227,8 +227,9 @@ roll-up (e.g. population-weighted).
   guards the site; for the tables here, check `issued_year` on the `_latest` file and that the
   in-season rows have `in_sample == False`.
 - **RP is not magnitude.** A 47-year dry RP in a marginal season can be a few millimetres.
-  `forecast_mm` and `hist_mean_mm` (trimester totals, same scale as the RP) pair the anomaly
-  with an amount; `tri_mean_mm_day` is the raw ERA5 climatology in mm/day.
+  `forecast_mm` and `hist_mean_mm` (trimester totals, the same values as the HNRP tab's
+  "forecast vs normal") pair the anomaly with an amount; `tri_mean_mm_day` is the raw ERA5
+  climatology in mm/day (arithmetic mean, so a little above `hist_mean_mm`).
 - **Countries are unequal in unit count** (Niger 8 admin-1 units, DR Congo 26, Ethiopia 13 /
   92 zones). A 60 % threshold means different things across them; `n_units_in_country` is in
   the units table.
@@ -236,13 +237,16 @@ roll-up (e.g. population-weighted).
 ## 8. Refreshing after a new issuance
 
 SEAS5 arrives on the 5th; ERA5 for the previous month around the 6th. The monthly cron
-(`.github/workflows/monthly-refresh.yml`, 7th 03:00 UTC) refreshes **admin-0 only**. The rest
-is manual, from this repo (`uv sync` first; needs the blob write SAS + prod DB read creds):
+(`.github/workflows/monthly-refresh.yml`, 7th 03:00 UTC) refreshes **admin-0 only**: the skill
+stats, then `build_hdx_signal_inputs.py --level 0`, so `signal_inputs{,_latest}.parquet` and
+`units.parquet` follow the country data automatically (`verify_site_data.py --check-signal`
+fails the run if they do not). The admin-1/2 tables are manual, from this repo (`uv sync`
+first; needs the blob write SAS + prod DB read creds):
 
 ```bash
 uv run python pipeline/compute_skill_adm1.py                 # ~40 min, 8 workers
 uv run python pipeline/compute_skill_adm2.py                 # ~15 min (all ADM2_ISO3S)
-for L in 0 1 2; do uv run python pipeline/build_hdx_signal_inputs.py --level $L; done
+for L in 1 2; do uv run python pipeline/build_hdx_signal_inputs.py --level $L; done
 # only if units were added/changed (new boundaries, new admin-2 country):
 for L in 0 1 2; do uv run python pipeline/compute_monthly_clim.py --level $L; done
 ```

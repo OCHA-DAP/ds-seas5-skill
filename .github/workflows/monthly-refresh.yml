@@ -68,6 +68,13 @@ jobs:
       - name: Recompute skill stats from SEAS5 DB → dev blob
         run: uv run python pipeline/compute_skill.py
 
+      # HDX-signal input tables, admin-0 (processed/hdx_signal/signal_inputs{,_latest}
+      # .parquet + units.parquet): a join of the skill stats just refreshed, the paired
+      # file and the admin-0 climatology, so they never lag the country data. Admin-1/2
+      # stay manual, like the adm1/adm2 skill stats they are built from.
+      - name: Build HDX-signal input tables, admin-0 → dev blob
+        run: uv run python pipeline/build_hdx_signal_inputs.py --level 0
+
       - name: Export static site data (forecast.json, skill_matrix.json, countries.geojson)
         run: uv run python pipeline/export_static_site.py
 
@@ -111,7 +118,7 @@ jobs:
       # The HNRP payloads may lag one issuance (their adm1/adm2 stats are manual);
       # that is a WARN here, a FAIL if they lag further or disagree.
       - name: Verify payload vintages & consistency
-        run: uv run python pipeline/verify_site_data.py
+        run: uv run python pipeline/verify_site_data.py --check-signal
 
       # main is branch-protected (PRs required, 0 approvals) — a direct push is
       # rejected, so the refresh lands via a self-merged PR instead.

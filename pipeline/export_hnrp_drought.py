@@ -123,7 +123,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 
-from src.constants import PROJECT_PREFIX, TRIMESTERS  # noqa: E402
+from src.constants import PROJECT_PREFIX, TRIMESTER_DAYS, TRIMESTERS  # noqa: E402
 from src.skill import trimester_lead  # noqa: E402
 from export_static_site import (  # noqa: E402
     THRESHOLDS, _min_signed, _tri_label, _tri_valid, compute_rainy_set,
@@ -1714,12 +1714,11 @@ def build_fewsnet_view() -> None:
                                                  issued_month), axis=1)]
 
         def _mm(r):
-            days = sum(calendar.monthrange(2025, m)[1]
-                       for m in TRIMESTERS[r["trimester"]])
+            days = TRIMESTER_DAYS[r["trimester"]]
             fc_log, nrm_log = r["current_forecast_mean"], r["era5_mean"]
-            fc = (round(math.expm1(float(fc_log)) * days)
+            fc = (max(0, round(math.expm1(float(fc_log)) * days))
                   if pd.notna(fc_log) else None)
-            nrm = (round(math.expm1(float(nrm_log)) * days)
+            nrm = (max(0, round(math.expm1(float(nrm_log)) * days))
                    if pd.notna(nrm_log) else None)
             return fc, nrm
 
@@ -2350,11 +2349,11 @@ def main() -> None:
     # every anomaly dry (the log-space mean sits below the mean for skewed rain).
     def _mm_totals(r) -> tuple[int | None, int | None]:
         """(forecast, climatological normal) seasonal totals, whole mm."""
-        days = sum(calendar.monthrange(2025, m)[1]  # any non-leap year
-                   for m in TRIMESTERS[r["trimester"]])
+        days = TRIMESTER_DAYS[r["trimester"]]
         fc_log, nrm_log = r["current_forecast_mean"], r["era5_mean"]
-        fc = round(math.expm1(float(fc_log)) * days) if pd.notna(fc_log) else None
-        nrm = round(math.expm1(float(nrm_log)) * days) if pd.notna(nrm_log) else None
+        # Detrended log values can sit below 0 in dry combos: clip like src/skill.py.
+        fc = max(0, round(math.expm1(float(fc_log)) * days)) if pd.notna(fc_log) else None
+        nrm = max(0, round(math.expm1(float(nrm_log)) * days)) if pd.notna(nrm_log) else None
         return fc, nrm
 
     # Per unit: the worst qualifying drought slot at the latest issuance.
