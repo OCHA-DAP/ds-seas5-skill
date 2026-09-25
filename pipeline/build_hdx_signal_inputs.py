@@ -14,9 +14,11 @@ Joins, per admin level, the three processed products this repo already maintains
 
 with, per row: the signed leadtime, skill (pearson_r, n_years), the forecast's position
 in its own hindcast distribution (pct, dry_rp, wet_rp — Weibull, computed in-sample for
-hindcast years exactly as the site does), the trimester's share of annual rainfall and
-the two in-season flags. Everything the signal's four parameters need, nothing that has
-to be recomputed. See src/hdx_signal.py for the roll-up and
+hindcast years exactly as the site does), the same forecast and the combo's hindcast
+normal as trimester totals in mm (forecast_mm, hist_mean_mm — the pair the HNRP tab
+shows, clipped at 0), the trimester's share of annual rainfall and the two in-season
+flags. Everything the signal's four parameters need,
+nothing that has to be recomputed. See src/hdx_signal.py for the roll-up and
 docs/dev-notes/hdx-signal-data.md for the column reference.
 
 Detrended variant only (what the site and every export use). Leads −2..4 only — the
@@ -43,7 +45,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 
-from src.constants import PROJECT_PREFIX, TRIMESTERS  # noqa: E402
+from src.constants import PROJECT_PREFIX, TRIMESTER_DAYS, TRIMESTERS  # noqa: E402
 from src.season import APP_TRIMESTER_SHARE, FLAT_TRIMESTER_SHARE, trimester_shares  # noqa: E402
 from src.skill import trimester_lead  # noqa: E402
 from export_static_site import issued_year_for_season  # noqa: E402
@@ -57,7 +59,7 @@ COLUMNS = [
     "issued_year", "issued_month", "trimester", "lead", "season_year",
     "pearson_r", "n_years",
     "forecast_mean_log", "obs_mean_log", "in_sample",
-    "pct", "dry_rp", "wet_rp",
+    "pct", "dry_rp", "wet_rp", "forecast_mm", "hist_mean_mm",
     "tri_share_annual", "tri_mean_mm_day", "in_season_flat", "in_season_app",
 ]
 
@@ -78,40 +80,63 @@ def read_parquet_blob(path: str, columns: list[str] | None = None,
 
 
 def position_metrics(paired: pd.DataFrame) -> pd.DataFrame:
-    """Per (pcode, issued_month, trimester, season_year): pct, dry_rp, wet_rp, in_sample.
+    """Per (pcode, issued_month, trimester, season_year): pct, dry_rp, wet_rp, in_sample,
+    forecast_mm, hist_mean_mm.
 
     The hindcast distribution of a combo = the years with BOTH a forecast and an
     observation (so the live forecast year is excluded from it, hindcast years are
     ranked in-sample — the same convention as src.skill / the site's history export).
     Weibull: RP = (n + 1) / rank, rank = 1 + number of hindcast values strictly more
     extreme in the given direction; pct = share of hindcast values ≤ the forecast.
+
+    Amounts: forecast_mm is the row's own forecast (the value the RP is computed from:
+    normalised to ERA5, detrended) back-transformed with expm1 and scaled from mm/day to
+    the trimester total (TRIMESTER_DAYS, non-leap). hist_mean_mm is the combo's normal:
+    expm1 of the MEAN LOG observation over EVERY observed year of the combo (the ERA5
+    record, so including 1981 whose forecast predates the hindcast), scaled the same way.
+    That is src.skill's era5_mean, the value the HNRP tab pairs the same forecast with
+    (export_hnrp_drought.py), so the two products show identical amounts. A log-space
+    mean, not the arithmetic mean of the mm values: for skewed rain the arithmetic mean
+    sits above the median, so pairing with it would read a median (pct 50) forecast as
+    below normal. Detrended log values can fall below 0 in dry combos, so both amounts
+    are clipped at 0 after expm1, as src.skill does.
     """
-    p = paired.dropna(subset=["forecast_mean"])
-    p = p.sort_values(["pcode", "issued_month", "trimester", "forecast_mean"])
+    # NaN forecasts (obs-only years) sort last in their combo; they feed the normal only.
+    p = paired.sort_values(["pcode", "issued_month", "trimester", "forecast_mean"])
     keys = ["pcode", "issued_month", "trimester"]
     grp = p.groupby(keys, sort=False, observed=True)
     fc = p["forecast_mean"].to_numpy()
-    in_sample = p["obs_mean"].notna().to_numpy()
+    has_fc = ~np.isnan(fc)
+    has_obs = p["obs_mean"].notna().to_numpy()
+    in_sample = has_fc & has_obs
     gid = grp.ngroup().to_numpy()
     starts = np.r_[0, np.flatnonzero(np.diff(gid)) + 1, len(p)]
 
+    obs_log = p["obs_mean"].to_numpy()
     n_hist = np.empty(len(p)); n_lt = np.empty(len(p)); n_le = np.empty(len(p)); n_gt = np.empty(len(p))
+    hist_log = np.full(len(p), np.nan)
     for a, b in zip(starts[:-1], starts[1:]):
         f = fc[a:b]
-        h = f[in_sample[a:b]]  # sorted because f is sorted
+        m = in_sample[a:b]
+        h = f[m]  # sorted because f is sorted
         n = len(h)
         n_hist[a:b] = n
         if n == 0:
-            continue
+            continue  # no hindcast: pct/RPs/hist_mean_mm stay NaN (no empty-slice mean)
         lt = np.searchsorted(h, f, side="left")
         le = np.searchsorted(h, f, side="right")
         n_lt[a:b], n_le[a:b], n_gt[a:b] = lt, le, n - le
-    ok = n_hist > 0
-    out = p[keys + ["season_year", "forecast_mean", "obs_mean"]].copy()
-    out["in_sample"] = in_sample
-    out["pct"] = np.where(ok, 100.0 * n_le / np.maximum(n_hist, 1), np.nan)
-    out["dry_rp"] = np.where(ok, (n_hist + 1) / (n_lt + 1), np.nan)
-    out["wet_rp"] = np.where(ok, (n_hist + 1) / (n_gt + 1), np.nan)
+        hist_log[a:b] = obs_log[a:b][has_obs[a:b]].mean()
+    ok = (n_hist > 0) & has_fc
+    out = p.loc[has_fc, keys + ["season_year", "forecast_mean", "obs_mean"]].copy()
+    out["in_sample"] = in_sample[has_fc]
+    out["pct"] = np.where(ok, 100.0 * n_le / np.maximum(n_hist, 1), np.nan)[has_fc]
+    out["dry_rp"] = np.where(ok, (n_hist + 1) / (n_lt + 1), np.nan)[has_fc]
+    out["wet_rp"] = np.where(ok, (n_hist + 1) / (n_gt + 1), np.nan)[has_fc]
+    # .map on the categorical maps its 12 categories, no per-row string materialisation.
+    days = out["trimester"].map(TRIMESTER_DAYS).to_numpy(dtype=float)
+    out["forecast_mm"] = np.expm1(fc[has_fc]).clip(min=0) * days
+    out["hist_mean_mm"] = np.expm1(hist_log[has_fc]).clip(min=0) * days
     return out.rename(columns={"forecast_mean": "forecast_mean_log", "obs_mean": "obs_mean_log"})
 
 
