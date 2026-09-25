@@ -84,6 +84,9 @@ MARKER_DIR.mkdir(exist_ok=True)
 # Azure Postgres requires SSL and stratus does not set sslmode (KB database.md).
 os.environ.setdefault("PGSSLMODE", "require")
 os.environ.setdefault("MPLBACKEND", "Agg")
+# The task's pip env holds the console scripts of the job libraries (node/npx from
+# nodejs-wheel, for the HNRP edge-match); subprocesses must find them on PATH.
+os.environ["PATH"] = f"{Path(sys.executable).parent}{os.pathsep}{os.environ.get('PATH', '')}"
 
 
 def run(*args, **env) -> None:

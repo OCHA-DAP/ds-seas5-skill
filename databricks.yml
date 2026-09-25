@@ -114,6 +114,9 @@ resources:
             - pypi: { package: "requests" }
             - pypi: { package: "psycopg2-binary" }
             - pypi: { package: "sqlalchemy>=2.0" }
+            # node + npx as console scripts: export_hnrp_drought.py edge-matches the
+            # HNRP geometries with `npx -y mapshaper@0.6` (skipped, with seams, without it)
+            - pypi: { package: "nodejs-wheel" }
         - task_key: skill_adm1
           depends_on: [{ task_key: skill_adm0 }]
           spark_python_task:
