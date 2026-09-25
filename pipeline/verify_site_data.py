@@ -33,9 +33,10 @@ Checks (exit 1 on any failure):
    mm amounts (forecast_mm, hist_mean_mm) are never negative — they are clipped
    at 0 in the builder, a negative one means an unclipped rebuild was uploaded.
 
-Run:  uv run python pipeline/verify_site_data.py --check-signal   # CI: after exports, before commit
+Run:  uv run python pipeline/verify_site_data.py            # Pages deploy: the downloaded bundle
       uv run python pipeline/verify_site_data.py --strict-raster   # after a raster refresh
-      uv run python pipeline/verify_site_data.py --strict-raster --strict-hnrp  # full manual refresh
+      uv run python pipeline/verify_site_data.py --expect 2026-09 --strict-hnrp --strict-raster --check-signal
+            # the Databricks refresh job: every payload (and the HDX-signal table) must show ITS issuance
 """
 
 import argparse
@@ -81,6 +82,10 @@ def main():
     ap.add_argument("--strict-hnrp", action="store_true",
                     help="a lagging hnrp_drought*.json is a failure, not a warning (use "
                          "right after refreshing the adm1/adm2 skill stats)")
+    ap.add_argument("--expect", metavar="YYYY-MM",
+                    help="the issuance every payload must show (the refresh job passes the "
+                         "month it ran for, so a compute that silently left last month's "
+                         "stats on the blob cannot ship as if it were new)")
     ap.add_argument("--check-signal", action="store_true",
                     help="also check the admin-0 HDX-signal table on the dev blob "
                          "(issuance, trimesters, no negative mm) — needs the blob SAS")
@@ -89,6 +94,11 @@ def main():
     fc = json.loads((DOCS / "data" / "forecast.json").read_text())
     iy, im = fc["issued_year"], fc["issued_month"]
     print(f"forecast.json: issued {fc['issued_label']} ({iy}-{im:02d})")
+    if args.expect:
+        ey, em = (int(x) for x in args.expect.split("-"))
+        if (iy, im) != (ey, em):
+            fail(f"forecast.json is issuance {iy}-{im:02d} but this refresh is for "
+                 f"{ey}-{em:02d} — the country skill stats on the blob were not updated")
 
     idx = json.loads((DOCS / "data" / "forecasts" / "index.json").read_text())
     latest = idx["latest"]

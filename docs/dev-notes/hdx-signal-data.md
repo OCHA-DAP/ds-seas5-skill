@@ -236,18 +236,21 @@ roll-up (e.g. population-weighted).
 
 ## 8. Refreshing after a new issuance
 
-SEAS5 arrives on the 5th; ERA5 for the previous month around the 6th. The monthly cron
-(`.github/workflows/monthly-refresh.yml`, 7th 03:00 UTC) refreshes **admin-0 only**: the skill
-stats, then `build_hdx_signal_inputs.py --level 0`, so `signal_inputs{,_latest}.parquet` and
-`units.parquet` follow the country data automatically (`verify_site_data.py --check-signal`
-fails the run if they do not). The admin-1/2 tables are manual, from this repo (`uv sync`
-first; needs the blob write SAS + prod DB read creds):
+SEAS5 arrives on the 5th; ERA5 for the previous month around the 6th. The Databricks job
+"SEAS5 Skill Monthly Refresh" (`databricks.yml`, 6th 13:15 UTC, polling until the raster-stats
+tables are current) refreshes **all three admin levels**, the monthly climatology and these
+signal tables in one run (tasks `skill_adm0` → `skill_adm1` → `skill_adm2` → `clim_signal`), and
+its vintage gate runs `verify_site_data.py --check-signal`, so `signal_inputs{,_latest}.parquet`
+and `units.parquet` can never lag the country data. Nothing is manual any more, and laptops can
+no longer reach the database. To redo a level by hand, run the same scripts from the workspace
+(`databricks bundle run seas5_monthly_refresh -t dev`, or "Repair run" on the task) — the
+underlying commands are unchanged:
 
 ```bash
 uv run python pipeline/compute_skill_adm1.py                 # ~40 min, 8 workers
 uv run python pipeline/compute_skill_adm2.py                 # ~15 min (all ADM2_ISO3S)
-for L in 1 2; do uv run python pipeline/build_hdx_signal_inputs.py --level $L; done
-# only if units were added/changed (new boundaries, new admin-2 country):
+for L in 0 1 2; do uv run python pipeline/build_hdx_signal_inputs.py --level $L; done
+# the job also refreshes the climatology every run (cheap); by hand only if units changed:
 for L in 0 1 2; do uv run python pipeline/compute_monthly_clim.py --level $L; done
 ```
 

@@ -22,9 +22,16 @@ analysis/__marimo__/
 analysis/uganda_hnrp.html
 analysis/uganda_hnrp_files/
 
-# ENSO slides live on the prod blob (pipeline/sync_enso_slides.py); the deploy downloads them
+# ENSO slides live on the dev blob (pipeline/sync_enso_slides.py); the deploy downloads them
 pages/enso/slides/
 pages/enso/countries.json
+
+# Generated site data: built by the Databricks refresh job and published as a bundle on the
+# dev blob (pipeline/sync_site_data.py); the deploy downloads it. `sync_site_data.py download`
+# populates these locally.
+docs/data/
+docs/raster/data/
+docs/cma/data/
 
 # Plaintext sources of the password-gated stories (pages/<slug>/ holds the encrypted page;
 # durable copy on the dev projects blob — see pages/README.md)

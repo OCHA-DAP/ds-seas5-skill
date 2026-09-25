@@ -13,6 +13,8 @@ Computes the raw and detrended variants in a single pass (shared loads) and writ
 Run:
   uv run python pipeline/compute_skill_raster.py                          # full global
   uv run python pipeline/compute_skill_raster.py --clip-iso3 ETH SOM KEN  # smoke test
+  uv run python pipeline/compute_skill_raster.py --issued-months 9 --merge  # monthly refresh:
+        # recompute one issuance month and write it into the existing blob cubes
 """
 
 import argparse
@@ -68,6 +70,31 @@ def load_era5_regridded(end_date, template, stage, clip_gdf):
     return da.rio.write_crs(4326).rio.reproject_match(template, resampling=Resampling.average)
 
 
+def merge_into_existing(out, suffix, issued_months):
+    """Overwrite the `issued_months` slices of the blob cube with the freshly computed ones.
+
+    The monthly refresh recomputes only the new issuance's month (~25 min) but the site,
+    the ENSO slides and the skill map all read one full cube — this keeps that cube
+    current without recomputing the other eleven months. The grids must match exactly.
+    """
+    blob = f"{PROJECT_PREFIX}/processed/raster/skill_stats_grid{suffix}.nc"
+    local = Path(f"/tmp/skill_stats_grid{suffix}_existing.nc")
+    tqdm.write(f"Merging into the existing cube {blob} ...")
+    local.write_bytes(stratus.load_blob_data(blob, stage="dev"))
+    existing = xr.load_dataset(local, engine="netcdf4")
+    local.unlink()
+    for dim in ("y", "x"):
+        if existing.sizes[dim] != out.sizes[dim] or not np.allclose(existing[dim], out[dim]):
+            raise SystemExit(f"--merge: {dim} grid differs from the existing cube; "
+                             f"recompute the full cube instead")
+    if list(existing["trimester"].values) != list(out["trimester"].values):
+        raise SystemExit("--merge: trimester order differs from the existing cube")
+    for im in issued_months:
+        for v in PIXEL_VARS + COMBO_VARS:
+            existing[v][im - 1] = out[v][im - 1]
+    return existing
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--end-date", default=pd.Timestamp.today().strftime("%Y-%m-01"),
@@ -75,7 +102,13 @@ def main():
     ap.add_argument("--issued-months", type=int, nargs="+", default=list(range(1, 13)))
     ap.add_argument("--clip-iso3", nargs="+", default=None, help="Clip to these ISO3s (smoke test)")
     ap.add_argument("--no-upload", action="store_true", help="Write local NetCDF only")
+    ap.add_argument("--merge", action="store_true",
+                    help="Write the computed --issued-months INTO the existing blob cubes "
+                         "(downloaded, slices overwritten, merged cube written/uploaded) "
+                         "instead of a partial cube holding only those months")
     args = ap.parse_args()
+    if args.merge and args.clip_iso3:
+        ap.error("--merge needs the full global grid (drop --clip-iso3)")
 
     clip_gdf = None
     if args.clip_iso3:
@@ -156,6 +189,8 @@ def main():
         del seas5
 
     for out, suffix, label in [(out_raw, "", "raw"), (out_dt, "_detrended", "detrended")]:
+        if args.merge:
+            out = merge_into_existing(out, suffix, args.issued_months)
         out.attrs["description"] = (
             f"Pixel-level SEAS5 seasonal precipitation skill on the SEAS5 native grid "
             f"({label}). Dims: issued_month × trimester × y × x."

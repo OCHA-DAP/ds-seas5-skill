@@ -1,0 +1,272 @@
+# Databricks Asset Bundle — ONE job: the monthly SEAS5 skill refresh that feeds the
+# GitHub Pages site (https://ocha-dap.github.io/ds-seas5-skill/app/).
+#
+# Why Databricks: the Postgres servers are losing public network access, and the
+# workspace is the only runtime that reaches their private endpoints (the dsci host
+# secrets hold the private IPs — KB infrastructure/database.md). GitHub Actions
+# never talks to the database any more: this job computes everything, exports the
+# site data, checks its vintage and uploads it as a bundle to the dev blob
+# (pipeline/sync_site_data.py); the Pages deploy downloads that bundle.
+#
+#   databricks bundle validate -t prod -p DEFAULT
+#   databricks bundle deploy   -t prod -p DEFAULT
+#   databricks bundle run seas5_monthly_refresh -t prod -p DEFAULT
+#   # rerun for a specific issuance, forcing the CMA mirror and the ENSO slides:
+#   databricks bundle run seas5_monthly_refresh -t prod -p DEFAULT \
+#       --params issued=2026-09,cma=force,enso=run
+#   # one step only (e.g. after fixing an exporter): right-click the task in the
+#   # Workflows UI -> "Repair run", or run the dispatcher locally:
+#   uv run python databricks/dispatch.py site 2026-09
+#
+# Deployment targets follow the team convention (KB infrastructure/databricks.md):
+# `dev` = your interactive cluster, unscheduled, for dry runs; `prod` = ephemeral Job
+# Compute under the dsci policy (secrets injected), scheduled. The data plane is the
+# same in both: prod DB (public.seas5/era5/polygon) + dev DB (HNRP/IPC/FEWS mirrors)
+# read, dev blob written — exactly what the old GitHub cron did.
+
+bundle:
+  name: ds-seas5-skill
+
+variables:
+  git_branch:
+    description: Branch the job pulls the pipeline from
+    default: main
+  existing_cluster_id:
+    description: Interactive cluster for the dev target
+    default: "0515-161935-i2w5mxhc"
+
+resources:
+  jobs:
+    seas5_monthly_refresh:
+      name: SEAS5 Skill Monthly Refresh
+      description: >-
+        Recomputes SEAS5-vs-ERA5 skill at admin 0/1/2 and per pixel for the new
+        issuance, builds every payload of the static Pages site, verifies that
+        all of them show that issuance, and publishes them as a bundle to the dev
+        blob (projects/ds-seas5-skill/site/<YYYY-MM>/) for the GitHub Pages
+        deploy workflow to pick up.
+      # Job-scoped (not top-level) permission: this workspace tier has directory
+      # ACLs disabled, so a bundle-wide permission fails on the deployment folder.
+      permissions:
+        - group_name: dsci
+          level: CAN_MANAGE
+      git_source:
+        git_url: https://github.com/OCHA-DAP/ds-seas5-skill.git
+        git_provider: gitHub
+        git_branch: ${var.git_branch}
+      schedule:
+        # Tight behind the upstream raster-stats jobs (ds-raster-pipelines, same
+        # workspace): "Run SEAS5" 5th 12:30 UTC (~25 min) writes public.seas5, "Run
+        # ERA5" 6th 12:00 UTC (37–68 min observed) writes public.era5 — the in-season
+        # trimesters need that ERA5 month. Start 75 min after ERA5 kicks off; the
+        # `preflight` task then re-polls every 30 min (up to 6 h) if either table is
+        # not current yet, so a slow upstream run delays this job instead of
+        # failing it. The Pages deploy has its own cron at 06:00 UTC on the 7th as a
+        # fallback for the `publish` task.
+        quartz_cron_expression: "0 15 13 6 * ?"
+        timezone_id: UTC
+        pause_status: UNPAUSED
+      max_concurrent_runs: 1
+      timeout_seconds: 43200   # 12 h — up to 6 h of preflight polling + the ~4 h chain
+      tags:
+        databricks: job
+        type: seas5-skill
+        output_blob: ds-seas5-skill/processed,ds-seas5-skill/site
+      email_notifications:
+        on_failure:
+          - tristan.downing@un.org
+        no_alert_for_skipped_runs: true
+
+      # Positional contract of databricks/dispatch.py: step, issued, cma, workers, enso.
+      parameters:
+        - name: issued      # YYYY-MM; "" = the current UTC month
+          default: ""
+        - name: cma         # auto | force | skip — CMA CMME mirror refresh
+          default: auto
+        - name: workers     # adm1/adm2 process count (prod DB max_connections = 50)
+          default: "6"
+        - name: enso        # run | skip — ENSO country slides (see README: still opt-in)
+          default: skip
+
+      tasks:
+        # --- preflight: upstream tables current? (fails + retries until they are) ---
+        - task_key: preflight
+          max_retries: 12
+          min_retry_interval_millis: 1800000   # 30 min
+          retry_on_timeout: false
+          spark_python_task: &dispatch
+            python_file: databricks/dispatch.py
+            source: GIT
+            parameters:
+              - "preflight"
+              - "{{job.parameters.issued}}"
+              - "{{job.parameters.cma}}"
+              - "{{job.parameters.workers}}"
+              - "{{job.parameters.enso}}"
+          libraries: &libs
+              - "{{job.parameters.issued}}"
+              - "{{job.parameters.cma}}"
+              - "{{job.parameters.workers}}"
+              - "{{job.parameters.enso}}"
+          libraries: &libs
+            - pypi: { package: "ocha-stratus" }
+            - pypi: { package: "geopandas" }
+            - pypi: { package: "shapely" }
+            - pypi: { package: "exactextract" }
+            - pypi: { package: "rasterio" }
+            - pypi: { package: "rioxarray" }
+            - pypi: { package: "xarray" }
+            - pypi: { package: "netcdf4" }
+            - pypi: { package: "zarr>=3.1" }
+            - pypi: { package: "scipy" }
+            - pypi: { package: "topojson" }
+            - pypi: { package: "matplotlib" }
+            - pypi: { package: "pillow" }
+            - pypi: { package: "tqdm" }
+            - pypi: { package: "requests" }
+            - pypi: { package: "psycopg2-binary" }
+            - pypi: { package: "sqlalchemy>=2.0" }
+            # node + npx as console scripts: export_hnrp_drought.py edge-matches the
+            # HNRP geometries with `npx -y mapshaper@0.6` (skipped, with seams, without it)
+            - pypi: { package: "nodejs-wheel" }
+        # --- compute (blob-mediated; sequential to cap prod DB connections) ---
+        - task_key: skill_adm0
+          depends_on: [{ task_key: preflight }]
+          spark_python_task:
+            <<: *dispatch
+            parameters: ["skill_adm0", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+          libraries: *libs
+        - task_key: skill_adm1
+          depends_on: [{ task_key: skill_adm0 }]
+          spark_python_task:
+            <<: *dispatch
+            parameters: ["skill_adm1", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+          libraries: *libs
+        - task_key: skill_adm2
+          depends_on: [{ task_key: skill_adm1 }]
+          spark_python_task:
+            <<: *dispatch
+            parameters: ["skill_adm2", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+          libraries: *libs
+        - task_key: clim_signal
+          depends_on: [{ task_key: skill_adm2 }]
+          spark_python_task:
+            <<: *dispatch
+            parameters: ["clim_signal", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+          libraries: *libs
+        # The pixel cube reads rasters from the prod blob, not the DB: independent of
+        # the admin chain, so it runs alongside it.
+        - task_key: raster
+          depends_on: [{ task_key: preflight }]
+          spark_python_task:
+            <<: *dispatch
+            parameters: ["raster", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+          libraries: *libs
+
+        # --- site: exports -> vintage gate -> bundle upload ---
+        # ALL_DONE: a failed raster must not block the country-level refresh (the
+        # gate then only warns about the stale pixel layer and the site disables
+        # Pixel mode); a failed admin compute is caught by the gate itself, which
+        # fails on any payload not showing this run's issuance.
+        - task_key: site
+          depends_on: [{ task_key: clim_signal }, { task_key: raster }]
+          run_if: ALL_DONE
+          spark_python_task:
+            <<: *dispatch
+            parameters: ["site", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+          libraries: *libs
+        - task_key: enso_slides
+          depends_on: [{ task_key: site }]
+          spark_python_task:
+            <<: *dispatch
+            parameters: ["enso_slides", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+          libraries: *libs
+        # Publishing a bundle that did not change is harmless (the deploy re-serves
+        # the same data), so this runs whatever happened upstream.
+        - task_key: publish
+          depends_on: [{ task_key: enso_slides }]
+          run_if: ALL_DONE
+          spark_python_task:
+            <<: *dispatch
+            parameters: ["publish", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      profile: DEFAULT
+    resources:
+      jobs:
+        seas5_monthly_refresh:
+          schedule:
+            pause_status: PAUSED
+          tasks:
+            - task_key: preflight
+              existing_cluster_id: ${var.existing_cluster_id}
+            - task_key: skill_adm0
+              existing_cluster_id: ${var.existing_cluster_id}
+            - task_key: skill_adm1
+              existing_cluster_id: ${var.existing_cluster_id}
+            - task_key: skill_adm2
+              existing_cluster_id: ${var.existing_cluster_id}
+            - task_key: clim_signal
+              existing_cluster_id: ${var.existing_cluster_id}
+            - task_key: raster
+              existing_cluster_id: ${var.existing_cluster_id}
+            - task_key: site
+              existing_cluster_id: ${var.existing_cluster_id}
+            - task_key: enso_slides
+              existing_cluster_id: ${var.existing_cluster_id}
+            - task_key: publish
+              existing_cluster_id: ${var.existing_cluster_id}
+
+  prod:
+    mode: production
+    workspace:
+      profile: DEFAULT
+      root_path: /Workspace/Users/adm.tdowning@global.un.org/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      user_name: adm.tdowning@global.un.org
+    resources:
+      jobs:
+        seas5_monthly_refresh:
+          job_clusters:
+            - job_cluster_key: refresh_cluster
+              new_cluster:
+                # Job Compute policy (000C79D951EAF0D6): ephemeral single-worker
+                # cluster with every dsci DB/blob secret injected as env vars;
+                # spark_version (latest LTS) from its defaults. DS13_v2 (56 GB,
+                # 8 cores): the raster merge holds four ~2.3 GB cubes while the
+                # admin computes run 6 worker processes alongside it.
+                policy_id: "000C79D951EAF0D6"
+                apply_policy_default_values: true
+                node_type_id: Standard_DS13_v2
+                num_workers: 1
+          tasks:
+            - task_key: preflight
+              job_cluster_key: refresh_cluster
+            - task_key: skill_adm0
+              job_cluster_key: refresh_cluster
+            - task_key: skill_adm1
+              job_cluster_key: refresh_cluster
+            - task_key: skill_adm2
+              job_cluster_key: refresh_cluster
+            - task_key: clim_signal
+              job_cluster_key: refresh_cluster
+            - task_key: raster
+              job_cluster_key: refresh_cluster
+            - task_key: site
+              job_cluster_key: refresh_cluster
+            - task_key: enso_slides
+              job_cluster_key: refresh_cluster
+            - task_key: publish
+              job_cluster_key: refresh_cluster
