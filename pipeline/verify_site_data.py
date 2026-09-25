@@ -27,11 +27,16 @@ Checks (exit 1 on any failure):
    issuance behind (the site disables Pixel mode for a stale raster); FAIL if
    it claims the current issuance but is missing PNG files for its own
    trimester list, or lists a trimester outside the expected set.
+5. --check-signal (needs the dev blob SAS): the admin-0 HDX-signal table
+   hdx_signal/signal_inputs_latest.parquet, rebuilt by the same refresh, shows
+   the same issuance as forecast.json with all expected trimesters, and its
+   mm amounts (forecast_mm, hist_mean_mm) are never negative — they are clipped
+   at 0 in the builder, a negative one means an unclipped rebuild was uploaded.
 
 Run:  uv run python pipeline/verify_site_data.py            # Pages deploy: the downloaded bundle
       uv run python pipeline/verify_site_data.py --strict-raster   # after a raster refresh
-      uv run python pipeline/verify_site_data.py --expect 2026-09 --strict-hnrp --strict-raster
-            # the Databricks refresh job: every payload must show ITS issuance
+      uv run python pipeline/verify_site_data.py --expect 2026-09 --strict-hnrp --strict-raster --check-signal
+            # the Databricks refresh job: every payload (and the HDX-signal table) must show ITS issuance
 """
 
 import argparse
@@ -39,7 +44,10 @@ import json
 import sys
 from pathlib import Path
 
+import ocha_stratus as stratus
+
 DOCS = Path(__file__).parent.parent / "docs"
+SIGNAL_LATEST_BLOB = "ds-seas5-skill/processed/hdx_signal/signal_inputs_latest.parquet"
 TRI_START = {"JFM": 1, "FMA": 2, "MAM": 3, "AMJ": 4, "MJJ": 5, "JJA": 6,
              "JAS": 7, "ASO": 8, "SON": 9, "OND": 10, "NDJ": 11, "DJF": 12}
 
@@ -78,6 +86,9 @@ def main():
                     help="the issuance every payload must show (the refresh job passes the "
                          "month it ran for, so a compute that silently left last month's "
                          "stats on the blob cannot ship as if it were new)")
+    ap.add_argument("--check-signal", action="store_true",
+                    help="also check the admin-0 HDX-signal table on the dev blob "
+                         "(issuance, trimesters, no negative mm) — needs the blob SAS")
     args = ap.parse_args()
 
     fc = json.loads((DOCS / "data" / "forecast.json").read_text())
@@ -187,6 +198,26 @@ def main():
                  f"were dropped; recompute the cube once ERA5's elapsed month is available")
     else:
         warn("no raster meta.json (pixel layer never built?)")
+
+    # 5. HDX-signal admin-0 table: same refresh, same blob inputs as forecast.json,
+    # so it must show the same issuance; the mm columns are clipped at 0 upstream.
+    if args.check_signal:
+        sig = stratus.load_parquet_from_blob(SIGNAL_LATEST_BLOB, stage="dev")
+        s_iy, s_im = int(sig["issued_year"].iloc[0]), int(sig["issued_month"].iloc[0])
+        print(f"signal_inputs_latest: issued {s_iy}-{s_im:02d} ({len(sig):,} rows)")
+        if (s_iy, s_im) != (iy, im):
+            fail(f"signal_inputs_latest is issuance {s_iy}-{s_im:02d} != forecast.json "
+                 f"{iy}-{im:02d} — rerun build_hdx_signal_inputs.py --level 0")
+        have = set(sig["trimester"].astype(str))
+        if have != want:
+            fail(f"signal_inputs_latest trimesters {sorted(have)} != expected {sorted(want)}")
+        for col in ("forecast_mm", "hist_mean_mm"):
+            n_neg = int((sig[col] < 0).sum())
+            if n_neg:
+                fail(f"{n_neg} negative {col} values in signal_inputs_latest")
+        n_na = int(sig["forecast_mm"].isna().sum())
+        if n_na:
+            fail(f"{n_na} null forecast_mm values in signal_inputs_latest")
 
     print(f"\n{len(failures)} failure(s), {len(warnings)} warning(s)")
     sys.exit(1 if failures else 0)

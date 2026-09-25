@@ -233,7 +233,7 @@ def step_site() -> None:
     # the HNRP payloads included (their adm1/adm2 inputs are part of this job now).
     # The raster is held to the same standard when this run rebuilt it.
     strict_raster = (MARKER_DIR / "raster_ok").exists()
-    run("pipeline/verify_site_data.py", "--expect", ISSUED, "--strict-hnrp",
+    run("pipeline/verify_site_data.py", "--expect", ISSUED, "--strict-hnrp", "--check-signal",
         *(["--strict-raster"] if strict_raster else []))
     run("pipeline/sync_site_data.py", "upload", "--tag", ISSUED)
 

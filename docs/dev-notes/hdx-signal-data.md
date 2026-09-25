@@ -87,8 +87,8 @@ per unit (mean of every January, every February, … over 1981–present), the t
 Storage account **`imb0chd0dev`** (the team's *dev* stage), container **`projects`**. Load with
 `ocha_stratus.load_parquet_from_blob(path, stage="dev")` — see §5 for the large ones. All
 paths below are under **`ds-seas5-skill/processed/`**. Everything was rebuilt for the
-**September 2026 issuance** (2026-09-07; Ethiopia admin-2 and the climatology/signal tables
-2026-09-15).
+**September 2026 issuance** (2026-09-07; Ethiopia admin-2 and the climatologies 2026-09-15; the
+signal tables 2026-09-24, with `forecast_mm` / `hist_mean_mm`).
 
 ### 4a. Ready-made signal inputs (start here)
 
@@ -117,6 +117,8 @@ One row per **unit × issuance (year, month) × trimester**, 1981 → September 
 | `in_sample` | True for hindcast years (an observation exists), False for the live forecast |
 | `pct` | forecast percentile within the unit's hindcast forecasts (0 = driest ever forecast, 100 = wettest) |
 | `dry_rp, wet_rp` | Weibull return period of the forecast from the dry and the wet end; max = n+1 ≈ 47 |
+| `forecast_mm` | the row's forecast as a trimester total in mm: `expm1(forecast_mean_log)` (mm/day, normalised to ERA5 and detrended — the value the RP is computed from), clipped at 0, × the trimester's calendar days (`TRIMESTER_DAYS`, non-leap, 89–92; Feb trimesters are 1 day short in leap years, ~1 %) |
+| `hist_mean_mm` | the "normal" to read `forecast_mm` against: `expm1` of the **mean of `obs_mean_log`** over every observed year (1981→) of this unit × issue month × trimester, clipped at 0, × the same days. This is `era5_mean` of the skill file, so the number is identical to the "normal" the Forecast × HNRP tab shows next to the same forecast. A log-space mean, not the arithmetic mean of the mm values, which sits above the median for skewed rain and would read a median forecast (`pct` 50) as below normal. Constant across the years of a combo; NaN only where the combo has no hindcast (`pct` / RPs NaN too) |
 | `tri_share_annual` | the trimester's share of the unit's annual ERA5 rainfall (climatology) |
 | `tri_mean_mm_day` | the trimester's climatological mean, mm/day |
 | `in_season_flat` | `tri_share_annual ≥ 0.25` — the starting rule |
@@ -225,8 +227,9 @@ roll-up (e.g. population-weighted).
   guards the site; for the tables here, check `issued_year` on the `_latest` file and that the
   in-season rows have `in_sample == False`.
 - **RP is not magnitude.** A 47-year dry RP in a marginal season can be a few millimetres.
-  `tri_mean_mm_day` (climatology) and `forecast_mean_log`/`obs_mean_log` (expm1 → mm/day) are
-  there to pair the anomaly with an amount.
+  `forecast_mm` and `hist_mean_mm` (trimester totals, the same values as the HNRP tab's
+  "forecast vs normal") pair the anomaly with an amount; `tri_mean_mm_day` is the raw ERA5
+  climatology in mm/day (arithmetic mean, so a little above `hist_mean_mm`).
 - **Countries are unequal in unit count** (Niger 8 admin-1 units, DR Congo 26, Ethiopia 13 /
   92 zones). A 60 % threshold means different things across them; `n_units_in_country` is in
   the units table.
@@ -234,10 +237,12 @@ roll-up (e.g. population-weighted).
 ## 8. Refreshing after a new issuance
 
 SEAS5 arrives on the 5th; ERA5 for the previous month around the 6th. The Databricks job
-"SEAS5 Skill Monthly Refresh" (`databricks.yml`, 6th 13:15 UTC, polling until the raster-stats tables are current) refreshes **all three admin
-levels**, the monthly climatology and these signal tables in one run (tasks `skill_adm0` →
-`skill_adm1` → `skill_adm2` → `clim_signal`); nothing is manual any more, and laptops can no
-longer reach the database. To redo a level by hand, run the same scripts from the workspace
+"SEAS5 Skill Monthly Refresh" (`databricks.yml`, 6th 13:15 UTC, polling until the raster-stats
+tables are current) refreshes **all three admin levels**, the monthly climatology and these
+signal tables in one run (tasks `skill_adm0` → `skill_adm1` → `skill_adm2` → `clim_signal`), and
+its vintage gate runs `verify_site_data.py --check-signal`, so `signal_inputs{,_latest}.parquet`
+and `units.parquet` can never lag the country data. Nothing is manual any more, and laptops can
+no longer reach the database. To redo a level by hand, run the same scripts from the workspace
 (`databricks bundle run seas5_monthly_refresh -t dev`, or "Repair run" on the task) — the
 underlying commands are unchanged:
 

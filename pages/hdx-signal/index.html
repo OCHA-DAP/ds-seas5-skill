@@ -180,8 +180,8 @@
   <p>Storage account <strong><code>imb0chd0dev</code></strong> (the team's dev stage), container
      <strong><code>projects</code></strong>. All paths below are under
      <strong><code>ds-seas5-skill/processed/</code></strong>. Everything was rebuilt for the
-     September 2026 issuance (2026-09-07; Ethiopia admin-2, the climatologies and the signal
-     tables on 2026-09-15).</p>
+     September 2026 issuance (2026-09-07; Ethiopia admin-2 and the climatologies on 2026-09-15; the
+     signal tables on 2026-09-24, with <code>forecast_mm</code> / <code>hist_mean_mm</code>).</p>
 
   <h3>4a. Ready-made signal inputs (start here)</h3>
   <div class="tblwrap"><table>
@@ -210,6 +210,8 @@
     <tr><td><code>in_sample</code></td><td>True for hindcast years (an observation exists), False for the live forecast</td></tr>
     <tr><td><code>pct</code></td><td>forecast percentile within the unit's hindcast forecasts (0 driest ever forecast, 100 wettest)</td></tr>
     <tr><td><code>dry_rp, wet_rp</code></td><td>Weibull return period of the forecast from the dry and the wet end; maximum n+1, about 47</td></tr>
+    <tr><td><code>forecast_mm</code></td><td>the row's forecast as a trimester total in mm: <code>expm1(forecast_mean_log)</code> (mm/day, normalised to ERA5 and detrended, the value the RP is computed from), clipped at 0, × the trimester's calendar days (<code>TRIMESTER_DAYS</code>, non-leap, 89–92; Feb trimesters are 1 day short in leap years, about 1 %)</td></tr>
+    <tr><td><code>hist_mean_mm</code></td><td>the "normal" to read <code>forecast_mm</code> against: <code>expm1</code> of the <strong>mean of <code>obs_mean_log</code></strong> over every observed year (1981→) of this unit × issue month × trimester, clipped at 0, × the same days. This is <code>era5_mean</code> of the skill file, so the number is identical to the "normal" the Forecast × HNRP tab shows next to the same forecast. A log-space mean, not the arithmetic mean of the mm values, which sits above the median for skewed rain and would read a median forecast (<code>pct</code> 50) as below normal. Constant across the years of a combo; NaN only where the combo has no hindcast (<code>pct</code> / RPs NaN too)</td></tr>
     <tr><td><code>tri_share_annual</code></td><td>the trimester's share of the unit's annual ERA5 rainfall (climatology)</td></tr>
     <tr><td><code>tri_mean_mm_day</code></td><td>the trimester's climatological mean, mm/day</td></tr>
     <tr><td><code>in_season_flat</code></td><td><code>tri_share_annual ≥ 0.25</code>, the starting rule</td></tr>
@@ -318,8 +320,10 @@ dry[dry["signal"]][["iso3", "trimester", "lead", "n_units", "n_qualifying", "fra
         tables, check <code>issued_year</code> on the <code>_latest</code> file and that its
         in-season rows have <code>in_sample == False</code>.</li>
     <li><strong>RP is not magnitude.</strong> A 47-year dry RP in a marginal season can be a few
-        millimetres. <code>tri_mean_mm_day</code> (climatology) and <code>forecast_mean_log</code> /
-        <code>obs_mean_log</code> (expm1 → mm/day) pair the anomaly with an amount.</li>
+        millimetres. <code>forecast_mm</code> and <code>hist_mean_mm</code> (trimester totals, the
+        same values as the HNRP tab's "forecast vs normal") pair the anomaly with an amount;
+        <code>tri_mean_mm_day</code> is the raw ERA5 climatology in mm/day (arithmetic mean, so a
+        little above <code>hist_mean_mm</code>).</li>
     <li><strong>Countries are unequal in unit count</strong> (Niger 8 admin-1 units, DR Congo 26,
         Ethiopia 13, or 92 zones). A 60 % threshold means different things across them;
         <code>n_units_in_country</code> is in the units table.</li>
@@ -327,12 +331,15 @@ dry[dry["signal"]][["iso3", "trimester", "lead", "n_units", "n_qualifying", "fra
 
   <h2 id="refresh">8. Refreshing after a new issuance</h2>
   <p>SEAS5 arrives on the 5th; ERA5 for the previous month around the 6th. The monthly cron
-     (<code>.github/workflows/monthly-refresh.yml</code>, 7th 03:00 UTC) refreshes admin-0 only.
-     The rest is manual, from the repo (<code>uv sync</code> first; needs the blob write SAS and
-     prod DB read credentials):</p>
+     (<code>.github/workflows/monthly-refresh.yml</code>, 7th 03:00 UTC) refreshes admin-0 only:
+     the skill stats, then <code>build_hdx_signal_inputs.py --level 0</code>, so
+     <code>signal_inputs{,_latest}.parquet</code> and <code>units.parquet</code> follow the country
+     data automatically (<code>verify_site_data.py --check-signal</code> fails the run if they do
+     not). The admin-1/2 tables are manual, from the repo (<code>uv sync</code> first; needs the
+     blob write SAS and prod DB read credentials):</p>
 <pre>uv run python pipeline/compute_skill_adm1.py                 # ~40 min, 8 workers
 uv run python pipeline/compute_skill_adm2.py                 # all ADM2_ISO3S
-for L in 0 1 2; do uv run python pipeline/build_hdx_signal_inputs.py --level $L; done
+for L in 1 2; do uv run python pipeline/build_hdx_signal_inputs.py --level $L; done
 # only if units were added or changed (new boundaries, new admin-2 country):
 for L in 0 1 2; do uv run python pipeline/compute_monthly_clim.py --level $L; done</pre>
   <p>Adding a country at admin-2: add its ISO3 to <code>ADM2_ISO3S</code> in

@@ -123,7 +123,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 sys.path.insert(0, str(HERE))
 
-from src.constants import PROJECT_PREFIX, TRIMESTERS  # noqa: E402
+from src.constants import PROJECT_PREFIX, TRIMESTER_DAYS, TRIMESTERS  # noqa: E402
 from src.skill import trimester_lead  # noqa: E402
 from export_static_site import (  # noqa: E402
     THRESHOLDS, _min_signed, _tri_label, _tri_valid, compute_rainy_set,
@@ -1537,9 +1537,12 @@ def combine_ipc_view() -> None:
 def _fews_lists() -> tuple[dict[str, list], pd.DataFrame]:
     """FEWS NET classifications per FNID + the unit registry, from ds-fewsnet-mirror.
 
-    From fewsnet.classification (FDW ipcphase): the published-map series only —
-    assistance = false (verified against the package shapefiles, which ARE the
-    rendered map), subnational units (FEWS NET's own geography: livelihood-zone x
+    From fewsnet.classification (FDW ipcphase): every published row at its
+    mapped phase — the `assistance` flag is FEWS NET's "!" marker (phase held
+    down by humanitarian assistance) on the ONE row per unit x scenario x
+    round, not a parallel series, so it is not filtered on (filtering
+    assistance = false dropped the "!" units; verified against the Oct 2016 ZW
+    package shapefiles' HA0/HA1/HA2 fields) — subnational units (FEWS NET's own geography: livelihood-zone x
     admin intersections and admin units — IDP camps are points and national parks
     are sentinels, neither drawable as a choropleth), the map scales (the FAOB's
     national "IPC Highest Household" series is a different product). Recency
@@ -1555,10 +1558,9 @@ def _fews_lists() -> tuple[dict[str, list], pd.DataFrame]:
     engine = stratus.get_engine("dev")
     q = """
     SELECT fnid, iso3, scenario, projection_start, projection_end,
-           reporting_date, phase
+           reporting_date, phase, assistance
     FROM fewsnet.classification
-    WHERE assistance = false
-      AND unit_type IN ('fsc_admin', 'fsc_admin_lhz')
+    WHERE unit_type IN ('fsc_admin', 'fsc_admin_lhz')
       AND scale <> 'IPC Highest Household'
       AND projection_end >= '2025-01-01'
       AND phase BETWEEN 1 AND 5
@@ -1601,6 +1603,10 @@ def _fews_lists() -> tuple[dict[str, list], pd.DataFrame]:
                          + f"{calendar.month_abbr[r['projection_end'].month]} "
                            f"{r['projection_end'].year}",
                 "ph": int(r["phase"]),
+                # FEWS NET's "!" — the phase would likely be at least one worse
+                # without current or programmed humanitarian assistance. Drawn on
+                # the map exactly as FEWS NET draws it; omitted when false.
+                **({"ha": True} if bool(r["assistance"]) else {}),
             }
             for _, r in g.iterrows()
         ]
@@ -1708,12 +1714,11 @@ def build_fewsnet_view() -> None:
                                                  issued_month), axis=1)]
 
         def _mm(r):
-            days = sum(calendar.monthrange(2025, m)[1]
-                       for m in TRIMESTERS[r["trimester"]])
+            days = TRIMESTER_DAYS[r["trimester"]]
             fc_log, nrm_log = r["current_forecast_mean"], r["era5_mean"]
-            fc = (round(math.expm1(float(fc_log)) * days)
+            fc = (max(0, round(math.expm1(float(fc_log)) * days))
                   if pd.notna(fc_log) else None)
-            nrm = (round(math.expm1(float(nrm_log)) * days)
+            nrm = (max(0, round(math.expm1(float(nrm_log)) * days))
                    if pd.notna(nrm_log) else None)
             return fc, nrm
 
@@ -2344,11 +2349,11 @@ def main() -> None:
     # every anomaly dry (the log-space mean sits below the mean for skewed rain).
     def _mm_totals(r) -> tuple[int | None, int | None]:
         """(forecast, climatological normal) seasonal totals, whole mm."""
-        days = sum(calendar.monthrange(2025, m)[1]  # any non-leap year
-                   for m in TRIMESTERS[r["trimester"]])
+        days = TRIMESTER_DAYS[r["trimester"]]
         fc_log, nrm_log = r["current_forecast_mean"], r["era5_mean"]
-        fc = round(math.expm1(float(fc_log)) * days) if pd.notna(fc_log) else None
-        nrm = round(math.expm1(float(nrm_log)) * days) if pd.notna(nrm_log) else None
+        # Detrended log values can sit below 0 in dry combos: clip like src/skill.py.
+        fc = max(0, round(math.expm1(float(fc_log)) * days)) if pd.notna(fc_log) else None
+        nrm = max(0, round(math.expm1(float(nrm_log)) * days)) if pd.notna(nrm_log) else None
         return fc, nrm
 
     # Per unit: the worst qualifying drought slot at the latest issuance.
