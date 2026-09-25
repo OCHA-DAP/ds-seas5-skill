@@ -111,7 +111,6 @@ resources:
             - pypi: { package: "matplotlib" }
             - pypi: { package: "pillow" }
             - pypi: { package: "tqdm" }
-            - pypi: { package: "openpyxl" }
             - pypi: { package: "requests" }
             - pypi: { package: "psycopg2-binary" }
             - pypi: { package: "sqlalchemy>=2.0" }
