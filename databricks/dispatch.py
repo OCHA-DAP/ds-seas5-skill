@@ -8,6 +8,8 @@ Databricks-specific glue (repo location, secrets, step composition).
     python databricks/dispatch.py <step> [issued] [cma] [workers] [enso]
 
 Steps (each is one task in databricks.yml; the dependency order is there):
+  preflight     wait (task retries) until public.seas5 has the issuance and public.era5
+                the month before it — the raster-stats jobs land them on the 5th/6th
   skill_adm0    compute_skill.py                        prod DB -> dev blob parquets
   skill_adm1    compute_skill_adm1.py --workers N
   skill_adm2    compute_skill_adm2.py --workers N
@@ -23,7 +25,7 @@ Steps (each is one task in databricks.yml; the dependency order is there):
 Positional contract (mirrors `parameters:` in databricks.yml):
   argv[1] step
   argv[2] issued   YYYY-MM of the SEAS5 issuance this run is for; "" = the
-                   current UTC month (the job runs on the 7th, after the ~5th issuance)
+                   current UTC month (the job runs on the 6th, after the ~5th issuance)
   argv[3] cma      auto | force | skip — refresh the CMA CMME mirror inside `site`
                    (auto = only when a CMME file newer than the last aggregation
                    exists on the dev blob; needs the dsci secret CMA_SITE_PASSWORD)
@@ -124,6 +126,32 @@ ISSUED_MONTH = int(ISSUED[5:])
 
 
 # --------------------------------------------------------------------------- steps
+
+def step_preflight() -> None:
+    """Fail (and let the task's retry policy re-poll) until the upstream raster-stats
+    jobs have landed this issuance in the prod DB: public.seas5 for the issuance
+    month and public.era5 for the month before it (the in-season trimesters blend
+    that month in; running without it silently falls back to last year's issuance).
+    """
+    import ocha_stratus as stratus
+    import pandas as pd
+    issued = pd.Timestamp(f"{ISSUED}-01")
+    era5_needed = issued - pd.DateOffset(months=1)
+    with stratus.get_engine("prod").connect() as conn:
+        seas5_max = pd.read_sql("SELECT max(issued_date) AS d FROM public.seas5", conn)["d"][0]
+        era5_max = pd.read_sql("SELECT max(valid_date) AS d FROM public.era5", conn)["d"][0]
+    seas5_max, era5_max = pd.Timestamp(seas5_max), pd.Timestamp(era5_max)
+    print(f"public.seas5 max issued_date {seas5_max:%Y-%m-%d} (need >= {issued:%Y-%m-%d}); "
+          f"public.era5 max valid_date {era5_max:%Y-%m-%d} (need >= {era5_needed:%Y-%m-%d})")
+    missing = []
+    if seas5_max < issued:
+        missing.append(f"SEAS5 issuance {ISSUED} not in public.seas5 yet")
+    if era5_max < era5_needed:
+        missing.append(f"ERA5 {era5_needed:%Y-%m} not in public.era5 yet")
+    if missing:
+        raise SystemExit("preflight: " + "; ".join(missing) + " — the task retries in 30 min")
+    print("preflight: upstream tables are current for", ISSUED)
+
 
 def step_skill_adm0() -> None:
     run("pipeline/compute_skill.py")
@@ -237,6 +265,7 @@ def step_publish() -> None:
 
 
 STEPS = {
+    "preflight": step_preflight,
     "skill_adm0": step_skill_adm0,
     "skill_adm1": step_skill_adm1,
     "skill_adm2": step_skill_adm2,

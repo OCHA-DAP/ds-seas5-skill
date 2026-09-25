@@ -55,15 +55,19 @@ resources:
         git_provider: gitHub
         git_branch: ${var.git_branch}
       schedule:
-        # 03:00 UTC on the 7th: buffer after the ~5th SEAS5 issuance and the
-        # ERA5 month-end update (the in-season trimesters need the elapsed month).
-        # The Pages deploy has its own cron at 10:00 UTC the same day as a fallback
-        # for the `publish` task.
-        quartz_cron_expression: "0 0 3 7 * ?"
+        # Tight behind the upstream raster-stats jobs (ds-raster-pipelines, same
+        # workspace): "Run SEAS5" 5th 12:30 UTC (~25 min) writes public.seas5, "Run
+        # ERA5" 6th 12:00 UTC (37–68 min observed) writes public.era5 — the in-season
+        # trimesters need that ERA5 month. Start 75 min after ERA5 kicks off; the
+        # `preflight` task then re-polls every 30 min (up to 6 h) if either table is
+        # not current yet, so a slow upstream run delays this job instead of
+        # failing it. The Pages deploy has its own cron at 06:00 UTC on the 7th as a
+        # fallback for the `publish` task.
+        quartz_cron_expression: "0 15 13 6 * ?"
         timezone_id: UTC
         pause_status: UNPAUSED
       max_concurrent_runs: 1
-      timeout_seconds: 36000   # 10 h — the whole chain is ~4 h
+      timeout_seconds: 43200   # 12 h — up to 6 h of preflight polling + the ~4 h chain
       tags:
         databricks: job
         type: seas5-skill
@@ -85,13 +89,21 @@ resources:
           default: skip
 
       tasks:
-        # --- compute (blob-mediated; sequential to cap prod DB connections) ---
-        - task_key: skill_adm0
+        # --- preflight: upstream tables current? (fails + retries until they are) ---
+        - task_key: preflight
+          max_retries: 12
+          min_retry_interval_millis: 1800000   # 30 min
+          retry_on_timeout: false
           spark_python_task: &dispatch
             python_file: databricks/dispatch.py
             source: GIT
             parameters:
-              - "skill_adm0"
+              - "preflight"
+              - "{{job.parameters.issued}}"
+              - "{{job.parameters.cma}}"
+              - "{{job.parameters.workers}}"
+              - "{{job.parameters.enso}}"
+          libraries: &libs
               - "{{job.parameters.issued}}"
               - "{{job.parameters.cma}}"
               - "{{job.parameters.workers}}"
@@ -117,6 +129,14 @@ resources:
             # node + npx as console scripts: export_hnrp_drought.py edge-matches the
             # HNRP geometries with `npx -y mapshaper@0.6` (skipped, with seams, without it)
             - pypi: { package: "nodejs-wheel" }
+        # --- compute (blob-mediated; sequential to cap prod DB connections) ---
+        - task_key: skill_adm0
+          depends_on: [{ task_key: preflight }]
+          spark_python_task:
+            <<: *dispatch
+            parameters: ["skill_adm0", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+          libraries: *libs
         - task_key: skill_adm1
           depends_on: [{ task_key: skill_adm0 }]
           spark_python_task:
@@ -141,6 +161,7 @@ resources:
         # The pixel cube reads rasters from the prod blob, not the DB: independent of
         # the admin chain, so it runs alongside it.
         - task_key: raster
+          depends_on: [{ task_key: preflight }]
           spark_python_task:
             <<: *dispatch
             parameters: ["raster", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
@@ -189,6 +210,8 @@ targets:
           schedule:
             pause_status: PAUSED
           tasks:
+            - task_key: preflight
+              existing_cluster_id: ${var.existing_cluster_id}
             - task_key: skill_adm0
               existing_cluster_id: ${var.existing_cluster_id}
             - task_key: skill_adm1
@@ -229,6 +252,8 @@ targets:
                 node_type_id: Standard_DS13_v2
                 num_workers: 1
           tasks:
+            - task_key: preflight
+              job_cluster_key: refresh_cluster
             - task_key: skill_adm0
               job_cluster_key: refresh_cluster
             - task_key: skill_adm1

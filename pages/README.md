@@ -23,7 +23,7 @@ slides. The runner never touches the database.
 
 **Deploy triggers.** Push to `main` touching `pages/**` or `docs/**`; `workflow_dispatch`, which
 the Databricks job fires when its bundle is up (and which takes an optional bundle `tag` to
-republish an older issuance); and a cron at 10:00 UTC on the 7th as a fallback for that dispatch.
+republish an older issuance); and a cron at 06:00 UTC on the 7th as a fallback for that dispatch.
 
 ## Adding a page
 

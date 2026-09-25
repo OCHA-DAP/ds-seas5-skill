@@ -21,7 +21,7 @@ below-/above-normal seasons where the forecast is skilful.
   (the in-season / rainy-trimester rule), `hdx_signal.py` (the HDX signal's unit condition and
   country roll-up), `constants.py`.
 - `databricks.yml` + `databricks/dispatch.py` — the **monthly refresh job** (Databricks Asset Bundle,
-  7th 03:00 UTC): runs every batch job below for the new issuance, verifies the site payloads and
+  6th 13:15 UTC, right behind the raster-stats jobs): runs every batch job below for the new issuance, verifies the site payloads and
   publishes them as a bundle to the dev blob for the Pages deploy (see `docs/README.md`).
 - `pipeline/` — batch jobs: `compute_skill.py` / `compute_skill_adm1.py` / `compute_skill_adm2.py` /
   `compute_skill_raster.py` (compute stats to blob at admin-0/1/2 and per pixel),

@@ -96,8 +96,8 @@ a faithful port of the marimo app's map logic (`analysis/prob_alerts.py`).
 ## Where the data comes from
 
 `data/`, `raster/data/` and `cma/data/` are **generated and not in git** (~100 MB, rewritten every
-issuance). The Databricks job **"SEAS5 Skill Monthly Refresh"** (`databricks.yml`, 7th of the
-month 03:00 UTC, entrypoint `databricks/dispatch.py`) builds them and uploads them as a versioned
+issuance). The Databricks job **"SEAS5 Skill Monthly Refresh"** (`databricks.yml`, 6th of the
+month 13:15 UTC, entrypoint `databricks/dispatch.py`) builds them and uploads them as a versioned
 bundle to the dev blob (`projects/ds-seas5-skill/site/<YYYY-MM>/`, `pipeline/sync_site_data.py`);
 the Pages deploy downloads that bundle into the site artifact. GitHub Actions never touches the
 database — the Postgres servers are only reachable from the Databricks workspace.
@@ -120,6 +120,7 @@ each is one of the ordinary scripts below, unchanged; `databricks/dispatch.py` o
 
 | task | runs | notes |
 |---|---|---|
+| `preflight` | checks `public.seas5` holds the issuance and `public.era5` the month before it | fails and retries every 30 min (up to 6 h) until the raster-stats jobs ("Run SEAS5" 5th 12:30 UTC, "Run ERA5" 6th 12:00 UTC) have landed |
 | `skill_adm0` | `pipeline/compute_skill.py` | ~30 min; prod DB → dev blob parquets |
 | `skill_adm1` | `pipeline/compute_skill_adm1.py --workers 6` | ~45 min |
 | `skill_adm2` | `pipeline/compute_skill_adm2.py --workers 6` | ~1.5 h (5,131 units) |
@@ -127,7 +128,7 @@ each is one of the ordinary scripts below, unchanged; `databricks/dispatch.py` o
 | `raster` | `compute_skill_raster.py --issued-months <M> --merge` | in parallel with the above; only the new month is recomputed and merged into the blob cubes |
 | `site` | previous bundle → `export_static_site`, `export_history_site`, `export_hnrp_drought` ×6, `export_plan_caseloads`, `export_raster_site`, CMA mirror when a new CMME file exists → **`verify_site_data.py --expect <YYYY-MM> --strict-hnrp [--strict-raster]`** → `sync_site_data.py upload` | the vintage gate fails the run before anything is published |
 | `enso_slides` | `analysis/png_enso_slides.py` + `sync_enso_slides.py upload` | **opt-in** (`enso=run`): ~700 MB of renders, and the ERA5 slicing is slow without the teleconnections cache — still run by hand for now |
-| `publish` | dispatches the Pages deploy workflow | needs the dsci secret `GH_SEAS5_PAGES_TOKEN`; the deploy's own 10:00 UTC cron is the fallback |
+| `publish` | dispatches the Pages deploy workflow | needs the dsci secret `GH_SEAS5_PAGES_TOKEN`; the deploy's own cron (7th 06:00 UTC) is the fallback |
 
 The CMA mirror needs the dsci secret `CMA_SITE_PASSWORD` (the payloads are encrypted); without it
 the previous `/cma/` payloads carry over and the log says so.
