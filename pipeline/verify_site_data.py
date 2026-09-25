@@ -28,9 +28,10 @@ Checks (exit 1 on any failure):
    it claims the current issuance but is missing PNG files for its own
    trimester list, or lists a trimester outside the expected set.
 
-Run:  uv run python pipeline/verify_site_data.py            # CI: after exports, before commit
+Run:  uv run python pipeline/verify_site_data.py            # Pages deploy: the downloaded bundle
       uv run python pipeline/verify_site_data.py --strict-raster   # after a raster refresh
-      uv run python pipeline/verify_site_data.py --strict-raster --strict-hnrp  # full manual refresh
+      uv run python pipeline/verify_site_data.py --expect 2026-09 --strict-hnrp --strict-raster
+            # the Databricks refresh job: every payload must show ITS issuance
 """
 
 import argparse
@@ -73,11 +74,20 @@ def main():
     ap.add_argument("--strict-hnrp", action="store_true",
                     help="a lagging hnrp_drought*.json is a failure, not a warning (use "
                          "right after refreshing the adm1/adm2 skill stats)")
+    ap.add_argument("--expect", metavar="YYYY-MM",
+                    help="the issuance every payload must show (the refresh job passes the "
+                         "month it ran for, so a compute that silently left last month's "
+                         "stats on the blob cannot ship as if it were new)")
     args = ap.parse_args()
 
     fc = json.loads((DOCS / "data" / "forecast.json").read_text())
     iy, im = fc["issued_year"], fc["issued_month"]
     print(f"forecast.json: issued {fc['issued_label']} ({iy}-{im:02d})")
+    if args.expect:
+        ey, em = (int(x) for x in args.expect.split("-"))
+        if (iy, im) != (ey, em):
+            fail(f"forecast.json is issuance {iy}-{im:02d} but this refresh is for "
+                 f"{ey}-{em:02d} — the country skill stats on the blob were not updated")
 
     idx = json.loads((DOCS / "data" / "forecasts" / "index.json").read_text())
     latest = idx["latest"]

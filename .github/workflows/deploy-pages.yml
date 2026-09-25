@@ -2,33 +2,39 @@ name: Deploy pages site to GitHub Pages
 
 # Publishes the landing page (pages/) with the SEAS5 alerts app (docs/) assembled under /app/.
 #
-# Template: OCHA-DAP/ds-geospatial-impact-estimates (see also the manifest-driven variant in
-# OCHA-DAP/ds-storm-impact-harmonisation PR #12 — deliberately not used here: two cards do not
-# need a manifest). No build step, no Python environment, no credentials.
+# No database access here — GitHub-hosted runners cannot reach the Postgres servers any
+# more. Everything the app shows is computed by the Databricks job "SEAS5 Skill Monthly
+# Refresh" (databricks.yml), which uploads the generated site data as a versioned bundle
+# to the dev blob; this workflow downloads that bundle (pipeline/sync_site_data.py) and
+# the ENSO slide bundle (pipeline/sync_enso_slides.py) into the Pages artifact — the KB's
+# "Pages artifact storage" modality with blob as the durable store. Generated data never
+# enters git. The only secret needed is the dev blob READ SAS.
 #
-# Two triggers beyond push, and the second one is load-bearing:
-#   - workflow_dispatch: manual redeploy.
-#   - workflow_run on "Monthly data refresh": that workflow merges its data PR into main with
-#     GITHUB_TOKEN, and pushes made with GITHUB_TOKEN do NOT fire push-triggered workflows —
-#     without this trigger the app's monthly data would silently stop reaching the site.
+# Triggers:
+#   - push to main touching the site's code (pages/, docs/, this file).
+#   - workflow_dispatch: the Databricks job's last task fires this when its bundle is up
+#     (needs the dsci secret GH_SEAS5_PAGES_TOKEN); also for a manual redeploy, optionally
+#     of an older bundle (`tag`).
+#   - schedule: 10:00 UTC on the 7th, a fallback in case the dispatch could not fire — the
+#     refresh job starts at 03:00 UTC and takes ~4 h. Redeploying an unchanged bundle is
+#     harmless.
 #
-# This repo's Pages previously served main:/docs directly (legacy build). configure-pages with
-# enablement: true switches the site to workflow builds on first run.
-#
-# The ENSO slides (~700 MB of per-country SVGs/PDFs) are NOT in git: they live on the
-# dev projects blob (see pipeline/sync_enso_slides.py) and are downloaded into the
-# artifact here — the KB's "Pages artifact storage" modality with blob as the durable
-# store. Re-rendering locally + `sync_enso_slides.py upload` + a dispatch of this
-# workflow publishes a new bundle.
+# Template: OCHA-DAP/ds-geospatial-impact-estimates; this repo's Pages previously served
+# main:/docs directly (legacy build). configure-pages with enablement: true switched the
+# site to workflow builds.
 
 on:
   push:
     branches: [main]
-    paths: ["pages/**", "docs/**", ".github/workflows/deploy-pages.yml"]
-  workflow_run:
-    workflows: ["Monthly data refresh"]
-    types: [completed]
+    paths: ["pages/**", "docs/**", ".github/workflows/deploy-pages.yml", "pipeline/sync_*.py"]
+  schedule:
+    - cron: "0 10 7 * *"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Site-data bundle to publish (YYYY-MM); empty = latest"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -41,13 +47,12 @@ concurrency:
 
 jobs:
   deploy:
-    # For workflow_run, deploy only after a successful refresh (a failed refresh leaves main
-    # unchanged, so there is nothing new to publish).
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,18 +60,27 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Download ENSO slides from blob
-        env:
-          DSCI_AZ_BLOB_DEV_SAS: ${{ secrets.DSCI_AZ_BLOB_DEV_SAS }}
+      - run: pip install --quiet ocha-stratus
+      - name: Download the site-data bundle from blob (docs/data, docs/raster/data, docs/cma/data)
         run: |
-          pip install --quiet ocha-stratus
-          python pipeline/sync_enso_slides.py download
+          TAG="${{ inputs.tag }}"
+          python pipeline/sync_site_data.py download ${TAG:+--tag "$TAG"}
+      - name: Download ENSO slides from blob
+        run: python pipeline/sync_enso_slides.py download
+      # The bundle was vintage-checked before upload (verify_site_data.py --expect ...);
+      # this re-run on the downloaded copy only confirms it is self-consistent, so a
+      # partial download or a stale mirror cannot go live.
+      - name: Verify the downloaded payloads
+        run: python pipeline/verify_site_data.py
       - name: Assemble site (landing at /, app at /app/)
         run: |
           mkdir -p site
           rsync -a pages/ site/
           rsync -a docs/ site/app/
           test -f site/index.html && test -f site/app/index.html && test -f site/uganda/index.html
+          test -f site/app/data/forecast.json && test -f site/app/data/forecasts/index.json
+          test -f site/app/data/hnrp_drought.json && test -f site/app/raster/data/meta.json
+          test -f site/app/cma/data/skill_matrix.json
           test -f site/enso/index.html && test -f site/enso/countries.json
           test -f site/enso/slides/NER_slide1.svg && test -f site/enso/slides/NER_fr.pdf
       - uses: actions/configure-pages@v5

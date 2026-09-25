@@ -93,74 +93,68 @@ CMA_SITE_PASSWORD=... uv run python pipeline/export_cma_site.py    # → docs/cm
 The Country layers read `data/`; the Pixel layers read `raster/`. The categorisation and colours are
 a faithful port of the marimo app's map logic (`analysis/prob_alerts.py`).
 
-## Rebuild the data
-Generated from the processed skill stats (blob) + ERA5 climatology (DB) and the per-pixel skill cube.
-Re-run when a new forecast lands (≈monthly):
+## Where the data comes from
+
+`data/`, `raster/data/` and `cma/data/` are **generated and not in git** (~100 MB, rewritten every
+issuance). The Databricks job **"SEAS5 Skill Monthly Refresh"** (`databricks.yml`, 7th of the
+month 03:00 UTC, entrypoint `databricks/dispatch.py`) builds them and uploads them as a versioned
+bundle to the dev blob (`projects/ds-seas5-skill/site/<YYYY-MM>/`, `pipeline/sync_site_data.py`);
+the Pages deploy downloads that bundle into the site artifact. GitHub Actions never touches the
+database — the Postgres servers are only reachable from the Databricks workspace.
+
+To work on the site locally, fetch the published bundle first:
 
 ```bash
-uv run python pipeline/export_static_site.py        # data/forecast.json, skill_matrix.json, countries.geojson
-uv run python pipeline/export_history_site.py       # data/forecasts/  (adds only the NEW issuance; see below)
-uv run python pipeline/export_raster_site.py        # raster/data/  (forecast pixels)
-uv run python pipeline/export_skill_raster_site.py  # raster/skill/ (skill pixels)
+uv run python pipeline/sync_site_data.py download            # latest bundle -> data/, raster/data/, cma/data/
+uv run python pipeline/sync_site_data.py download --tag 2026-08   # an older issuance
+uv run python pipeline/sync_site_data.py list
 ```
 
-Commit the result.
+`raster/skill/` (the skill pixel layer, `pipeline/export_skill_raster_site.py`) IS committed: skill is
+a fixed hindcast statistic, so it only changes when the cube is fully recomputed.
+
+## The monthly refresh (what the job does)
+
+One run, one issuance (`issued` parameter, default = the current month), tasks in this order —
+each is one of the ordinary scripts below, unchanged; `databricks/dispatch.py` only composes them:
+
+| task | runs | notes |
+|---|---|---|
+| `skill_adm0` | `pipeline/compute_skill.py` | ~30 min; prod DB → dev blob parquets |
+| `skill_adm1` | `pipeline/compute_skill_adm1.py --workers 6` | ~45 min |
+| `skill_adm2` | `pipeline/compute_skill_adm2.py --workers 6` | ~1.5 h (5,131 units) |
+| `clim_signal` | `compute_monthly_clim.py` + `build_hdx_signal_inputs.py`, levels 0/1/2 | HDX-signal inputs |
+| `raster` | `compute_skill_raster.py --issued-months <M> --merge` | in parallel with the above; only the new month is recomputed and merged into the blob cubes |
+| `site` | previous bundle → `export_static_site`, `export_history_site`, `export_hnrp_drought` ×6, `export_plan_caseloads`, `export_raster_site`, CMA mirror when a new CMME file exists → **`verify_site_data.py --expect <YYYY-MM> --strict-hnrp [--strict-raster]`** → `sync_site_data.py upload` | the vintage gate fails the run before anything is published |
+| `enso_slides` | `analysis/png_enso_slides.py` + `sync_enso_slides.py upload` | **opt-in** (`enso=run`): ~700 MB of renders, and the ERA5 slicing is slow without the teleconnections cache — still run by hand for now |
+| `publish` | dispatches the Pages deploy workflow | needs the dsci secret `GH_SEAS5_PAGES_TOKEN`; the deploy's own 10:00 UTC cron is the fallback |
+
+The CMA mirror needs the dsci secret `CMA_SITE_PASSWORD` (the payloads are encrypted); without it
+the previous `/cma/` payloads carry over and the log says so.
+
+```bash
+databricks bundle deploy -t prod -p DEFAULT                      # after merging a change to main
+databricks bundle run seas5_monthly_refresh -t prod -p DEFAULT   # a full run now
+databricks bundle run seas5_monthly_refresh -t prod -p DEFAULT --params issued=2026-09,cma=force,enso=run
+databricks bundle run seas5_monthly_refresh -t dev  -p DEFAULT   # dry run on your interactive cluster
+```
+
+A single failed task is re-run from the Workflows UI ("Repair run"); the `site` task can be
+repeated on its own once the compute is on the blob.
 
 Notes:
-- **Compute first.** These exports read the processed stats. When a new SEAS5 issuance lands, first
-  refresh those: `pipeline/compute_skill.py` (country → blob parquets) and
-  `pipeline/compute_skill_raster.py` (per-pixel cube → blob + `/tmp`). The raster compute wants its
-  full ~16 GB — close memory-heavy apps first, or run just the latest issuance with
-  `--issued-months <N> --no-upload` to refresh only the forecast-pixel layer.
 - **History is frozen.** `export_history_site.py` only writes the new issuance's file (past files'
-  in-sample percentiles drift trivially each month; freezing keeps the repo from bloating). Use
-  `--rebuild` to regenerate all of `data/forecasts/` — needed after a methodology change (last
-  done July 2026, adding the in-season trimesters).
-- **Skill pixels are stable.** Skill is a fixed hindcast statistic, so `raster/skill/` only changes
-  when the cube is fully recomputed; it can usually be skipped between forecasts.
-
-## Full monthly checklist (everything the site shows)
-
-The `monthly-refresh.yml` cron (7th, 03:00 UTC) covers only the country-level part: it runs
-`compute_skill.py`, the static/history exports, the Forecast × HNRP exports (against whatever
-adm1/adm2 stats are in the blob) and `plan_caseloads.json`, then merges a data PR. Everything
-below is **manual** after each issuance, because it is too heavy for a runner or lives outside
-`docs/data/`. Check the prerequisites first (`SELECT max(valid_date) FROM public.era5` must be
-the month before the issuance; SEAS5 COGs `precip_em_i<YYYY-MM>-01_lt*.tif` present):
-
-```bash
-# 1. Subnational skill stats (the HNRP tab's inputs; ~40 min + ~10 min)
-uv run python pipeline/compute_skill_adm1.py
-uv run python pipeline/compute_skill_adm2.py
-for L in 1 2 3 low ipc fews; do uv run python pipeline/export_hnrp_drought.py --level $L; done
-
-# 1b. HDX-signal inputs (dev-notes/hdx-signal-data.md): climatology only when the unit set
-#     changed; the signal tables every issuance (~5 min each; adm2 ~15 min)
-for L in 0 1 2; do uv run python pipeline/compute_monthly_clim.py --level $L; done   # optional
-for L in 0 1 2; do uv run python pipeline/build_hdx_signal_inputs.py --level $L; done
-
-# 2. Pixel raster (latest issuance only; merge into the blob cube if you keep it current)
-uv run python pipeline/compute_skill_raster.py --issued-months <M> --no-upload
-uv run python pipeline/export_raster_site.py
-uv run python pipeline/verify_site_data.py --strict-raster --strict-hnrp
-
-# 3. CMA mirror (only when a new PREC.6m.CMME.<YYYYMM> file has landed on the dev blob)
-uv run python pipeline/compute_skill_cma.py --reaggregate
-CMA_SITE_PASSWORD=... uv run python pipeline/export_cma_site.py
-
-# 4. ENSO slides (needs the current cube at /tmp/skill_stats_grid_detrended.nc; ~30 min)
-uv run python analysis/png_enso_slides.py --country all --force
-uv run python pipeline/sync_enso_slides.py upload
-
-# 5. Uganda district stats (feeds analysis/uganda_hnrp.qmd; the page is re-rendered by hand)
-uv run python pipeline/compute_uga_district_stats.py
-uv run python pipeline/compute_skill_uga_adm2.py
-
-uv run python pipeline/audit_site_coverage.py    # every selectable country renders
-```
-
-Commit `docs/data/`, `docs/raster/`, `docs/cma/data/` via a PR (main is branch-protected); the
-Pages deploy fires on merge and pulls the ENSO slide bundle from the blob.
+  in-sample percentiles drift trivially each month). Use `--rebuild` to regenerate all of
+  `data/forecasts/` — needed after a methodology change (last done July 2026, adding the
+  in-season trimesters) — then upload a new bundle.
+- **Vintage gate.** `pipeline/verify_site_data.py` fails the run when any payload does not show the
+  issuance the run is for (`--expect`), when the in-season trimesters are missing (ERA5's elapsed
+  month not landed yet — rerun later), when the HNRP or raster payloads lag, or when the two country
+  exporters disagree. The deploy re-runs it (without `--expect`) on the downloaded bundle.
+- **Still by hand** after an issuance: the ENSO slides (above), the CMA password/token secrets
+  the first time, and the Uganda page (`compute_uga_district_stats.py`, `compute_skill_uga_adm2.py`,
+  `analysis/uganda_hnrp.qmd` — a narrative written around one issuance; do not re-render blindly).
+  `pipeline/audit_site_coverage.py` checks that every selectable country renders.
 
 ## GitHub Pages
 The app is live at **https://ocha-dap.github.io/ds-seas5-skill/app/** — under `/app/`, not at the
@@ -178,10 +172,6 @@ Old links to the root still work: `pages/index.html` forwards a recognised app h
 
 ## Local preview
 ```bash
-python -m http.server -d docs 8000   # then open http://localhost:8000
+uv run python pipeline/sync_site_data.py download   # once, or after each issuance
+python -m http.server -d docs 8000                  # then open http://localhost:8000
 ```
-
-## TODO: automate monthly refresh (future)
-Add a scheduled GitHub Action (e.g. monthly) that runs `pipeline/export_static_site.py` and commits
-the updated `data/`. It needs the blob + DB credentials as repo secrets (the same env
-`ocha-stratus` uses for `stage="dev"` blob and the `prod` DB engine). Until then, refresh manually.

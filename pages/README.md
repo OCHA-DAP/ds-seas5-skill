@@ -11,14 +11,19 @@ build step: `.github/workflows/deploy-pages.yml` assembles the site on push to `
 | `/` | `pages/` as-is (landing, assets, product pages) |
 | `/app/` | `docs/` — the SEAS5 alerts app, copied unchanged at deploy time |
 
-so the app stays exactly where it always lived in the repo (`docs/`, refreshed monthly by
-`monthly-refresh.yml`) and nothing about it changes except the URL prefix. The site root,
-which used to serve the app directly, now serves the landing page.
+so the app stays exactly where it always lived in the repo (`docs/`) and nothing about it
+changes except the URL prefix. The site root, which used to serve the app directly, now serves
+the landing page.
 
-**Deploy triggers.** Push to `main` touching `pages/**` or `docs/**` — plus a `workflow_run`
-on "Monthly data refresh", because that workflow merges its data PR with `GITHUB_TOKEN`, whose
-pushes do not fire push-triggered workflows. Without the `workflow_run` trigger the app's data
-would silently stop reaching the site.
+**Where the data comes from.** The app's generated data (`docs/data/`, `docs/raster/data/`,
+`docs/cma/data/`) is not in git: the Databricks job "SEAS5 Skill Monthly Refresh"
+(`databricks.yml`) computes it every issuance and uploads it as a bundle to the dev blob, and the
+deploy downloads that bundle (`pipeline/sync_site_data.py`) — the same modality as the ENSO
+slides. The runner never touches the database.
+
+**Deploy triggers.** Push to `main` touching `pages/**` or `docs/**`; `workflow_dispatch`, which
+the Databricks job fires when its bundle is up (and which takes an optional bundle `tag` to
+republish an older issuance); and a cron at 10:00 UTC on the 7th as a fallback for that dispatch.
 
 ## Adding a page
 

@@ -233,15 +233,19 @@ roll-up (e.g. population-weighted).
 
 ## 8. Refreshing after a new issuance
 
-SEAS5 arrives on the 5th; ERA5 for the previous month around the 6th. The monthly cron
-(`.github/workflows/monthly-refresh.yml`, 7th 03:00 UTC) refreshes **admin-0 only**. The rest
-is manual, from this repo (`uv sync` first; needs the blob write SAS + prod DB read creds):
+SEAS5 arrives on the 5th; ERA5 for the previous month around the 6th. The Databricks job
+"SEAS5 Skill Monthly Refresh" (`databricks.yml`, 7th 03:00 UTC) refreshes **all three admin
+levels**, the monthly climatology and these signal tables in one run (tasks `skill_adm0` →
+`skill_adm1` → `skill_adm2` → `clim_signal`); nothing is manual any more, and laptops can no
+longer reach the database. To redo a level by hand, run the same scripts from the workspace
+(`databricks bundle run seas5_monthly_refresh -t dev`, or "Repair run" on the task) — the
+underlying commands are unchanged:
 
 ```bash
 uv run python pipeline/compute_skill_adm1.py                 # ~40 min, 8 workers
 uv run python pipeline/compute_skill_adm2.py                 # ~15 min (all ADM2_ISO3S)
 for L in 0 1 2; do uv run python pipeline/build_hdx_signal_inputs.py --level $L; done
-# only if units were added/changed (new boundaries, new admin-2 country):
+# the job also refreshes the climatology every run (cheap); by hand only if units changed:
 for L in 0 1 2; do uv run python pipeline/compute_monthly_clim.py --level $L; done
 ```
 
