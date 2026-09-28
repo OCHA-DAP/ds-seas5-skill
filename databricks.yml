@@ -39,12 +39,7 @@ resources:
   jobs:
     seas5_monthly_refresh:
       name: SEAS5 Skill Monthly Refresh
-      description: >-
-        Recomputes SEAS5-vs-ERA5 skill at admin 0/1/2 and per pixel for the new
-        issuance, builds every payload of the static Pages site, verifies that
-        all of them show that issuance, and publishes them as a bundle to the dev
-        blob (projects/ds-seas5-skill/site/<YYYY-MM>/) for the GitHub Pages
-        deploy workflow to pick up.
+      description: "Recompute SEAS5 versus ERA5 forecast skill for the new issuance and rebuild the skill site"
       # Job-scoped (not top-level) permission: this workspace tier has directory
       # ACLs disabled, so a bundle-wide permission fails on the deployment folder.
       permissions:
@@ -70,8 +65,9 @@ resources:
       timeout_seconds: 43200   # 12 h — up to 6 h of preflight polling + the ~4 h chain
       tags:
         databricks: job
-        type: seas5-skill
-        output_blob: ds-seas5-skill/processed,ds-seas5-skill/site
+        type: dataset-ingest
+        hazard: drought
+        output_blob: projects/ds-seas5-skill/processed,projects/ds-seas5-skill/site
       email_notifications:
         on_failure:
           - tristan.downing@un.org
