@@ -238,15 +238,14 @@ targets:
           job_clusters:
             - job_cluster_key: refresh_cluster
               new_cluster:
-                # Job Compute policy (000C79D951EAF0D6): ephemeral single-worker
-                # cluster with every dsci DB/blob secret injected as env vars;
-                # spark_version (latest LTS) from its defaults. DS13_v2 (56 GB,
-                # 8 cores): the raster merge holds four ~2.3 GB cubes while the
-                # admin computes run 6 worker processes alongside it.
-                policy_id: "000C79D951EAF0D6"
+                # Job Compute (single node) policy (0017962FF5D1E3B9): ephemeral
+                # one-VM cluster with every dsci DB/blob secret injected as env vars;
+                # spark_version (latest LTS) and num_workers=0 come from the policy.
+                # DS13_v2 (56 GB, 8 cores): the raster merge holds four ~2.3 GB cubes
+                # while the admin computes run 6 worker processes alongside it.
+                policy_id: "0017962FF5D1E3B9"
                 apply_policy_default_values: true
                 node_type_id: Standard_DS13_v2
-                num_workers: 1
           tasks:
             - task_key: preflight
               job_cluster_key: refresh_cluster
