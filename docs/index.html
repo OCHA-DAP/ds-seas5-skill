@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <!-- versioned: the HNRP legend's box strip and clear button need this
        stylesheet and hnrp.js to arrive as a pair, never one from cache -->
-  <link rel="stylesheet" href="style.css?v=20260910b" />
+  <link rel="stylesheet" href="style.css?v=20261102b" />
 </head>
 <body>
   <p class="dev-banner" role="note">
@@ -31,6 +31,8 @@
     <button class="tab" data-tab="hnrp">Forecast × HNRP</button>
     <!-- Unlisted for now: reachable only via the #alerts hash link -->
     <button class="tab" data-tab="alerts" hidden>Country alerts</button>
+    <!-- Unlisted: reachable only via the #explorer hash link -->
+    <button class="tab" data-tab="explorer" hidden>Admin explorer</button>
     <button class="tab" data-tab="methods">Methodology</button>
   </nav>
 
@@ -807,6 +809,78 @@
     </p>
   </section>
 
+  <section id="tab-explorer" class="tab-panel" hidden>
+    <h3 class="hnrp-h" id="ex-title">Admin explorer — loading…</h3>
+    <div id="ex-controls">
+      <label class="ctl">Country <select id="ex-country" class="map-select"></select></label>
+      <label class="ctl">Admin 1 <select id="ex-adm1" class="map-select"></select></label>
+      <label class="ctl">Admin 2 <select id="ex-adm2" class="map-select"></select></label>
+      <span class="ctl">Version
+        <span class="seg" id="ex-ver" role="group" aria-label="Forecast version">
+          <button type="button" class="seg-btn active" data-v="dt">Detrended</button>
+          <button type="button" class="seg-btn" data-v="raw">Raw</button>
+        </span>
+      </span>
+      <span id="ex-status" class="lock-note" aria-live="polite"></span>
+    </div>
+    <p class="ex-sub">Showing: <strong id="ex-level">Country</strong> level. The version
+      switch sets the scatter, the record chart's emphasis and the skill heatmap; the first
+      chart and the table always show both.</p>
+
+    <h4 class="ex-h">Forecast for the coming trimesters</h4>
+    <div class="ex-legend" aria-hidden="true">
+      <span><i class="ex-key" style="background:#1baf7a"></i>Detrended</span>
+      <span><i class="ex-key" style="background:#6250d6"></i>Raw</span>
+      <span><b style="color:#0e3b82">Bold blue</b> trimester = rainy season</span>
+    </div>
+    <div id="ex-outlook" class="ex-chart"></div>
+    <table id="ex-table" class="ex-table"></table>
+
+    <h4 class="ex-h" id="ex-scatter-h">Forecast against observed, one point per year</h4>
+    <div id="ex-scatter-controls">
+      <label class="ctl">Trimester <select id="ex-tri" class="map-select"></select></label>
+    </div>
+    <div id="ex-scatter" class="ex-chart ex-scatter"></div>
+    <p id="ex-scatter-stats" class="ex-stats"></p>
+
+    <h4 class="ex-h" id="ex-trend-h">The record, raw and detrended</h4>
+    <div class="ex-legend" aria-hidden="true">
+      <span><i class="ex-key ex-dot" style="background:#6250d6"></i>Raw</span>
+      <span><i class="ex-key ex-dot" style="background:#1baf7a"></i>Detrended</span>
+      <span><i class="ex-key ex-line" style="background:#6250d6"></i>Linear trend of the raw series</span>
+      <span><i class="ex-key ex-dot ex-ring"></i>This issuance's forecast</span>
+    </div>
+    <div id="ex-trend" class="ex-two"></div>
+
+    <h4 class="ex-h">Skill for every issue month</h4>
+    <div id="ex-skill" class="ex-chart"></div>
+
+    <div class="note prose">
+      <p><strong>What this tab shows.</strong> One country, admin-1 or admin-2 unit at a
+        time, for the latest SEAS5 issuance only. The numbers are the same per-unit statistics
+        behind the rest of this site: each trimester's SEAS5 forecast and ERA5 observation
+        are averaged over the unit, log-transformed, and the forecast is rescaled to match
+        ERA5's mean and spread over 1981–present. Admin 2 covers the countries in the
+        Forecast × HNRP analysis plus Ethiopia.</p>
+      <p><strong>Raw and detrended.</strong> "Detrended" removes each series' straight-line
+        trend over the record (fitted in log space, keeping its average), so a drying or
+        wetting trend in either the forecast or the observations does not count as skill or
+        set the percentile. The Map tab uses the detrended version. Where the two versions
+        disagree, the trend is doing a lot of the work: the record chart shows how big it is.</p>
+      <p><strong>Reading the charts.</strong> The percentile ranks this issuance's forecast
+        among the forecasts SEAS5 made for the same trimester from the same issue month in
+        past years; the shaded bands are the Map tab's below- and above-normal classes
+        (return period 3 and 10 years). Skill is the correlation between those past forecasts
+        and what ERA5 observed. In the scatter, each year is placed by its forecast (across)
+        and observed rainfall (up), on a log scale. The dashed grey lines split each axis into
+        thirds; years in the shaded corners were forecast in the right third (dry or wet).
+        The dashed black line is this issuance's forecast, which has no observation yet. The heatmap gives the unit's
+        skill for every trimester at every lead time, as in the Skill by country tab.
+        In-season trimesters had already started at the issue date, so their first months
+        are observed rainfall, which makes their skill higher.</p>
+    </div>
+  </section>
+
   <section id="tab-methods" class="tab-panel" hidden>
     <div class="prose">
       <h2>How the forecast alerts are calculated</h2>
@@ -944,10 +1018,12 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="mapframe.js?v=20260910b"></script>
-  <script src="app.js?v=20260910b"></script>
+  <script src="app.js?v=20261102a"></script>
   <script src="skillmap.js?v=20260910b"></script>
-  <script src="skill.js"></script>
+  <script src="skill.js?v=20261102a"></script>
   <script src="hnrp.js?v=20260901a"></script>
   <script src="alerts.js?v=20260804j"></script>
+  <script src="explorer_math.js?v=20261102b"></script>
+  <script src="explorer.js?v=20261102d"></script>
 </body>
 </html>

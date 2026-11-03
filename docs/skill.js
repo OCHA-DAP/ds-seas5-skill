@@ -233,6 +233,9 @@
     host.replaceChildren(svg);
   }
 
+  // The Admin explorer tab (explorer.js) draws the same chart for any admin unit.
+  window.renderSkillChart = render;
+
   fetch("data/skill_matrix.json").then((r) => r.json()).then((meta) => {
     const sel = document.getElementById("skill-country");
     const host = document.getElementById("skill-chart");

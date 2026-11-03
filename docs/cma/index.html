@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Merriweather:wght@700&display=swap" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="../style.css?v=20260910b" />
+  <link rel="stylesheet" href="../style.css?v=20261102b" />
 </head>
 <body>
   <div id="gate">
@@ -327,7 +327,7 @@
 
       function boot() {
         document.getElementById("gate").remove();
-        for (const src of ["../mapframe.js?v=20260910b", "../app.js?v=20260910b", "../skillmap.js?v=20260910b", "../skill.js"]) {
+        for (const src of ["../mapframe.js?v=20260910b", "../app.js?v=20261102a", "../skillmap.js?v=20260910b", "../skill.js?v=20261102a"]) {
           const s = document.createElement("script");
           s.src = src;
           s.async = false;  // preserve execution order (skillmap needs app's tab registry)

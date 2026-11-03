@@ -28,7 +28,8 @@ below-/above-normal seasons where the forecast is skilful.
   `compute_monthly_clim.py` (ERA5 monthly climatology per admin level),
   `build_hdx_signal_inputs.py` (one tidy table per admin level for the HDX signal —
   see [`docs/dev-notes/hdx-signal-data.md`](docs/dev-notes/hdx-signal-data.md)),
-  `export_static_site.py` / `export_raster_site.py` (build the static-site data in `docs/`),
+  `export_static_site.py` / `export_raster_site.py` / `export_explorer_site.py` (build the
+  static-site data in `docs/`),
   `compute_skill_cma.py` / `export_cma_site.py` (the same, for the CMA CMME mirror at `docs/cma/`).
 - `analysis/` — the marimo app (`prob_alerts.py`) and other exploratory notebooks.
 - `docs/` — the static GitHub Pages site (see [`docs/README.md`](docs/README.md)).
