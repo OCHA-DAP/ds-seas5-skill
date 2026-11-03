@@ -219,6 +219,9 @@ def step_site() -> None:
         run("pipeline/export_hnrp_drought.py", "--level", level)
     run("pipeline/export_plan_caseloads.py")
     run("pipeline/export_raster_site.py")
+    # Admin explorer tab (#explorer): admin 0/1/2 per-unit payloads for this issuance,
+    # from the skill/paired/clim parquets the skill_adm* and clim_signal tasks just wrote.
+    run("pipeline/export_explorer_site.py")
 
     if CMA != "skip" and (CMA == "force" or _cma_needs_refresh()):
         password = _secret("CMA_SITE_PASSWORD")

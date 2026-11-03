@@ -493,7 +493,7 @@ Promise.all([
 // Tabs (Map / Methodology) with #hash deep-linking.
 (function setupTabs() {
   const buttons = document.querySelectorAll(".tab");
-  const TABS = ["map", "skillmap", "skill", "hnrp", "alerts", "methods"];
+  const TABS = ["map", "skillmap", "skill", "hnrp", "alerts", "explorer", "methods"];
   function show(name) {
     // Unlisted tabs (hidden buttons, reachable only by #hash): once explicitly opened,
     // reveal the button for this session so navigating away and back works.

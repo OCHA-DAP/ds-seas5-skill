@@ -19,6 +19,16 @@ log space before blending; see `src/skill.py:aggregate_mixed_trimester`). Their 
 much higher. **Pixel layers cover leads 0–4 / fully-forecast trimesters only** — the in-season
 combos are country-level; the JS shows a note instead of a broken overlay.
 - **Methodology** — static prose.
+- **Admin explorer** (`explorer.js`, **unlisted** — hidden tab button, reached only at
+  `/app/#explorer`) — the static port of the retired Azure marimo app's per-country section
+  (`analysis/prob_alerts.py`) with the ds-seas5-viz explorer's admin-level picker. Pick a country,
+  admin 1 or admin 2 unit; for the **latest issuance** it shows forecast percentile and skill per
+  valid trimester (raw next to detrended, + a table with the mm amounts and the Map category),
+  the hindcast scatter (SEAS5 vs ERA5, one point per year, log axes, terciles of the plotted
+  years), the raw and detrended series with the raw linear trend, and the unit's leadtime ×
+  trimester skill heatmap (drawn by `skill.js`'s `window.renderSkillChart`). Selection lives in
+  the URL (`?ex=ISO3.ADM1.ADM2&ex_tri=OND&ex_v=raw#explorer`). Admin 2 = the countries
+  `compute_skill_adm2.py` covers (24).
 
 Both maps share `mapframe.js`: an in-frame title card (top-left) that spells out the valid
 trimester (`Jul–Aug–Sep 2026 (JAS)`), a small `Source: ECMWF SEAS5 and ERA5` line
@@ -90,6 +100,17 @@ CMA_SITE_PASSWORD=... uv run python pipeline/export_cma_site.py    # → docs/cm
 - `raster/skill/` — skill pixel layer: baked RGBA PNGs per trimester × leadtime (`{TRI}_L{lead}.png`)
   + `meta.json` (`pipeline/export_skill_raster_site.py`).
 
+- `data/explorer/` — the Admin explorer payloads (`pipeline/export_explorer_site.py`, ~16 MB):
+  `index.json` (issuance, trimesters, countries) + `<ISO3>.json.gz` (admin 0 + every admin 1) +
+  `adm2/<ADM1 pcode>.json.gz`. **Gzipped** (plain JSON would be ~45 MB, which the 1 GB Pages limit
+  cannot spare next to the ENSO slides); `explorer.js` inflates them with `DecompressionStream`.
+  Only the latest issue month's **raw** yearly pairs ship (log1p × 1e4 integers); the detrended
+  series are re-derived in the browser by `explorer_math.js` `detrend`, the pipeline's own fit —
+  `pipeline/check_explorer_detrend.py` runs that JS under Node against
+  `paired_yearly_detrended*.parquet` (last run: 0 mismatches over 1.4 M values, worst 7e-5 in
+  log space). Run it after touching either side of the detrending. Every r, percentile and
+  return period shown is the pipeline's.
+
 The Country layers read `data/`; the Pixel layers read `raster/`. The categorisation and colours are
 a faithful port of the marimo app's map logic (`analysis/prob_alerts.py`).
 
@@ -126,7 +147,7 @@ each is one of the ordinary scripts below, unchanged; `databricks/dispatch.py` o
 | `skill_adm2` | `pipeline/compute_skill_adm2.py --workers 6` | ~1.5 h (5,131 units) |
 | `clim_signal` | `compute_monthly_clim.py` + `build_hdx_signal_inputs.py`, levels 0/1/2 | HDX-signal inputs |
 | `raster` | `compute_skill_raster.py --issued-months <M> --merge` | in parallel with the above; only the new month is recomputed and merged into the blob cubes |
-| `site` | previous bundle → `export_static_site`, `export_history_site`, `export_hnrp_drought` ×6, `export_plan_caseloads`, `export_raster_site`, CMA mirror when a new CMME file exists → **`verify_site_data.py --expect <YYYY-MM> --strict-hnrp [--strict-raster]`** → `sync_site_data.py upload` | the vintage gate fails the run before anything is published |
+| `site` | previous bundle → `export_static_site`, `export_history_site`, `export_hnrp_drought` ×6, `export_plan_caseloads`, `export_raster_site`, `export_explorer_site`, CMA mirror when a new CMME file exists → **`verify_site_data.py --expect <YYYY-MM> --strict-hnrp [--strict-raster]`** → `sync_site_data.py upload` | the vintage gate fails the run before anything is published |
 | `enso_slides` | `analysis/png_enso_slides.py` + `sync_enso_slides.py upload` | **opt-in** (`enso=run`): ~700 MB of renders, and the ERA5 slicing is slow without the teleconnections cache — still run by hand for now |
 | `publish` | dispatches the Pages deploy workflow | needs the dsci secret `GH_SEAS5_PAGES_TOKEN`; the deploy's own cron (7th 06:00 UTC) is the fallback |
 
