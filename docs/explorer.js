@@ -394,7 +394,7 @@
       const lo = Math.min(...vals), hi = Math.max(...vals), pad = 0.08 * (hi - lo || 1);
       const X = (yr) => ML + ((yr - yr0) / Math.max(1, yr1 - yr0)) * (W - ML - MR);
       const Y = (x) => MT + (1 - (x - (lo - pad)) / (hi - lo + 2 * pad)) * (H - MT - MB);
-      const ty = ticks(lo - pad, hi + pad, 4);
+      const ty = ticks(lo - pad, hi + pad, 6);
       ty.out.forEach((x) => {
         svg.appendChild(el("line", { x1: ML, x2: W - MR, y1: Y(x), y2: Y(x), stroke: GRID }));
         svg.appendChild(el("text", { x: ML - 6, y: Y(x) + 4, "text-anchor": "end", class: "ex-muted" },
