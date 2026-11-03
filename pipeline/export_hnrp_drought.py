@@ -393,6 +393,11 @@ NAME_ALIAS = {
     ("DJI", "djibouti ville"): "djiboutii",
     # Madagascar renamed Haute Matsiatra to Matsiatra Ambony. Same region.
     ("MDG", "matsiatra ambony"): "haute matsiatra",
+    # Angola: FEWS NET spells three provinces with a K where our polygon table
+    # uses a C. Same provinces (AO05, AO06, AO07).
+    ("AGO", "kuando kubango"): "cuando cubango",
+    ("AGO", "kuanza norte"): "cuanza norte",
+    ("AGO", "kuanza sul"): "cuanza sul",
     # NOT aliased, deliberately: VATOVAVY and FITOVINANY are the two halves of a
     # SPLIT of Vatovavy Fitovinany — aliasing both onto the old unit would put two
     # rows on one polygon, which the collision guard blocks and a sum would be
@@ -1627,7 +1632,8 @@ def build_fewsnet_view() -> None:
     The forecast is the point of the tab and FEWS NET units carry no zonal
     stats, so each unit INHERITS the forecast of the COD admin unit it sits in,
     name-matched from the package's ADMIN2 (then ADMIN1) attribute against the
-    plan payloads — the same mechanism as adm3 inheriting adm2, one step
+    plan payloads, through NAME_ALIAS for known spelling differences (Angola's
+    Kuando Kubango, Kuanza Norte, Kuanza Sul) — the same mechanism as adm3 inheriting adm2, one step
     looser (names, not parent pcodes), flagged on the row ("fcu") so the site
     can say where the forecast came from. A country in the tab's scope with no
     FEWS NET coverage keeps its plan units and forecast, exactly as countries
@@ -1843,7 +1849,8 @@ def build_fewsnet_view() -> None:
         for lvl, name in ((2, u["admin2"]), (1, u["admin1"])):
             if not name:
                 continue
-            src = by_name[lvl].get((iso3, _fold(name)))
+            f = _fold(name)
+            src = by_name[lvl].get((iso3, NAME_ALIAS.get((iso3, f), f)))
             if src:
                 matched[lvl] += 1
                 break
