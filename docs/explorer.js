@@ -460,8 +460,11 @@
 
   async function selectCountry(iso3) {
     S.iso3 = iso3;
-    country = await getJSON(`${BASE}${iso3}.json.gz`);
+    // Check for a later pick BEFORE touching shared state: cached files resolve on the
+    // next microtask, so an earlier, slower fetch can land after a later, cached one.
+    const c = await getJSON(`${BASE}${iso3}.json.gz`);
     if (S.iso3 !== iso3) return false; // superseded by a later pick
+    country = c;
     const a1 = country.adm1;
     fillSelect($("ex-adm1"), [["", a1.length ? "Whole country" : "No admin 1 data"]]
       .concat(a1.map(([p, n]) => [p, n])), S.adm1);
@@ -472,12 +475,14 @@
 
   async function selectAdm1(pcode) {
     S.adm1 = pcode;
+    const iso3 = S.iso3;
     const entry = country.adm1.find(([p]) => p === pcode);
-    adm2File = null;
+    let a2 = null;
     if (entry && entry[2]) {
-      adm2File = await getJSON(`${BASE}adm2/${pcode}.json.gz`);
-      if (S.adm1 !== pcode) return false;
+      a2 = await getJSON(`${BASE}adm2/${pcode}.json.gz`);
+      if (S.adm1 !== pcode || S.iso3 !== iso3) return false; // superseded
     }
+    adm2File = a2;
     const sel = $("ex-adm2");
     if (adm2File) {
       fillSelect(sel, [["", "Whole admin 1"]].concat(
@@ -517,7 +522,7 @@
     if (location.hash.replace("#", "") !== "explorer") return;
     const q = new URLSearchParams(location.search);
     q.set("ex", [S.iso3, S.adm1, S.adm2].filter(Boolean).join("."));
-    q.set("ex_tri", S.tri);
+    if (S.tri) q.set("ex_tri", S.tri); else q.delete("ex_tri");
     q.set("ex_v", S.ver);
     history.replaceState(null, "", `?${q}#explorer`);
   }
@@ -525,7 +530,7 @@
   function update() {
     const level = resolveUnit();
     const avail = IDX.trimesters.filter((t) => unit.tri[t.key]).map((t) => t.key);
-    if (!avail.includes(S.tri)) {
+    if (avail.length && !avail.includes(S.tri)) {
       S.tri = avail.includes(IDX.default_trimester) ? IDX.default_trimester : avail[0];
     }
     fillSelect($("ex-tri"), IDX.trimesters.filter((t) => avail.includes(t.key))
@@ -550,8 +555,11 @@
   async function run(step) {
     $("ex-status").textContent = "Loading…";
     try {
-      if ((await step()) !== false) update();
-      $("ex-status").textContent = "";
+      // A superseded step (false) leaves the status to the pick that replaced it.
+      if ((await step()) !== false) {
+        update();
+        $("ex-status").textContent = "";
+      }
     } catch (e) {
       console.error(e);
       $("ex-status").textContent = "Could not load this unit's data.";

@@ -205,7 +205,10 @@ def build_unit(
 
 def adm1_parent(adm2_pcodes: list[str], adm1_pcodes: set[str]) -> dict[str, str]:
     """adm2 pcode -> its admin-1 pcode by longest pcode prefix (100 % match on the
-    current tables); a miss aborts rather than silently dropping a unit."""
+    current tables). A unit with no match cannot be placed under an admin 1, so it is
+    left out of the tab — loudly, but without failing the monthly site refresh for a
+    coverage gap (e.g. an admin-2 country added to compute_skill_adm2.py before its
+    admin-1 stats exist)."""
     out, missing = {}, []
     for p in adm2_pcodes:
         par = next((p[:n] for n in range(len(p) - 1, 1, -1) if p[:n] in adm1_pcodes), None)
@@ -214,7 +217,8 @@ def adm1_parent(adm2_pcodes: list[str], adm1_pcodes: set[str]) -> dict[str, str]
         else:
             out[p] = par
     if missing:
-        raise SystemExit(f"{len(missing)} admin-2 pcodes have no admin-1 parent: {missing[:10]}")
+        print(f"  WARN {len(missing)} admin-2 pcodes have no admin-1 parent and are left out "
+              f"of the explorer: {missing[:10]}")
     return out
 
 
@@ -307,6 +311,8 @@ def main() -> None:
                 adm1_names[pcode] = str(name)
                 adm1_iso3[pcode] = iso3
             else:
+                if pcode not in parent:
+                    continue  # no admin-1 parent (warned in adm1_parent)
                 if parent[pcode] not in adm1_names:
                     print(f"  WARN admin-2 {pcode} has skill but its admin-1 {parent[pcode]} "
                           "was skipped (no skill); skipped")

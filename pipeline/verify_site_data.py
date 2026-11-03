@@ -27,17 +27,19 @@ Checks (exit 1 on any failure):
    issuance behind (the site disables Pixel mode for a stale raster); FAIL if
    it claims the current issuance but is missing PNG files for its own
    trimester list, or lists a trimester outside the expected set.
-6. Admin explorer (#explorer, export_explorer_site.py): its index shows the same
-   issuance and trimesters as forecast.json, every country file it lists exists,
-   and each country's admin-0 detrended percentile and r match forecast.json.
-   A missing explorer payload FAILS under --expect (the refresh job builds it) and
-   only WARNS otherwise (bundles published before the tab existed lack it).
 5. --check-signal (needs the dev blob SAS): the admin-0 HDX-signal table
    hdx_signal/signal_inputs_latest.parquet, rebuilt by the same refresh, shows
    the same issuance as forecast.json with all expected trimesters, and its
    mm amounts (forecast_mm, hist_mean_mm) are never negative — they are clipped
    at 0 in the builder, a negative one means an unclipped rebuild was uploaded.
 
+6. Admin explorer (#explorer, export_explorer_site.py): its index shows the same
+   issuance and trimesters as forecast.json, every country file it lists exists,
+   it covers every country forecast.json has a forecast for, and each country's
+   admin-0 detrended percentile and r match forecast.json — including WHICH
+   trimesters carry a current forecast (a dropped or a stale one both fail).
+   A missing explorer payload FAILS under --expect (the refresh job builds it) and
+   only WARNS otherwise (bundles published before the tab existed lack it).
 Run:  uv run python pipeline/verify_site_data.py            # Pages deploy: the downloaded bundle
       uv run python pipeline/verify_site_data.py --strict-raster   # after a raster refresh
       uv run python pipeline/verify_site_data.py --expect 2026-09 --strict-hnrp --strict-raster --check-signal
@@ -220,7 +222,13 @@ def main():
         have = {t["key"] for t in ex["trimesters"]}
         if have != want:
             fail(f"explorer trimesters {sorted(have)} != expected {sorted(want)}")
-        n_cmp = n_diff = n_missing = 0
+        n_cmp = n_diff = n_missing = n_pres = 0
+        ex_isos = {c["iso3"] for c in ex["countries"]}
+        fc_isos = {i for i, tris in fc["data"].items()
+                   if any(v.get("pct") is not None for v in tris.values())}
+        if fc_isos - ex_isos:
+            fail(f"explorer lacks {len(fc_isos - ex_isos)} countries forecast.json has a forecast "
+                 f"for (partial --iso3 build?): {sorted(fc_isos - ex_isos)[:10]}")
         for c in ex["countries"]:
             cp = ex_dir / f"{c['iso3']}.json.gz"
             if not cp.exists():
@@ -236,9 +244,21 @@ def main():
                         fail(f"explorer: {c['iso3']} admin-1 {a1} flagged with admin 2 but "
                              f"adm2/{a1}.json.gz is missing")
             u = cd["units"][cd["pcode"]]
-            for t, v in fc["data"].get(c["iso3"], {}).items():
+            fc_c = fc["data"].get(c["iso3"], {})
+            for t in want:
+                v = fc_c.get(t) or {}
                 ev = (u["tri"].get(t) or {}).get("dt") or {}
-                if v.get("pct") is None or ev.get("pct") is None:
+                if (v.get("pct") is None) != (ev.get("pct") is None):
+                    # one side shows a current forecast, the other not: a dropped forecast,
+                    # or a stale (last year's) one shown as this issuance's
+                    n_pres += 1
+                    if n_pres <= 5:
+                        fail(f"explorer {c['iso3']} {t}: current forecast "
+                             f"{'present' if ev.get('pct') is not None else 'missing'} in the "
+                             f"explorer but {'present' if v.get('pct') is not None else 'missing'} "
+                             f"in forecast.json")
+                    continue
+                if v.get("pct") is None:
                     continue
                 n_cmp += 1
                 # explorer rounds pct to 0.1 and r to 0.001; forecast.json to 0.01 / 0.001
@@ -251,6 +271,10 @@ def main():
             fail(f"... and {n_missing - 5} more missing explorer files")
         if n_diff > 5:
             fail(f"... and {n_diff - 5} more explorer/forecast.json mismatches")
+        if n_pres > 5:
+            fail(f"... and {n_pres - 5} more current-forecast presence mismatches")
+        if n_cmp == 0:
+            fail("explorer vs forecast.json: nothing compared — no admin-0 current forecasts")
         print(f"explorer vs forecast.json: {n_cmp} admin-0 values compared, {n_diff} mismatches")
 
     # 5. HDX-signal admin-0 table: same refresh, same blob inputs as forecast.json,
