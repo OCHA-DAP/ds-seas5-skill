@@ -40,6 +40,14 @@ Checks (exit 1 on any failure):
    trimesters carry a current forecast (a dropped or a stale one both fail).
    A missing explorer payload FAILS under --expect (the refresh job builds it) and
    only WARNS otherwise (bundles published before the tab existed lack it).
+SEAS5-only partial refresh (docs/data/pending_inseason.json, written by the refresh
+job's `site` step when it runs with inseason=skip, before ERA5's elapsed month has
+landed): the in-season trimesters (leads -2/-1) of THAT issuance are pending. Checks
+2, 4, 5 and 6 then expect the other trimesters to carry current data and the pending
+ones to carry NO data in any payload. The marker must name the bundle's own issuance;
+a marker left over from another issuance FAILS (it must never relax a later bundle).
+A full refresh deletes the marker.
+
 Run:  uv run python pipeline/verify_site_data.py            # Pages deploy: the downloaded bundle
       uv run python pipeline/verify_site_data.py --strict-raster   # after a raster refresh
       uv run python pipeline/verify_site_data.py --expect 2026-09 --strict-hnrp --strict-raster --check-signal
@@ -108,6 +116,20 @@ def main():
             fail(f"forecast.json is issuance {iy}-{im:02d} but this refresh is for "
                  f"{ey}-{em:02d} — the country skill stats on the blob were not updated")
 
+    want_full = expected_tris(im)
+    pending: set[str] = set()
+    marker_path = DOCS / "data" / "pending_inseason.json"
+    if marker_path.exists():
+        mk = json.loads(marker_path.read_text())
+        if mk.get("issued") != f"{iy}-{im:02d}":
+            fail(f"{marker_path.name} is for issuance {mk.get('issued')!r} but the bundle "
+                 f"is {iy}-{im:02d} — a SEAS5-only marker must never carry over")
+        else:
+            pending = {t for t in want_full if lead(t, im) < 0}
+            warn(f"SEAS5-only partial refresh: in-season trimesters {sorted(pending)} are "
+                 f"pending ({mk.get('reason', 'no reason given')}); they must carry no data")
+    want = want_full - pending
+
     idx = json.loads((DOCS / "data" / "forecasts" / "index.json").read_text())
     latest = idx["latest"]
     if (latest["year"], latest["month"]) != (iy, im):
@@ -125,13 +147,24 @@ def main():
 
     # 2. Trimester completeness — the in-season ones vanish exactly when the
     # refresh raced ERA5; that must block the release, not ship quietly.
-    want = expected_tris(im)
     for name, payload in [("forecast.json", fc)] + ([(hist_path.name, hist)] if hist else []):
         have = {t["key"] for t in payload["trimesters"]}
-        if have != want:
+        if not pending and have != want:
             fail(f"{name} trimesters {sorted(have)} != expected {sorted(want)} "
                  f"(missing: {sorted(want - have)}) — if in-season trimesters are missing, "
                  f"ERA5's elapsed month has not landed yet; rerun the refresh after it does")
+        if pending:
+            # Partial refresh: the pending trimesters may still be listed (exporters list
+            # by issue month) but must be empty; every other one must carry data.
+            with_data = {t for tris in payload["data"].values()
+                         for t, v in tris.items() if v.get("pct") is not None}
+            if not want <= have <= want_full:
+                fail(f"{name} trimesters {sorted(have)} outside {sorted(want)}..{sorted(want_full)}")
+            if with_data & pending:
+                fail(f"{name} has data for pending in-season trimesters "
+                     f"{sorted(with_data & pending)} — stale (last year's) values?")
+            if want - with_data:
+                fail(f"{name} has no data for {sorted(want - with_data)}")
 
     # 3. The two country exporters must agree numerically.
     if hist:
@@ -200,9 +233,11 @@ def main():
                 p = DOCS / "raster" / "data" / f"{t}_{v}.png"
                 if not p.exists():
                     fail(f"raster meta lists {t} but {p.name} is missing")
-        if args.strict_raster and r_tris != expected_tris(r_im):
-            missing = expected_tris(r_im) - r_tris
-            fail(f"raster missing trimesters {sorted(missing)} — stale in-season layers "
+        r_want = expected_tris(r_im) - (pending if (r_iy, r_im) == (iy, im) else set())
+        if args.strict_raster and r_tris - r_want:
+            fail(f"raster has layers for pending in-season trimesters {sorted(r_tris - r_want)}")
+        if args.strict_raster and r_want - r_tris:
+            fail(f"raster missing trimesters {sorted(r_want - r_tris)} — stale in-season layers "
                  f"were dropped; recompute the cube once ERA5's elapsed month is available")
     else:
         warn("no raster meta.json (pixel layer never built?)")
@@ -220,7 +255,7 @@ def main():
         if (e_iy, e_im) != (iy, im):
             fail(f"explorer index is issuance {e_iy}-{e_im:02d} != forecast.json {iy}-{im:02d}")
         have = {t["key"] for t in ex["trimesters"]}
-        if have != want:
+        if have != want and not (pending and want <= have <= want_full):
             fail(f"explorer trimesters {sorted(have)} != expected {sorted(want)}")
         n_cmp = n_diff = n_missing = n_pres = 0
         ex_isos = {c["iso3"] for c in ex["countries"]}
@@ -245,7 +280,7 @@ def main():
                              f"adm2/{a1}.json.gz is missing")
             u = cd["units"][cd["pcode"]]
             fc_c = fc["data"].get(c["iso3"], {})
-            for t in want:
+            for t in sorted(want_full):
                 v = fc_c.get(t) or {}
                 ev = (u["tri"].get(t) or {}).get("dt") or {}
                 if (v.get("pct") is None) != (ev.get("pct") is None):

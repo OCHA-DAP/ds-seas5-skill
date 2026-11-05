@@ -83,6 +83,8 @@ resources:
           default: "6"
         - name: enso        # run | skip — ENSO country slides (see README: still opt-in)
           default: skip
+        - name: inseason    # wait | skip — skip = SEAS5-only refresh before ERA5 lands
+          default: wait     # (in-season trimesters published as pending; dispatch.py)
 
       tasks:
         # --- preflight: upstream tables current? (fails + retries until they are) ---
@@ -99,6 +101,7 @@ resources:
               - "{{job.parameters.cma}}"
               - "{{job.parameters.workers}}"
               - "{{job.parameters.enso}}"
+              - "{{job.parameters.inseason}}"
           libraries: &libs
               - "{{job.parameters.issued}}"
               - "{{job.parameters.cma}}"
@@ -131,28 +134,32 @@ resources:
           spark_python_task:
             <<: *dispatch
             parameters: ["skill_adm0", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
-                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}",
+                         "{{job.parameters.inseason}}"]
           libraries: *libs
         - task_key: skill_adm1
           depends_on: [{ task_key: skill_adm0 }]
           spark_python_task:
             <<: *dispatch
             parameters: ["skill_adm1", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
-                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}",
+                         "{{job.parameters.inseason}}"]
           libraries: *libs
         - task_key: skill_adm2
           depends_on: [{ task_key: skill_adm1 }]
           spark_python_task:
             <<: *dispatch
             parameters: ["skill_adm2", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
-                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}",
+                         "{{job.parameters.inseason}}"]
           libraries: *libs
         - task_key: clim_signal
           depends_on: [{ task_key: skill_adm2 }]
           spark_python_task:
             <<: *dispatch
             parameters: ["clim_signal", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
-                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}",
+                         "{{job.parameters.inseason}}"]
           libraries: *libs
         # The pixel cube reads rasters from the prod blob, not the DB: independent of
         # the admin chain, so it runs alongside it.
@@ -161,7 +168,8 @@ resources:
           spark_python_task:
             <<: *dispatch
             parameters: ["raster", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
-                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}",
+                         "{{job.parameters.inseason}}"]
           libraries: *libs
 
         # --- site: exports -> vintage gate -> bundle upload ---
@@ -175,14 +183,16 @@ resources:
           spark_python_task:
             <<: *dispatch
             parameters: ["site", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
-                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}",
+                         "{{job.parameters.inseason}}"]
           libraries: *libs
         - task_key: enso_slides
           depends_on: [{ task_key: site }]
           spark_python_task:
             <<: *dispatch
             parameters: ["enso_slides", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
-                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}",
+                         "{{job.parameters.inseason}}"]
           libraries: *libs
         # Publishing a bundle that did not change is harmless (the deploy re-serves
         # the same data), so this runs whatever happened upstream.
@@ -192,7 +202,8 @@ resources:
           spark_python_task:
             <<: *dispatch
             parameters: ["publish", "{{job.parameters.issued}}", "{{job.parameters.cma}}",
-                         "{{job.parameters.workers}}", "{{job.parameters.enso}}"]
+                         "{{job.parameters.workers}}", "{{job.parameters.enso}}",
+                         "{{job.parameters.inseason}}"]
 
 targets:
   dev:

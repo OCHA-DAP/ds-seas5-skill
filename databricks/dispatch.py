@@ -31,6 +31,14 @@ Positional contract (mirrors `parameters:` in databricks.yml):
                    exists on the dev blob; needs the dsci secret CMA_SITE_PASSWORD)
   argv[4] workers  process count for the adm1/adm2 computes ("" = 6)
   argv[5] enso     run | skip — render + upload the ENSO country slides after `site`
+  argv[6] inseason wait | skip — "wait" (default, the scheduled run): `preflight` waits
+                   for ERA5's elapsed month too, and every trimester must update.
+                   "skip": a SEAS5-only refresh as soon as the issuance is in
+                   public.seas5 — `preflight` ignores ERA5, and `site` writes
+                   docs/data/pending_inseason.json so the vintage gate (here and in
+                   the Pages deploy) accepts the in-season trimesters (leads -2/-1)
+                   as pending: they are published with NO data, never last year's.
+                   The next "wait" run deletes the marker and fills them in.
 """
 
 import datetime as dt
@@ -119,9 +127,13 @@ ISSUED = _arg(2, dt.datetime.now(dt.timezone.utc).strftime("%Y-%m"))
 CMA = _arg(3, "auto")
 WORKERS = _arg(4, "6")
 ENSO = _arg(5, "skip")
+INSEASON = _arg(6, "wait")
 
 if not re.fullmatch(r"\d{4}-\d{2}", ISSUED):
     raise SystemExit(f"issued must be YYYY-MM, got {ISSUED!r}")
+if INSEASON not in ("wait", "skip"):
+    raise SystemExit(f"inseason must be wait or skip, got {INSEASON!r}")
+PENDING_MARKER = ROOT / "docs" / "data" / "pending_inseason.json"
 ISSUED_MONTH = int(ISSUED[5:])
 
 
@@ -147,7 +159,11 @@ def step_preflight() -> None:
     if seas5_max < issued:
         missing.append(f"SEAS5 issuance {ISSUED} not in public.seas5 yet")
     if era5_max < era5_needed:
-        missing.append(f"ERA5 {era5_needed:%Y-%m} not in public.era5 yet")
+        if INSEASON == "skip":
+            print(f"preflight: inseason=skip — not waiting for ERA5 {era5_needed:%Y-%m}; "
+                  f"the in-season trimesters will be published as pending")
+        else:
+            missing.append(f"ERA5 {era5_needed:%Y-%m} not in public.era5 yet")
     if missing:
         raise SystemExit("preflight: " + "; ".join(missing) + " — the task retries in 30 min")
     print("preflight: upstream tables are current for", ISSUED)
@@ -213,6 +229,18 @@ def step_site() -> None:
     # present, history issuances are frozen, and the CMA payloads carry over when
     # the mirror is not refreshed this run.
     run("pipeline/sync_site_data.py", "download", "--if-exists")
+    # SEAS5-only marker (see the inseason argument): written for a skip run, and
+    # removed by every full run so a previous partial refresh never relaxes the gate.
+    if INSEASON == "skip":
+        PENDING_MARKER.parent.mkdir(parents=True, exist_ok=True)
+        PENDING_MARKER.write_text(json.dumps({
+            "issued": ISSUED,
+            "reason": "SEAS5-only refresh: ERA5's elapsed month was not in public.era5 yet",
+            "written_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
+        }))
+        print(f"site: wrote {PENDING_MARKER.relative_to(ROOT)} (inseason=skip)", flush=True)
+    else:
+        PENDING_MARKER.unlink(missing_ok=True)
     run("pipeline/export_static_site.py")
     run("pipeline/export_history_site.py")
     for level in ("1", "2", "3", "low", "ipc", "fews"):
