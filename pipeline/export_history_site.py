@@ -114,11 +114,15 @@ def main() -> None:
     years = sorted(met["issued_year"].unique().tolist())
     months_by_year: dict[str, list[int]] = {}
     n_written = n_frozen = 0
+    # The newest issuance is never frozen: a SEAS5-only refresh (refresh job with
+    # inseason=skip) publishes it without its in-season trimesters, and the full
+    # refresh after ERA5 lands must be able to rewrite it with all of them.
+    newest = max(zip(met["issued_year"].astype(int), met["issued_month"].astype(int)))
     for (iy, im), grp in met.groupby(["issued_year", "issued_month"]):
         # Every issuance goes in the index regardless of whether we (re)write its file.
         months_by_year.setdefault(str(int(iy)), []).append(int(im))
         path = OUT / f"{int(iy)}-{int(im):02d}.json"
-        if path.exists() and not args.rebuild:
+        if path.exists() and not args.rebuild and (int(iy), int(im)) != newest:
             n_frozen += 1  # freeze: keep the existing file, don't rewrite
             continue
         valid_tris = sorted(grp["trimester"].unique(),
