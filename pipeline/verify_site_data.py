@@ -16,10 +16,12 @@ Checks (exit 1 on any failure):
    its own issuance honestly), FAIL if it is further behind, ahead, or the
    payloads disagree with each other. --strict-hnrp makes any lag a failure
    (use right after refreshing the adm1/adm2 stats).
-2. The latest issuance carries ALL expected trimesters (leads -2..4, seven of
-   them) in BOTH forecast.json and forecasts/<latest>.json — a missing
-   in-season trimester means the refresh ran before ERA5's elapsed month
-   landed; rerun after ERA5 arrives instead of shipping without them.
+2. The latest issuance carries ALL expected trimesters (leads -3..4, eight of
+   them: the fully observed one, two in season, five forecast) in BOTH
+   forecast.json and forecasts/<latest>.json — a missing observed or in-season
+   trimester means the refresh ran before ERA5's elapsed month landed; rerun
+   after ERA5 arrives instead of shipping without them. Only the observed
+   trimester (lead -3) is flagged `obs`, and it carries no skill r.
 3. forecast.json and forecasts/<latest>.json agree numerically (same pct for
    every country x trimester) — they are built by different exporters from
    the same blob and must never diverge.
@@ -42,7 +44,8 @@ Checks (exit 1 on any failure):
    only WARNS otherwise (bundles published before the tab existed lack it).
 SEAS5-only partial refresh (docs/data/pending_inseason.json, written by the refresh
 job's `site` step when it runs with inseason=skip, before ERA5's elapsed month has
-landed): the in-season trimesters (leads -2/-1) of THAT issuance are pending. Checks
+landed): the observed and in-season trimesters (leads -3..-1, all needing that ERA5
+month) of THAT issuance are pending. Checks
 2, 4, 5 and 6 then expect the other trimesters to carry current data and the pending
 ones to carry NO data in any payload. The marker must name the bundle's own issuance;
 a marker left over from another issuance FAILS (it must never relax a later bundle).
@@ -82,12 +85,17 @@ def warn(msg):
 
 
 def lead(tri, im):
+    """Signed lead, as src.skill.trimester_lead: 0..6 ahead, else negative (-3 = the fully
+    observed trimester, -2/-1 = in season)."""
     o = (TRI_START[tri] - im) % 12
-    return o - 12 if o >= 10 else o
+    return o if o <= 6 else o - 12
+
+
+OBSERVED_LEAD = -3  # src.constants.OBSERVED_LEAD
 
 
 def expected_tris(im):
-    return {t for t in TRI_START if -2 <= lead(t, im) <= 4}
+    return {t for t in TRI_START if OBSERVED_LEAD <= lead(t, im) <= 4}
 
 
 def main():
@@ -165,6 +173,17 @@ def main():
                      f"{sorted(with_data & pending)} — stale (last year's) values?")
             if want - with_data:
                 fail(f"{name} has no data for {sorted(want - with_data)}")
+        # The fully observed trimester is ERA5's value: flagged obs, no skill r. Any other
+        # trimester flagged obs (or the observed one carrying an r) is a mislabelled row.
+        obs_t = {t for t in want_full if lead(t, im) == OBSERVED_LEAD}
+        for iso3, tris in payload["data"].items():
+            for t, v in tris.items():
+                if v.get("pct") is None:
+                    continue
+                if (t in obs_t) != bool(v.get("obs")) or (t in obs_t and v.get("r") is not None):
+                    fail(f"{name} {iso3} {t}: obs={v.get('obs')!r} r={v.get('r')!r} — only the "
+                         f"fully observed trimester {sorted(obs_t)} is obs, and it has no r")
+                    break
 
     # 3. The two country exporters must agree numerically.
     if hist:

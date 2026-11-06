@@ -4,6 +4,12 @@ PROJECT_PREFIX = "ds-seas5-skill"
 
 MIN_YEARS: int = 10
 
+# Signed lead of the fully observed trimester: the one that ended the month before the
+# issuance (ASO for a November issuance). It has no forecast; its value is ERA5's, ranked
+# against the earlier seasons (src.skill.observed_trimester_stats). Leads -2/-1 are the
+# in-season (mixed) trimesters, 0-4 the fully forecast ones.
+OBSERVED_LEAD: int = -3
+
 # First year of the SEAS5 record (reforecast/hindcast start). Used to populate the
 # historical issued-year selector; the record is continuous from here to the present.
 SEAS5_FORECAST_START_YEAR: int = 1981
