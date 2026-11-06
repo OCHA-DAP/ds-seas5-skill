@@ -1723,7 +1723,7 @@ def build_fewsnet_view() -> None:
 
         def _mm(r):
             days = TRIMESTER_DAYS[r["trimester"]]
-            fc_log, nrm_log = r["current_forecast_mean"], r["era5_mean"]
+            fc_log, nrm_log = _shown_log(r), r["era5_mean"]
             fc = (max(0, round(math.expm1(float(fc_log)) * days))
                   if pd.notna(fc_log) else None)
             nrm = (max(0, round(math.expm1(float(nrm_log)) * days))
@@ -1949,6 +1949,17 @@ def build_fewsnet_view() -> None:
           f"{len(no_fews)} on plan units)")
     print(f"Wrote {out} ({out.stat().st_size / 1024:.0f} KB) and {gout.name} "
           f"({gout.stat().st_size / 1e6:.1f} MB)")
+
+
+def _shown_log(r) -> float:
+    """The log1p value an mm display pairs with the normal. A forecast shows its
+    (normalized, detrended) value; the fully observed trimester shows its ACTUAL ERA5 season
+    (observed_raw_mean, not detrended), so "observed N mm" is the real total. The normal
+    (era5_mean) is the earlier seasons' mean log, which detrending leaves unchanged, so
+    both pairings are like-for-like."""
+    if bool(r.get("is_observed", False)) and pd.notna(r.get("observed_raw_mean")):
+        return r["observed_raw_mean"]
+    return r["current_forecast_mean"]
 
 
 def main() -> None:
@@ -2368,7 +2379,7 @@ def main() -> None:
     def _mm_totals(r) -> tuple[int | None, int | None]:
         """(forecast, climatological normal) seasonal totals, whole mm."""
         days = TRIMESTER_DAYS[r["trimester"]]
-        fc_log, nrm_log = r["current_forecast_mean"], r["era5_mean"]
+        fc_log, nrm_log = _shown_log(r), r["era5_mean"]
         # Detrended log values can sit below 0 in dry combos: clip like src/skill.py.
         fc = max(0, round(math.expm1(float(fc_log)) * days)) if pd.notna(fc_log) else None
         nrm = max(0, round(math.expm1(float(nrm_log)) * days)) if pd.notna(nrm_log) else None

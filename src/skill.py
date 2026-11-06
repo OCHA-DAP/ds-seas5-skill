@@ -229,13 +229,15 @@ def observed_trimester_stats(df_e_raw: pd.DataFrame, detrend: bool = False) -> d
     `df_e_raw` is aggregate_era5_trimester's output (complete seasons only, mm/day). The
     current season is the latest one there; when ERA5's last month has not landed yet it
     is last year's, and the exporters drop it as stale like any other old vintage.
-    `series` is every season's log1p value (detrended with `detrend`) for the paired rows.
+    `series` is every season's log1p value (detrended with `detrend`) for the paired rows;
+    `observed_raw_mean` is the current season's log1p value NOT detrended, for displays of
+    the season's actual total (the detrended value is a rank-space quantity).
     """
     out: dict = dict(
         n_years=None, era5_mean=None, era5_std=None, lower_tercile_mm=None,
         current_forecast_year=None, current_forecast_mean=None, prob_lower_tercile=None,
         forecast_rp=None, flood_rp=None, forecast_percentile=None,
-        series=pd.Series(dtype=float),
+        series=pd.Series(dtype=float), observed_raw_mean=None,
     )
     if df_e_raw.empty:
         return out
@@ -245,6 +247,7 @@ def observed_trimester_stats(df_e_raw: pd.DataFrame, detrend: bool = False) -> d
     cur_year = int(yrs[-1])
     hist_mask = yrs < cur_year
     out["current_forecast_year"] = cur_year
+    out["observed_raw_mean"] = float(vals[-1])
     if hist_mask.sum() < MIN_YEARS:
         out["current_forecast_mean"] = float(vals[-1])
         out["series"] = pd.Series(vals, index=yrs)
@@ -408,6 +411,7 @@ def run_all_combinations(
                     "prob_rp": None,
                     "forecast_percentile": obs["forecast_percentile"],
                     "is_observed": True,
+                    "observed_raw_mean": obs["observed_raw_mean"],
                 })
                 if progress is not None:
                     progress.update(1)
@@ -581,6 +585,7 @@ def run_all_combinations(
                 "prob_rp": prob_rp,
                 "forecast_percentile": forecast_percentile,
                 "is_observed": False,
+                "observed_raw_mean": None,
             })
 
             if progress is not None:

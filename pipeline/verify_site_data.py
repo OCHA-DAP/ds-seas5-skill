@@ -236,6 +236,13 @@ def main():
             if bad:
                 fail(f"{hp.name}: {len(bad)} unit-trimester(s) mislabelled obs / with an r on "
                      f"the observed trimester / carrying data while pending, e.g. {bad[:3]}")
+            # Listed is not enough: every expected (non-pending) trimester must carry data in
+            # some unit — e.g. admin skill tables computed without the observed rows would
+            # list the observed trimester (exporters list by issue month) but leave it empty.
+            with_data = {t for row in h.get("rows", []) for t, v in (row.get("tris") or {}).items()
+                         if v.get("pct") is not None}
+            if h.get("rows") and want - with_data:
+                fail(f"{hp.name} has no data for {sorted(want - with_data)} in any unit")
             continue
         msg = (f"{hp.name} is issuance {h_iy}-{h_im:02d}, country data is {iy}-{im:02d} "
                f"({lag:+d} month{'s' if abs(lag) != 1 else ''})")
