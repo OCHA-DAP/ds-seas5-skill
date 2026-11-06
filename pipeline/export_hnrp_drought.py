@@ -126,8 +126,8 @@ sys.path.insert(0, str(HERE))
 from src.constants import PROJECT_PREFIX, TRIMESTER_DAYS, TRIMESTERS  # noqa: E402
 from src.skill import trimester_lead  # noqa: E402
 from export_static_site import (  # noqa: E402
-    THRESHOLDS, _min_signed, _tri_label, _tri_valid, compute_rainy_set,
-    issued_year_for_season,
+    SITE_MIN_LEAD, THRESHOLDS, _min_signed, _tri_label, _tri_valid, compute_rainy_set,
+    issued_year_for_season, observed_mask,
 )
 
 SKILL_BLOB = f"{PROJECT_PREFIX}/processed/skill_stats_detrended_adm1.parquet"
@@ -1711,7 +1711,15 @@ def build_fewsnet_view() -> None:
         sub = skill1[skill1["pcode"].isin(set(p1["pcode"]))
                      & (skill1["issued_month"] == issued_month)].copy()
         sub = sub[sub.apply(lambda r: _tri_valid(TRIMESTERS[r["trimester"]],
-                                                 issued_month), axis=1)]
+                                                 issued_month, min_lead=SITE_MIN_LEAD),
+                            axis=1)]
+        # Same vintage rule as the main export: a trimester still carrying LAST
+        # year's value at this issued month (the observed or an in-season one,
+        # when ERA5's elapsed month has not landed) is dropped, not shown as current.
+        issued_year = int(data[1]["issued_year"])
+        sub = sub[[pd.isna(cy) or issued_year_for_season(int(cy), issued_month, t) == issued_year
+                   for cy, t in zip(sub["current_forecast_year"], sub["trimester"])]]
+        sub_obs = observed_mask(sub)
 
         def _mm(r):
             days = TRIMESTER_DAYS[r["trimester"]]
@@ -1732,9 +1740,10 @@ def build_fewsnet_view() -> None:
             iso3, name = names1.loc[pcode, "iso3"], names1.loc[pcode, "name"]
             row = {"name": name}
             best = None
-            for _, r in g.iterrows():
+            for i, r in g.iterrows():
                 pct, pr = r["forecast_percentile"], r["pearson_r"]
-                if pd.isna(pct) or pd.isna(pr):
+                # the worst-drought slot is a FORECAST signal: never the observed season
+                if sub_obs.loc[i] or pd.isna(pct) or pd.isna(pr):
                     continue
                 if pr < THRESHOLDS["r_mod"] or pct >= 50:
                     continue
@@ -1756,7 +1765,7 @@ def build_fewsnet_view() -> None:
                 best["tri_label"] = _tri_label(TRIMESTERS[best["tri"]])
                 row |= best
             tris = {}
-            for _, r in g.iterrows():
+            for i, r in g.iterrows():
                 pct, pr = r["forecast_percentile"], r["pearson_r"]
                 if pd.isna(pct):
                     continue
@@ -1771,6 +1780,11 @@ def build_fewsnet_view() -> None:
                     "rainy": (pcode, r["trimester"]) in rainy_set,
                     "fc": fc_mm, "nrm": nrm_mm,
                 }
+                if sub_obs.loc[i]:
+                    tris[r["trimester"]] |= {"obs": True, "r": None}
+            # the observed season shows only where SEAS5 covers the unit
+            if all(v.get("obs") for v in tris.values()):
+                tris = {}
             if tris:
                 row["tris"] = tris
             fb = next((r for _, r in g.iterrows()
@@ -2287,13 +2301,17 @@ def main() -> None:
     if skill.empty:
         sys.exit("No overlap between ADM1 skill pcodes and HNRP PiN pcodes")
 
-    # Latest issuance, same logic as the ADM0 static export.
+    # Latest issuance, same logic as the ADM0 static export: read off the FORECAST rows
+    # only (an observed row needs nothing but ERA5, so it could announce an issuance
+    # whose SEAS5 run is not in yet).
     iy = skill[skill["current_forecast_year"].notna()].copy()
     iy["_iy"] = [
         issued_year_for_season(int(cy), im, t)
         for cy, im, t in zip(iy["current_forecast_year"], iy["issued_month"], iy["trimester"])
     ]
-    max_iy_by_month = iy.groupby("issued_month")["_iy"].max().astype(int).to_dict()
+    iy_obs = observed_mask(iy)
+    max_iy_by_month = (iy[~iy_obs].groupby("issued_month")["_iy"].max()
+                       .astype(int).to_dict())
     global_max_iy = max(max_iy_by_month.values())
     issued_month = max(m for m, y in max_iy_by_month.items() if y == global_max_iy)
     issued_label = f"{calendar.month_name[issued_month]} {global_max_iy}"
@@ -2363,13 +2381,16 @@ def main() -> None:
     # forecast, and month-only selection mixes vintages (Uganda, Aug 2026:
     # 2025's JJA/JAS rows rendered next to 2026's ASO..DJF).
     sub = iy[(iy["issued_month"] == issued_month) & (iy["_iy"] == global_max_iy)].copy()
-    sub = sub[sub.apply(lambda r: _tri_valid(TRIMESTERS[r["trimester"]], issued_month), axis=1)]
+    sub = sub[sub.apply(lambda r: _tri_valid(TRIMESTERS[r["trimester"]], issued_month,
+                                             min_lead=SITE_MIN_LEAD), axis=1)]
+    sub_obs = observed_mask(sub)
     records = []
     for pcode, g in sub.groupby("pcode"):
         best = None
-        for _, r in g.iterrows():
+        for i, r in g.iterrows():
             pct, pr = r["forecast_percentile"], r["pearson_r"]
-            if pd.isna(pct) or pd.isna(pr):
+            # the worst-drought slot is a FORECAST signal: never the observed season
+            if sub_obs.loc[i] or pd.isna(pct) or pd.isna(pr):
                 continue
             if pr < THRESHOLDS["r_mod"] or pct >= 50:
                 continue
@@ -2396,9 +2417,11 @@ def main() -> None:
             best["pct"] = round(best["pct"], 1)
             best["r"] = round(best["r"], 3)
             row |= best
-        # Every valid trimester's forecast, for the explicit valid-season selector.
+        # Every valid trimester's forecast, for the explicit valid-season selector. The
+        # fully observed trimester (lead -3) is ERA5's season: "obs": true, no skill r,
+        # its fc is the observed total.
         tris = {}
-        for _, r in g.iterrows():
+        for i, r in g.iterrows():
             pct, pr = r["forecast_percentile"], r["pearson_r"]
             if pd.isna(pct):
                 continue
@@ -2413,6 +2436,12 @@ def main() -> None:
                 "fc": fc_mm,
                 "nrm": nrm_mm,
             }
+            if sub_obs.loc[i]:
+                tris[r["trimester"]] |= {"obs": True, "r": None}
+        # The observed season shows only where SEAS5 covers the unit: a unit with ERA5
+        # but no forecast in any trimester stays "not monitored", observed one included.
+        if all(v.get("obs") for v in tris.values()):
+            tris = {}
         if tris:
             row["tris"] = tris
         # Fallback display slot for units with no qualifying drought signal: the default
@@ -2528,7 +2557,8 @@ def main() -> None:
                   f"{sorted(no_geo['iso3'] + ':' + no_geo['pcode'])}")
 
     valid_tris = sorted(
-        [t for t in TRIMESTERS if _tri_valid(TRIMESTERS[t], issued_month)],
+        [t for t in TRIMESTERS if _tri_valid(TRIMESTERS[t], issued_month,
+                                             min_lead=SITE_MIN_LEAD)],
         key=lambda t: _min_signed(TRIMESTERS[t], issued_month),
     )
     # Per-sector PiN/targeted travel the pipeline as wide numeric columns; fold them
