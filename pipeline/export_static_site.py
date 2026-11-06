@@ -96,6 +96,22 @@ def observed_mask(df: pd.DataFrame) -> pd.Series:
     return df["is_observed"].fillna(False).astype(bool)
 
 
+def blank_observed_without_forecast(data: dict[str, dict]) -> int:
+    """Empty the observed trimester of units SEAS5 does not cover in this issuance (no
+    non-observed trimester with a value): ERA5 alone would otherwise give them one filled
+    trimester among empty ones. Their record keeps the shape of the other empty ones.
+    `data` is {unit: {trimester: record}}; returns how many records were emptied."""
+    n = 0
+    for tris in data.values():
+        if any(v.get("pct") is not None and not v.get("obs") for v in tris.values()):
+            continue
+        for t, v in list(tris.items()):
+            if v.get("obs"):
+                tris[t] = {"pct": None, "r": None, "rp": None, "rainy": v.get("rainy", False)}
+                n += 1
+    return n
+
+
 def _min_signed(months: list[int], im: int) -> int:
     return min(o if (o := (m - im) % 12) <= 6 else o - 12 for m in months)
 
@@ -342,6 +358,10 @@ def main() -> None:
             if is_obs.loc[row.name]:
                 rec["obs"] = True
             data.setdefault(iso3, {})[tri] = rec
+
+    n_blank = blank_observed_without_forecast(data)
+    if n_blank:
+        print(f"Observed trimester left empty for {n_blank} countries without a SEAS5 forecast")
 
     forecast = {
         "issued_label": issued_label,
