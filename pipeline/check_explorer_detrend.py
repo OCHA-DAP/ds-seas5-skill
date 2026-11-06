@@ -1,8 +1,9 @@
 """Check the Admin explorer's in-browser detrending against the pipeline's.
 
 The explorer ships only the RAW yearly pairs (pipeline/export_explorer_site.py) and
-re-derives the detrended series with `detrend` in docs/explorer_math.js. This runs that
-exact JS under Node on the exported files and compares it with
+re-derives the detrended series with `detrend` in docs/explorer_math.js (`detrendObserved`
+for the fully observed trimester, flagged `obs` in index.json: ERA5 only, fitted to the
+earlier seasons). This runs that exact JS under Node on the exported files and compares it with
 paired_yearly_detrended{,_adm1,_adm2}.parquet for the same units, issue month and
 trimesters. Run it after changing either side of the detrending (src/skill.py or
 docs/explorer_math.js); it is a developer check, not part of the monthly job.
@@ -39,15 +40,17 @@ SUFFIX = {0: "", 1: "_adm1", 2: "_adm2"}
 
 NODE_HARNESS = r"""
 // node -e <script> a b c  ->  process.argv = [node, a, b, c]
-const [mathJs, unitsJson, scaleArg] = process.argv.slice(1);
+const [mathJs, unitsJson, scaleArg, obsArg] = process.argv.slice(1);
 const M = require(mathJs);
 const units = JSON.parse(require("fs").readFileSync(unitsJson, "utf8"));
 const scale = Number(scaleArg);
+const observed = new Set(JSON.parse(obsArg));
 const out = {};
 for (const [pcode, u] of Object.entries(units)) {
   out[pcode] = {};
   for (const [tri, t] of Object.entries(u.tri)) {
-    const d = M.detrend(t.y0, M.decode(t.fc, scale), M.decode(t.obs, scale));
+    const fn = observed.has(tri) ? M.detrendObserved : M.detrend;
+    const d = fn(t.y0, M.decode(t.fc, scale), M.decode(t.obs, scale));
     out[pcode][tri] = { y0: t.y0, fc: d.fc, obs: d.obs };
   }
 }
@@ -77,6 +80,8 @@ def main() -> None:
 
     index = json.loads((EXPLORER / "index.json").read_text())
     im, scale = index["issued_month"], index["scale"]
+    observed = [t["key"] for t in index["trimesters"] if t.get("obs")]
+    print(f"issue month {im}; observed trimester(s) {observed or 'none'}")
     units = _units_by_level(args.max_units)
     worst = 0.0
     bad = 0
@@ -86,7 +91,8 @@ def main() -> None:
             continue
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
             json.dump(units[level], fh)
-        js = subprocess.run(["node", "-e", NODE_HARNESS, str(MATH_JS), fh.name, str(scale)],
+        js = subprocess.run(["node", "-e", NODE_HARNESS, str(MATH_JS), fh.name, str(scale),
+                             json.dumps(observed)],
                             capture_output=True, text=True)
         Path(fh.name).unlink()
         if js.returncode:
@@ -100,6 +106,7 @@ def main() -> None:
         ).to_pandas()
         exp = {k: g.set_index("season_year") for k, g in tbl.groupby(["pcode", "trimester"])}
         n = 0
+        n_obs = 0
         lvl_worst = 0.0
         for pcode, tris in got.items():
             for tri, d in tris.items():
@@ -120,13 +127,15 @@ def main() -> None:
                         diff = abs(v - e)
                         lvl_worst = max(lvl_worst, diff)
                         n += 1
+                        n_obs += tri in observed
                         if diff > args.tol:
                             bad += 1
                             if bad <= 20:
                                 print(f"  FAIL {pcode} {tri} {key} {yr}: js {v:.5f} vs "
                                       f"pipeline {e:.5f}")
         worst = max(worst, lvl_worst)
-        print(f"level {level}: {len(got)} units, {n:,} values, max |diff| {lvl_worst:.2e}")
+        print(f"level {level}: {len(got)} units, {n:,} values ({n_obs:,} of the observed "
+              f"trimester), max |diff| {lvl_worst:.2e}")
     print(f"{'FAILED' if bad else 'OK'}: {bad} mismatches, worst |diff| {worst:.2e} "
           f"(tol {args.tol})")
     sys.exit(1 if bad else 0)

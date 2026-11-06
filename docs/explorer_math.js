@@ -1,6 +1,7 @@
 // Pure maths for the Admin explorer tab (explorer.js). No DOM: it also runs under
-// Node for pipeline/check_explorer_detrend.py, which checks `detrend` against the
-// pipeline's own detrended series (paired_yearly_detrended*.parquet).
+// Node for pipeline/check_explorer_detrend.py, which checks `detrend` and
+// `detrendObserved` against the pipeline's own detrended series
+// (paired_yearly_detrended*.parquet).
 (function (root) {
   "use strict";
 
@@ -46,6 +47,26 @@
     };
   }
 
+  // The fully observed trimester (lead -3: ERA5 only, no forecast), as
+  // src/skill.py observed_trimester_stats detrends it: the newest season with a value
+  // is out of sample; the line is fitted to the EARLIER seasons and every season loses
+  // it and gets the earlier seasons' mean back. Fewer than MIN_YEARS earlier seasons:
+  // left as is. `fc` is all null for this trimester and is passed through.
+  function detrendObserved(y0, fc, obs) {
+    let last = -1;
+    for (let i = 0; i < obs.length; i++) if (obs[i] != null) last = i;
+    const yrs = [], o = [];
+    for (let i = 0; i < last; i++) {
+      if (obs[i] != null) { yrs.push(y0 + i); o.push(obs[i]); }
+    }
+    if (last < 0 || yrs.length < MIN_YEARS) return { fc: fc.slice(), obs: obs.slice() };
+    const fo = linfit(yrs, o);
+    return {
+      fc: fc.slice(),
+      obs: obs.map((v, i) => (v == null ? null : v - (fo.a * (y0 + i) + fo.b) + fo.meanY)),
+    };
+  }
+
   function pearson(xs, ys) {
     const n = xs.length;
     if (n < 3) return null;
@@ -68,7 +89,7 @@
     return s[lo] + (h - lo) * (s[hi] - s[lo]);
   }
 
-  const api = { MIN_YEARS, decode, linfit, detrend, pearson, quantile };
+  const api = { MIN_YEARS, decode, linfit, detrend, detrendObserved, pearson, quantile };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.ExplorerMath = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -276,6 +276,10 @@ def main():
         have = {t["key"] for t in ex["trimesters"]}
         if have != want and not (pending and want <= have <= want_full):
             fail(f"explorer trimesters {sorted(have)} != expected {sorted(want)}")
+        ex_obs = {t["key"] for t in ex["trimesters"] if t.get("obs")}
+        want_obs = {t for t in have if lead(t, im) == OBSERVED_LEAD}
+        if ex_obs != want_obs:
+            fail(f"explorer index flags {sorted(ex_obs)} as observed, expected {sorted(want_obs)}")
         n_cmp = n_diff = n_missing = n_pres = 0
         ex_isos = {c["iso3"] for c in ex["countries"]}
         fc_isos = {i for i, tris in fc["data"].items()
@@ -315,8 +319,11 @@ def main():
                 if v.get("pct") is None:
                     continue
                 n_cmp += 1
-                # explorer rounds pct to 0.1 and r to 0.001; forecast.json to 0.01 / 0.001
-                if abs(v["pct"] - ev["pct"]) > 0.06 or abs(v["r"] - ev["r"]) > 0.0011:
+                # explorer rounds pct to 0.1 and r to 0.001; forecast.json to 0.01 / 0.001.
+                # The observed trimester has no r on either side (None == None).
+                r_off = ((v.get("r") is None) != (ev.get("r") is None)
+                         or (v.get("r") is not None and abs(v["r"] - ev["r"]) > 0.0011))
+                if abs(v["pct"] - ev["pct"]) > 0.06 or r_off:
                     n_diff += 1
                     if n_diff <= 5:
                         fail(f"explorer {c['iso3']} {t}: pct {ev['pct']} r {ev['r']} vs "
