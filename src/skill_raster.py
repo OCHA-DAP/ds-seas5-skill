@@ -252,6 +252,44 @@ def forecast_metrics_grid(fc_norm: xr.DataArray, obs: xr.DataArray, r: xr.DataAr
     }
 
 
+def observed_metrics_grid(obs_l: xr.DataArray, detrend: bool = False) -> dict | None:
+    """Grid version of src.skill.observed_trimester_stats (the OBSERVED_LEAD trimester).
+
+    `obs_l` is the log1p ERA5 trimester series (season_year, y, x), complete seasons only.
+    The latest season is ranked per pixel against the EARLIER seasons (percentile = share
+    of earlier seasons <= it, Weibull RPs), with `detrend` against a line fitted to the
+    earlier seasons (the current one out of sample). Climatology (era5_mean/std, lower
+    tercile) is the earlier seasons', so prob_lower_tercile is 1.0 or 0.0. No skill:
+    pearson_r / rmse / sigma stay NaN. None when fewer than MIN_YEARS earlier seasons.
+    """
+    yrs = obs_l["season_year"].to_numpy()
+    cur_year = int(yrs.max())
+    hist_years = yrs[yrs < cur_year]
+    if len(hist_years) < MIN_YEARS:
+        return None
+    if detrend:
+        obs_l = detrend_grid(obs_l, hist_years)
+    current = obs_l.sel(season_year=cur_year)
+    hist = obs_l.sel(season_year=hist_years)
+    n = len(hist_years)
+    t_log = hist.quantile(1 / 3, dim="season_year").drop_vars("quantile")
+    valid = current.notnull() & hist.notnull().all("season_year")
+    nan = xr.full_like(current, np.nan, dtype="float64")
+    return {
+        "n_years": int(n),
+        "current_forecast_year": cur_year,
+        "current_forecast_mean": current,
+        "era5_mean": hist.mean("season_year"),
+        "era5_std": hist.std("season_year", ddof=1),
+        "lower_tercile_mm": np.expm1(t_log),
+        "forecast_percentile": (100.0 * (hist <= current).sum("season_year") / n).where(valid),
+        "forecast_rp": _empirical_rp_grid(current, hist, higher_is_more_extreme=False).where(valid),
+        "flood_rp": _empirical_rp_grid(current, hist, higher_is_more_extreme=True).where(valid),
+        "prob_lower_tercile": (current <= t_log).astype("float64").where(valid),
+        "pearson_r": nan, "rmse": nan, "sigma": nan,
+    }
+
+
 # ── Rainy-season mask (per pixel) ────────────────────────────────────────────────────
 def monthly_clim_grid(da_era5: xr.DataArray) -> xr.DataArray:
     """ERA5 -> (month, y, x) climatological monthly mean precipitation."""
