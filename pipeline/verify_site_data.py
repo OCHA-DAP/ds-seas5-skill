@@ -220,6 +220,21 @@ def main():
         hnrp_vintages[hp.name] = (h_iy, h_im)
         lag = (iy * 12 + im) - (h_iy * 12 + h_im)
         if lag == 0:
+            # Same issuance: the same trimester set as forecast.json, only the fully
+            # observed trimester flagged obs (and with no r), nothing in pending ones.
+            h_tris = set(h.get("trimesters") or [])
+            if not want <= h_tris <= want_full:
+                fail(f"{hp.name} trimesters {sorted(h_tris)} != expected {sorted(want_full)}")
+            obs_t = {t for t in want_full if lead(t, im) == OBSERVED_LEAD}
+            bad = sorted({
+                (row.get("iso3") or row.get("country"), t)
+                for row in h.get("rows", []) for t, v in (row.get("tris") or {}).items()
+                if v.get("pct") is not None
+                and ((t in obs_t) != bool(v.get("obs"))
+                     or (t in obs_t and v.get("r") is not None) or t in pending)})
+            if bad:
+                fail(f"{hp.name}: {len(bad)} unit-trimester(s) mislabelled obs / with an r on "
+                     f"the observed trimester / carrying data while pending, e.g. {bad[:3]}")
             continue
         msg = (f"{hp.name} is issuance {h_iy}-{h_im:02d}, country data is {iy}-{im:02d} "
                f"({lag:+d} month{'s' if abs(lag) != 1 else ''})")

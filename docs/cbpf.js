@@ -74,11 +74,14 @@ let T = { sev_rp: 3, vsev_rp: 10, r_mod: 0.3, r_high: 0.5 };
 function classify(rec, rainyOn) {
   if (!rec) return "unmonitored";
   if (!rainyOn && !rec.rainy) return "off_season";
+  // The fully observed trimester (rec.obs: ERA5's season, no forecast) is certain:
+  // classified at full skill, with no r to test.
+  const obs = !!rec.obs && rec.pct != null;
   // Missing r/pct means the country isn't effectively monitored for this slot.
-  if (rec.r == null || rec.pct == null) return "unmonitored";
-  if (rec.r < T.r_mod) return "low_skill";
+  if (!obs && (rec.r == null || rec.pct == null)) return "unmonitored";
+  if (!obs && rec.r < T.r_mod) return "low_skill";
   const vsev_m = 100 / T.vsev_rp, sev_m = 100 / T.sev_rp;
-  const pct = rec.pct, r = rec.r;
+  const pct = rec.pct, r = obs ? 1 : rec.r;
   const vsev = pct <= vsev_m || pct >= 100 - vsev_m;
   const sev = (pct > vsev_m && pct <= sev_m) || (pct >= 100 - sev_m && pct < 100 - vsev_m);
   const drought = pct < 50;
@@ -230,10 +233,12 @@ Promise.all([
   const updateTriLabel = () => {
     const t = fc.trimesters[+triSlider.value];
     curTriKey = t.key;
-    const inSeason = triLead(t.key) < 0;
+    const lead = triLead(t.key);
+    const inSeason = lead < 0;  // lead −3 = fully observed (ERA5), −2/−1 = in season
     triSlider.classList.toggle("in-season", inSeason);
     triLabel.innerHTML = `${t.key} (${t.label})` +
-      (inSeason ? ` <span class="in-season-tag">· in season</span>` : "");
+      (lead === -3 ? ` <span class="in-season-tag">· observed (ERA5)</span>`
+       : inSeason ? ` <span class="in-season-tag">· in season</span>` : "");
   };
 
   // Map (plate carrée; flush fit with a temporary zoomSnap 0).
@@ -312,10 +317,12 @@ Promise.all([
     const cat = catOf(f, currentTri(), seasonalityOn());
     const tag = membershipTag(f.properties.iso3);
     let extra = "";
+    const rLine = rec && rec.obs ? `<div>Observed (ERA5)</div>`
+      : `<div>Correlation: ${fmtR(rec && rec.r)}</div>`;
     if (rec && rec.rp != null) {
-      extra = `<div>Return period: ${fmtRp(rec.rp)} yr</div><div>Correlation: ${fmtR(rec.r)}</div>`;
+      extra = `<div>Return period: ${fmtRp(rec.rp)} yr</div>` + rLine;
     } else if (rec) {
-      extra = `<div>Correlation: ${fmtR(rec.r)}</div>`;
+      extra = rLine;
     }
     return `<div class="name">${f.properties.name}${tag}</div>` +
       `<div class="cat" style="color:${STYLE[cat][1]}">${CAT_LABEL[catBase(cat)] || cat}</div>` + extra;
