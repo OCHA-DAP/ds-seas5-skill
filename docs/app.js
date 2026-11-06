@@ -32,21 +32,24 @@ const catBase = (cat) => cat.replace(/_(high|mod)$/, "");
 let T = { sev_rp: 3, vsev_rp: 10, r_mod: 0.3, r_high: 0.5 };
 
 // Faithful port of the map categorisation (analysis/prob_alerts.py:379-397).
+// An observed record (rec.obs: the fully observed trimester, ERA5's value) has no skill r
+// and is certain, so it is styled like a high-skill forecast.
 function classify(rec, rainyOn) {
   if (!rec) return "unmonitored";
   if (!rainyOn && !rec.rainy) return "off_season";
   // Missing r/pct means the country isn't effectively monitored for this slot.
-  if (rec.r == null || rec.pct == null) return "unmonitored";
-  if (rec.r < T.r_mod) return "low_skill";
+  if (rec.pct == null || (rec.r == null && !rec.obs)) return "unmonitored";
+  if (!rec.obs && rec.r < T.r_mod) return "low_skill";
   const vsev_m = 100 / T.vsev_rp, sev_m = 100 / T.sev_rp;
-  const pct = rec.pct, r = rec.r;
+  const pct = rec.pct;
+  const high = rec.obs || rec.r >= T.r_high;
   const vsev = pct <= vsev_m || pct >= 100 - vsev_m;
   const sev = (pct > vsev_m && pct <= sev_m) || (pct >= 100 - sev_m && pct < 100 - vsev_m);
   const drought = pct < 50;
-  const sk = r >= T.r_high ? "high" : "mod";
+  const sk = high ? "high" : "mod";
   if (vsev) return (drought ? "drought" : "flood") + "_vsev_" + sk;
   if (sev) return (drought ? "drought" : "flood") + "_sev_" + sk;
-  return r >= T.r_high ? "high_none" : "mid_none";
+  return high ? "high_none" : "mid_none";
 }
 
 // ── adm0 SVG hatch patterns (constant screen density on Leaflet; layer points ≈ px) ──
@@ -225,8 +228,9 @@ Promise.all([
   const monthSel = document.getElementById("issued-month");
   const seasonalityOn = () => seasonality.checked;
   const currentTri = () => fc.trimesters[+triSlider.value].key;
-  // Signed leadtime of a trimester for the loaded issuance; negative = in-season
-  // (the trimester already started — its elapsed months are observed, not forecast).
+  // Signed leadtime of a trimester for the loaded issuance; -1/-2 = in-season (the
+  // trimester already started — its elapsed months are observed, not forecast); -3 = fully
+  // observed (it ended the month before the issuance: ERA5 only, no forecast).
   const TRI_START = { JFM: 1, FMA: 2, MAM: 3, AMJ: 4, MJJ: 5, JJA: 6,
     JAS: 7, ASO: 8, SON: 9, OND: 10, NDJ: 11, DJF: 12 };
   const triLead = (key) => {
@@ -236,9 +240,11 @@ Promise.all([
   const updateTriLabel = () => {
     const t = fc.trimesters[+triSlider.value];
     curTriKey = t.key;
-    const inSeason = triLead(t.key) < 0;
+    const lead = triLead(t.key);
+    const observed = lead <= -3, inSeason = lead < 0;
     triSlider.classList.toggle("in-season", inSeason);
-    const tag = inSeason ? ` <span class="in-season-tag">· in season</span>` : "";
+    const tag = observed ? ` <span class="in-season-tag">· observed (ERA5)</span>`
+      : inSeason ? ` <span class="in-season-tag">· in season</span>` : "";
     triLabel.innerHTML = `${t.key} (${t.label})` + tag;
     frame.setSub(`Issued ${fc.issued_label} · Valid ` +
       MapFrame.validText(t, fc.issued_year, fc.issued_month) + tag);
@@ -297,7 +303,11 @@ Promise.all([
     const rec = (fc.data[iso3] || {})[currentTri()];
     const cat = catOf(f, currentTri(), seasonalityOn());
     let rpLine = "";
-    if (rec && rec.rp != null) {
+    if (rec && rec.obs) {
+      // Observed season: no forecast, so no correlation; the RP is ERA5's own.
+      rpLine = (rec.rp != null ? `<div>Return period: ${fmtRp(rec.rp)} yr</div>` : "") +
+        `<div>Observed (ERA5), no forecast</div>`;
+    } else if (rec && rec.rp != null) {
       rpLine = `<div>Return period: ${fmtRp(rec.rp)} yr</div><div>Correlation: ${fmtR(rec.r)}</div>`;
     } else if (rec) {
       rpLine = `<div>Correlation: ${fmtR(rec.r)}</div>`;

@@ -38,10 +38,15 @@ def classify(rec, thresholds):
     masks low-skill slots.
     """
     t = thresholds
-    if rec is None or rec.get("r") is None or rec.get("pct") is None:
+    if rec is None or rec.get("pct") is None:
         return None
-    r, pct = rec["r"], rec["pct"]
-    skill = "high" if r >= t["r_high"] else "moderate" if r >= t["r_mod"] else "low"
+    # The fully observed trimester (rec["obs"]): ERA5's season, no forecast, no skill r.
+    obs = bool(rec.get("obs"))
+    if not obs and rec.get("r") is None:
+        return None
+    r, pct = rec.get("r"), rec["pct"]
+    skill = ("observed (ERA5)" if obs else
+             "high" if r >= t["r_high"] else "moderate" if r >= t["r_mod"] else "low")
     vsev_m, sev_m = 100 / t["vsev_rp"], 100 / t["sev_rp"]
     direction = "drought (below normal)" if pct < 50 else "flood (above normal)"
     if pct <= vsev_m or pct >= 100 - vsev_m:

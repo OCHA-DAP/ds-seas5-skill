@@ -586,6 +586,9 @@
   // often a season already in progress; "incl. in-season" also scans leads −2/−1.
   // (Fallback: the default lead-1 trimester.) An explicit trimester shows THAT
   // season's forecast for every unit. Slot keys are the compact trimester codes (MJJ).
+  // The fully observed trimester (lead −3, t.obs) is ERA5's season, not a forecast:
+  // only an explicit selection shows it, never a "worst drought" mode; it has no
+  // skill r, so the skill floor does not apply and it is classified as certain.
   const triSel = document.getElementById("hnrp-tri");
   // Scope is the country filter, nothing more. Areas outside the plan's
   // admin-level analysis still carry a forecast, and the forecast is the point
@@ -599,6 +602,7 @@
   function worstSlot(r, inclInSeason) {
     let best = null;
     for (const [key, t] of Object.entries(r.tris ?? {})) {
+      if (t.obs) continue;
       if (!inclInSeason && t.lead < 0) continue;
       if (t.pct == null || t.pct >= 50 || !t.rainy || t.rp == null) continue;
       if (t.r == null || t.r < rMin()) continue;
@@ -616,14 +620,19 @@
     const t = r.tris && r.tris[triSel.value];
     if (!t || t.pct == null) return null;
     return { key: triSel.value, lead: t.lead, rp: t.rp, pct: t.pct, r: t.r, rainy: !!t.rainy,
-             fc: t.fc, nrm: t.nrm };
+             fc: t.fc, nrm: t.nrm, obs: !!t.obs };
   }
   // Qualifying drought signal = drought side, rainy season, skill + RP thresholds.
   function isDrought(s) {
     return !!s && s.pct != null && s.pct < 50 && s.rainy
-      && s.r != null && s.r >= rMin()
+      && (s.obs || (s.r != null && s.r >= rMin()))
       && s.rp != null && s.rp >= rpMin();
   }
+  // Category of a slot. An observed season (ERA5) is certain: classified at full skill
+  // (r stands in at 1 for the classifier only; it is never displayed).
+  const classifySlot = (s) => classify(
+    s.obs ? { pct: s.pct, r: 1, rainy: s.rainy, obs: true }
+          : { pct: s.pct, r: s.r, rainy: s.rainy }, false);
   // Display slot: the qualifying drought slot, else the same season's real
   // category — flood/normal/low-skill/off-season, like the Map tab. Narrowing
   // the view to drought signals is the legend's job (pin "strongly below" /
@@ -653,11 +662,11 @@
   // the same grey as "no forecast for this season".
   function catAnyOf(r) {
     const s = r && slotOfAny(r);
-    return s ? classify({ pct: s.pct, r: s.r, rainy: s.rainy }, false) : null;
+    return s ? classifySlot(s) : null;
   }
   function catOf(r) {
     const s = r && slotOf(r);
-    return s ? classify({ pct: s.pct, r: s.r, rainy: s.rainy }, false) : null;
+    return s ? classifySlot(s) : null;
   }
 
   // ── ADM1 choropleth ──────────────────────────────────────────────────────────
@@ -935,20 +944,20 @@
       const months = TRI_MONTHS[s.key];
       rows += `<div><strong>${s.key}</strong>` +
         (months ? ` <span class="muted">${months}</span>` : "") +
-        `${s.lead < 0 ? " · in season" : ""}` +
-        ` — RP ${fmt(s.rp, 1)} yr, r ${fmt(s.r, 2)}</div>`;
+        `${s.obs ? " · observed (ERA5)" : s.lead < 0 ? " · in season" : ""}` +
+        ` — RP ${fmt(s.rp, 1)} yr${s.obs ? "" : `, r ${fmt(s.r, 2)}`}</div>`;
       // RP says how unusual, not how much water: pair it with the magnitude.
       // % of normal is suppressed below 10 mm — in near-rainless seasons the
       // ratio of two tiny totals reads as precision the data doesn't have.
       if (s.fc != null && s.nrm != null) {
         const pctN = s.nrm >= 10
           ? ` (${Math.round(100 * s.fc / s.nrm)}% of normal)` : "";
-        rows += `<div class="muted">forecast ${s.fc} mm · normal ${s.nrm} mm${pctN}</div>`;
+        rows += `<div class="muted">${s.obs ? "observed" : "forecast"} ${s.fc} mm · normal ${s.nrm} mm${pctN}</div>`;
       }
     }
     if (agg) {
-      rows += `<div class="muted">Country-level forecast, not an average of its` +
-        ` areas</div>`;
+      rows += `<div class="muted">Country-level ${s && s.obs ? "value" : "forecast"}, not an` +
+        ` average of its areas</div>`;
     }
     const sev = agg ? agg.sevVal : sevValOf(r);
     if (sev != null) {
@@ -1125,7 +1134,7 @@
       };
     }
     const slot = fcRow ? slotOfAny(fcRow) : null;
-    const cat = slot ? classify({ pct: slot.pct, r: slot.r, rainy: slot.rainy }, false) : null;
+    const cat = slot ? classifySlot(slot) : null;
     // Severity mix across the country's units, as a share of the caseload rather
     // than a count of areas — one huge class-3 state should not read the same as
     // one tiny one. Built from whichever encoding is on screen.
@@ -2615,10 +2624,12 @@
       const sl = slotOf(r);
       titled(sw, cat
         ? `${CAT_LABEL[catBase(cat)] || cat}` +
-          (sl ? ` · ${sl.key}${sl.lead < 0 ? " (in season)" : ""} — RP ${fmt(sl.rp, 1)} yr, ` +
-                `percentile ${fmt(sl.pct, 1)}, skill r ${fmt(sl.r, 2)}` +
+          (sl ? ` · ${sl.key}${sl.obs ? " (observed, ERA5)" : sl.lead < 0 ? " (in season)" : ""}` +
+                ` — RP ${fmt(sl.rp, 1)} yr, percentile ${fmt(sl.pct, 1)}` +
+                (sl.obs ? "" : `, skill r ${fmt(sl.r, 2)}`) +
                 (sl.fc != null && sl.nrm != null
-                  ? `, forecast ${sl.fc} mm vs normal ${sl.nrm} mm` : "") : "")
+                  ? `, ${sl.obs ? "observed" : "forecast"} ${sl.fc} mm vs normal ${sl.nrm} mm`
+                  : "") : "")
         : "No forecast for the selected season");
       // Which season the category refers to, beside its swatch — omitted below
       // the skill floor, where there is no alert for a season to qualify.
@@ -2888,11 +2899,19 @@
       }
     }, 600);
   }
-  // Valid-season selector options: auto + each valid trimester at this issuance.
+  // Valid-season selector options: auto + each valid trimester at this issuance. The
+  // fully observed one (lead −3, ended the month before the issuance) is ERA5's season.
+  const TRI_ORDER = ["JFM", "FMA", "MAM", "AMJ", "MJJ", "JJA", "JAS", "ASO", "SON", "OND",
+                     "NDJ", "DJF"];
+  const leadOfTri = (t) => {
+    const o = (TRI_ORDER.indexOf(t) + 1 - data.issued_month + 12) % 12;
+    return o <= 6 ? o : o - 12;
+  };
   for (const t of data.trimesters ?? []) {
     const o = document.createElement("option");
     o.value = t;
-    o.textContent = TRI_MONTHS[t] ? `${t} — ${TRI_MONTHS[t]}` : t;
+    o.textContent = (TRI_MONTHS[t] ? `${t} — ${TRI_MONTHS[t]}` : t)
+      + (leadOfTri(t) === -3 ? " · observed (ERA5)" : "");
     triSel.appendChild(o);
   }
 

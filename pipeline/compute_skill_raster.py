@@ -10,6 +10,11 @@ one issued-month at a time; the output cube (~2.3 GB float32) is held and writte
 
 Computes the raw and detrended variants in a single pass (shared loads) and writes both.
 
+The fully observed trimester of each issued month (lead -3, src.constants.OBSERVED_LEAD: it
+ended the month before the issuance) has no forecast: its pixels carry ERA5's season ranked
+against the earlier seasons (src.skill_raster.observed_metrics_grid, the per-pixel
+src.skill.observed_trimester_stats) and no skill (pearson_r / rmse / sigma NaN).
+
 Run:
   uv run python pipeline/compute_skill_raster.py                          # full global
   uv run python pipeline/compute_skill_raster.py --clip-iso3 ETH SOM KEN  # smoke test
@@ -32,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import ocha_stratus as stratus  # noqa: E402
 
-from src.constants import PROJECT_PREFIX, TRIMESTERS  # noqa: E402
+from src.constants import OBSERVED_LEAD, PROJECT_PREFIX, TRIMESTERS  # noqa: E402
 import src.skill_raster as sr  # noqa: E402
 
 SEAS5_START = "1981-01-01"
@@ -162,15 +167,36 @@ def main():
         out["n_years"][im - 1, ti] = skill["n_years"]
         out["current_forecast_year"][im - 1, ti] = fm["current_forecast_year"]
 
+    def _fill_observed(out, im, ti, obs_l, rainy, detrend):
+        om = sr.observed_metrics_grid(obs_l, detrend=detrend)
+        if om is None:
+            return
+        for v in PIXEL_VARS:
+            da = rainy.astype("float32") if v == "rainy" else om[v]
+            out[v][im - 1, ti, :, :] = da.transpose("y", "x").values
+        out["n_years"][im - 1, ti] = om["n_years"]
+        out["current_forecast_year"][im - 1, ti] = om["current_forecast_year"]
+
     for im in tqdm(args.issued_months, desc="issued_month"):
         seas5 = seas5_cache.pop(im, None)
         if seas5 is None:
             seas5 = load_seas5_issued_month(im, args.end_date, "prod", clip_gdf)
         for ti, tri in enumerate(TRI_NAMES):
             valid = TRIMESTERS[tri]
+            lead = sr.trimester_lead(im, valid)
+            # Fully observed trimester: ERA5 only, ranked in its own record (no SEAS5).
+            if lead == OBSERVED_LEAD:
+                obs = sr.aggregate_era5_trimester_grid(era5, valid)
+                if obs is None:
+                    continue
+                obs_l = sr.log1p(obs)
+                rainy = sr.rainy_grid(clim, valid)
+                _fill_observed(out_raw, im, ti, obs_l, rainy, detrend=False)
+                _fill_observed(out_dt, im, ti, obs_l, rainy, detrend=True)
+                continue
             # In-season (mixed) trimesters — issuance falls inside the trimester, so the
             # already-observed months come from ERA5 and only the rest is forecast.
-            if sr.trimester_lead(im, valid) in (-1, -2):
+            if lead in (-1, -2):
                 fc = sr.aggregate_mixed_trimester_grid(seas5, era5, im, valid)
             else:
                 fc = sr.aggregate_seas5_trimester_grid(seas5, im, valid)
@@ -186,6 +212,20 @@ def main():
             if len(hist) >= sr.MIN_YEARS:
                 _fill(out_dt, im, ti, sr.detrend_grid(fc_n, hist),
                       sr.detrend_grid(obs_l, hist), rainy)
+        # The observed layer keeps only the pixels SEAS5 covers in this issuance (any of
+        # its forecast / in-season trimesters is drawn there: percentile AND r finite), so
+        # its footprint is the forecast layers' and ERA5-only pixels stay empty. (A finite
+        # percentile alone is not coverage: forecast_metrics_grid gives 0 on NaN pixels.)
+        lead_of = {ti: sr.trimester_lead(im, TRIMESTERS[t]) for ti, t in enumerate(TRI_NAMES)}
+        fc_ti = [ti for ti, ld in lead_of.items() if -2 <= ld <= 4]
+        for out in (out_raw, out_dt):
+            cover = (np.isfinite(out["forecast_percentile"].values[im - 1, fc_ti])
+                     & np.isfinite(out["pearson_r"].values[im - 1, fc_ti])).any(axis=0)
+            for ti in (ti for ti, ld in lead_of.items() if ld == OBSERVED_LEAD):
+                for v in PIXEL_VARS:
+                    if v != "rainy":
+                        out[v][im - 1, ti, :, :] = np.where(cover, out[v].values[im - 1, ti],
+                                                            np.nan)
         del seas5
 
     for out, suffix, label in [(out_raw, "", "raw"), (out_dt, "_detrended", "detrended")]:
@@ -211,13 +251,13 @@ def main():
     # Aug-2026 label). The export drops such layers, but shout here too so the
     # operator knows to rerun once ERA5 lands rather than ship 5/7 trimesters.
     sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling exporter module
-    from export_static_site import _tri_valid, issued_year_for_season  # noqa: E402
+    from export_static_site import SITE_MIN_LEAD, _tri_valid, issued_year_for_season  # noqa: E402
     cfy = out_dt["current_forecast_year"]
 
     def _issue_years(m):
         ys = {}
         for t, months in TRIMESTERS.items():
-            if not _tri_valid(months, m):
+            if not _tri_valid(months, m, min_lead=SITE_MIN_LEAD):
                 continue
             v = cfy.sel(issued_month=m, trimester=t).values
             v = v[np.isfinite(v)]
@@ -225,11 +265,17 @@ def main():
                 ys[t] = issued_year_for_season(int(v.max()), m, t)
         return ys
 
-    per_im = {m: ys for m in range(1, 13) if (ys := _issue_years(m))}
+    # The issuance is read off the FORECAST combos only: the observed one needs nothing but
+    # ERA5, so it could otherwise announce an issuance whose SEAS5 run is not in yet.
+    def _fc(m, ys):
+        return {t: y for t, y in ys.items()
+                if sr.trimester_lead(m, TRIMESTERS[t]) != OBSERVED_LEAD}
+
+    per_im = {m: ys for m in range(1, 13) if (ys := _issue_years(m)) and _fc(m, ys)}
     if per_im:
-        latest_im = max(per_im, key=lambda m: (max(per_im[m].values()), m))
+        latest_im = max(per_im, key=lambda m: (max(_fc(m, per_im[m]).values()), m))
         ys = per_im[latest_im]
-        newest = max(ys.values())
+        newest = max(_fc(latest_im, ys).values())
         stale = sorted(t for t, y in ys.items() if y < newest)
         if stale:
             tqdm.write(f"WARNING: issued_month {latest_im} combos {stale} carry an OLDER "

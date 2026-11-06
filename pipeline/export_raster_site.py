@@ -2,6 +2,8 @@
 
 Bakes the adm0 colour scheme + skill hatching into transparent PNGs (one per valid trimester,
 masked / all-pixels variants) so a browser just swaps images over a plain world-outline basemap.
+The fully observed trimester (lead -3: ERA5's season, no forecast) is drawn like a high-skill
+forecast (no skill hatch: the value is known) and flagged `"obs": true` in meta.json.
 Reads the local detrended skill cube written by compute_skill_raster.py (matches the adm0 static
 map's default). No data is shipped to the browser beyond the small PNGs + meta.json.
 
@@ -26,10 +28,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))  # for src
 sys.path.insert(0, str(HERE))         # for the sibling export_static_site module
 
-from src.constants import TRIMESTERS  # noqa: E402
+from src.constants import OBSERVED_LEAD, TRIMESTERS  # noqa: E402
 from src.skill import trimester_lead  # noqa: E402
 from src.skill_raster import rainy_from_cube  # noqa: E402
-from export_static_site import _default_tri, issued_year_for_season  # noqa: E402
+from export_static_site import SITE_MIN_LEAD, _default_tri, issued_year_for_season  # noqa: E402
 
 RAINY_TRIMESTER_PCT = 0.15  # matches the country export's trimester_pct default
 
@@ -58,8 +60,13 @@ def _ensure_cube():
     return CUBE
 
 
-def _classify(P, R, rainy, masked):
-    """Per-pixel category code (full adm0 set). Mirrors the adm0 classify()."""
+def _classify(P, R, rainy, masked, observed=False):
+    """Per-pixel category code (full adm0 set). Mirrors the adm0 classify().
+
+    `observed`: the fully observed trimester has no skill r (nothing to verify); it is
+    certain, so it is categorised as high skill wherever it has a value."""
+    if observed:
+        R = np.where(np.isfinite(P), 1.0, np.nan)
     vsev_m, sev_m = 100 / THRESH["vsev_rp"], 100 / THRESH["sev_rp"]
     valid = np.isfinite(P) & np.isfinite(R)
     off = masked & valid & (rainy != 1)
@@ -102,10 +109,18 @@ def main():
     ds = xr.open_dataset(_ensure_cube())
 
     # adm0-style helpers: trimester validity and season_year -> issue_year mapping.
-    # Valid = lead −2 … 4, matching the country site: 0–4 are fully-forecast complete
-    # trimesters; −1/−2 are in-season (mixed obs+forecast).
+    # Valid = lead −3 … 4, matching the country site: 0–4 are fully-forecast complete
+    # trimesters; −1/−2 are in-season (mixed obs+forecast); −3 is fully observed (ERA5).
     def tri_valid(months, m):
-        return -2 <= trimester_lead(m, months) <= 4
+        return SITE_MIN_LEAD <= trimester_lead(m, months) <= 4
+
+    def is_obs(t, m):
+        return trimester_lead(m, TRIMESTERS[t]) == OBSERVED_LEAD
+
+    # The issuance is read off the FORECAST combos only: the observed one needs nothing
+    # but ERA5, so it could otherwise announce an issuance whose SEAS5 run is not in yet.
+    def fc_valid(t, m):
+        return tri_valid(TRIMESTERS[t], m) and not is_obs(t, m)
 
     def min_signed(months, m):
         return min(o if (o := (mm - m) % 12) <= 6 else o - 12 for mm in months)
@@ -122,14 +137,14 @@ def main():
         for m in range(1, 13):
             ys = [issue_year(float(cfy.sel(issued_month=m, trimester=t)), m, t)
                   for t in TRIMESTERS
-                  if tri_valid(TRIMESTERS[t], m)
+                  if fc_valid(t, m)
                   and np.isfinite(float(cfy.sel(issued_month=m, trimester=t)))]
             if ys:
                 iy_by_month[m] = max(ys)
         ymax = max(iy_by_month.values())
         im = max(m for m, iy in iy_by_month.items() if iy == ymax)
     issued_year = max(issue_year(float(cfy.sel(issued_month=im, trimester=t)), im, t)
-                      for t in TRIMESTERS if tri_valid(TRIMESTERS[t], im)
+                      for t in TRIMESTERS if fc_valid(t, im)
                       and np.isfinite(float(cfy.sel(issued_month=im, trimester=t))))
     issued_label = f"{calendar.month_name[im]} {issued_year}"
 
@@ -169,7 +184,8 @@ def main():
 
     meta = {"issued_label": issued_label, "issued_month": im, "issued_year": issued_year,
             "bounds": bounds, "thresholds": THRESH, "default_trimester": _default_tri(tris, im),
-            "trimesters": [{"key": t, "label": "–".join(calendar.month_abbr[m] for m in TRIMESTERS[t])}
+            "trimesters": [{"key": t, "label": "–".join(calendar.month_abbr[m] for m in TRIMESTERS[t]),
+                            **({"obs": True} if is_obs(t, im) else {})}
                            for t in tris]}
 
     rainy_da = rainy_from_cube(ds, RAINY_TRIMESTER_PCT)  # re-derive at current threshold
@@ -179,7 +195,7 @@ def main():
         R = s["pearson_r"].values
         RA = rainy_da.sel(trimester=t).values
         for masked, tag in [(True, "masked"), (False, "all")]:
-            code = _classify(P, R, RA, masked)
+            code = _classify(P, R, RA, masked, observed=is_obs(t, im))
             code[~land] = 0   # ocean / non-land -> transparent (show basemap)
             _code_png(code, OUT / f"{t}_{tag}.png")
         print(f"  {t}: wrote masked/all PNGs", flush=True)

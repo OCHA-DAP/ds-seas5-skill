@@ -27,7 +27,7 @@ from shapely.geometry import MultiPolygon, Polygon, box
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.constants import PROJECT_PREFIX, TRIMESTERS
+from src.constants import OBSERVED_LEAD, PROJECT_PREFIX, TRIMESTERS
 from src.season import APP_MONTH_SHARE, APP_TRIMESTER_SHARE
 from src.season import compute_rainy_set as _compute_rainy_set
 from src.skill import trimester_lead
@@ -37,6 +37,10 @@ USE_DETRENDED = True  # app default "Forecast version: Detrended"
 RAINY_TRIMESTER_PCT = APP_TRIMESTER_SHARE  # 0.15, trimester_pct_sl default (src/season.py)
 RAINY_MONTH_PCT = APP_MONTH_SHARE  # 0.0, month_pct_sl default (no per-month minimum)
 THRESHOLDS = {"sev_rp": 3, "vsev_rp": 10, "r_mod": 0.3, "r_high": 0.5}
+# First lead the SITE shows: the fully observed trimester (OBSERVED_LEAD, ERA5 only). Every
+# site exporter passes it to _tri_valid explicitly; the default there stays -2 for the
+# forecast-only consumers (HDX signal inputs, CMA).
+SITE_MIN_LEAD = OBSERVED_LEAD
 
 DOCS_DATA = Path(__file__).resolve().parent.parent / "docs" / "data"
 GEO_SRC = Path(__file__).resolve().parent.parent / "analysis" / "_world_countries.gpkg"
@@ -59,7 +63,8 @@ def issued_year_for_season(season_year: int, im: int, tri: str) -> int:
     if trimester_lead(im, months) < 0:
         if is_wrap:
             return int(season_year) + (0 if im > 6 else 1)
-        return int(season_year)
+        # the observed trimester of a January issuance is the previous year's OND
+        return int(season_year) + (1 if months[0] > im else 0)
     is_cross = not is_wrap and min(months) < im
     return int(season_year) - (1 if is_cross else 0)
 
@@ -71,14 +76,40 @@ def _actual_issued_year(row) -> int:
 
 
 def _tri_valid(months: list[int], im: int, min_lead: int = -2, max_lead: int = 4) -> bool:
-    """Valid = lead −2 … 4: complete trimesters with ≥1 forecast month in SEAS5's horizon.
+    """Valid = lead −2 … 4 by default: complete trimesters with ≥1 forecast month in SEAS5's
+    horizon. The site passes min_lead=SITE_MIN_LEAD (−3) to add the fully observed one.
 
     Leads 0–4 are fully-forecast trimesters (lead 5–6 would spill past the 6-month
     horizon). Leads −1/−2 are in-season (mixed) trimesters: 1–2 months already observed
-    from ERA5, the rest forecast from this issuance. Other forecast systems can pass
+    from ERA5, the rest forecast from this issuance. Lead −3 (OBSERVED_LEAD) ended the
+    month before the issuance: ERA5 only, no forecast. Other forecast systems can pass
     their own lead window (CMA CMME: 1–4, no in-season trimesters).
     """
     return min_lead <= trimester_lead(im, months) <= max_lead
+
+
+def observed_mask(df: pd.DataFrame) -> pd.Series:
+    """Rows of a skill table that are the fully observed trimester (src.skill's
+    `is_observed`; absent in tables computed before it existed = no observed rows)."""
+    if "is_observed" not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df["is_observed"].fillna(False).astype(bool)
+
+
+def blank_observed_without_forecast(data: dict[str, dict]) -> int:
+    """Empty the observed trimester of units SEAS5 does not cover in this issuance (no
+    non-observed trimester with a value): ERA5 alone would otherwise give them one filled
+    trimester among empty ones. Their record keeps the shape of the other empty ones.
+    `data` is {unit: {trimester: record}}; returns how many records were emptied."""
+    n = 0
+    for tris in data.values():
+        if any(v.get("pct") is not None and not v.get("obs") for v in tris.values()):
+            continue
+        for t, v in list(tris.items()):
+            if v.get("obs"):
+                tris[t] = {"pct": None, "r": None, "rp": None, "rainy": v.get("rainy", False)}
+                n += 1
+    return n
 
 
 def _min_signed(months: list[int], im: int) -> int:
@@ -202,7 +233,8 @@ def build_forecast_df(
 
     Returns:
         DataFrame with columns: issued_month, issued_year, iso3, country_name,
-        trimester, forecast_pct, return_period, pearson_r, is_rainy.
+        trimester, forecast_pct, return_period, pearson_r, is_rainy, is_observed
+        (True for the fully observed trimester: ERA5's value, no forecast).
     """
     rows = [
         {
@@ -215,6 +247,7 @@ def build_forecast_df(
             "return_period": vals["rp"],
             "pearson_r": vals["r"],
             "is_rainy": vals["rainy"],
+            "is_observed": bool(vals.get("obs", False)),
         }
         for iso3, tris in data.items()
         for tri, vals in tris.items()
@@ -266,17 +299,21 @@ def main() -> None:
     )
     rainy_set = compute_rainy_set(monthly_clim)
 
-    # Latest issued month + year, and its valid trimesters (app's selector logic).
+    # Latest issued month + year, and its valid trimesters (app's selector logic). The
+    # issuance is read off the FORECAST rows only: an observed row needs nothing but ERA5,
+    # so it could otherwise announce an issuance whose SEAS5 run is not in yet.
     iy = df[df["current_forecast_year"].notna()].copy()
     iy["_iy"] = iy.apply(_actual_issued_year, axis=1)
-    max_iy_by_month = iy.groupby("issued_month")["_iy"].max().astype(int).to_dict()
+    fc_iy = iy[~observed_mask(iy)]
+    max_iy_by_month = fc_iy.groupby("issued_month")["_iy"].max().astype(int).to_dict()
     global_max_iy = max(max_iy_by_month.values())
     issued_month = max(m for m, y in max_iy_by_month.items() if y == global_max_iy)
     issued_year = global_max_iy
     issued_label = f"{calendar.month_name[issued_month]} {issued_year}"
 
     valid_tris = sorted(
-        [name for name, months in TRIMESTERS.items() if _tri_valid(months, issued_month)],
+        [name for name, months in TRIMESTERS.items()
+         if _tri_valid(months, issued_month, min_lead=SITE_MIN_LEAD)],
         key=lambda t: _min_signed(TRIMESTERS[t], issued_month),
     )
     default_trimester = _default_tri(valid_tris, issued_month)
@@ -291,7 +328,10 @@ def main() -> None:
     # Month-only selection would publish them as current — drop them instead.
     stale_idx = set(iy.index[iy["_iy"] != global_max_iy])
 
-    # Build per-iso3 per-trimester records (latest forecast only).
+    # Build per-iso3 per-trimester records (latest forecast only). The observed trimester
+    # carries "obs": true and no r (there is no forecast to verify); its pct/rp are ERA5's
+    # rank in its own record, on the same scale as a forecast's.
+    is_obs = observed_mask(df)
     data: dict[str, dict] = {}
     for tri in valid_tris:
         sub = df[(df["issued_month"] == issued_month) & (df["trimester"] == tri)]
@@ -309,12 +349,19 @@ def main() -> None:
                 rp = row["forecast_rp"] if pct < 50 else row["flood_rp"]
             else:
                 rp = None
-            data.setdefault(iso3, {})[tri] = {
+            rec = {
                 "pct": round(float(pct), 2) if pd.notna(pct) else None,
                 "r": round(float(r), 3) if pd.notna(r) else None,
                 "rp": round(float(rp), 1) if pd.notna(rp) else None,
                 "rainy": (pc, tri) in rainy_set,
             }
+            if is_obs.loc[row.name]:
+                rec["obs"] = True
+            data.setdefault(iso3, {})[tri] = rec
+
+    n_blank = blank_observed_without_forecast(data)
+    if n_blank:
+        print(f"Observed trimester left empty for {n_blank} countries without a SEAS5 forecast")
 
     forecast = {
         "issued_label": issued_label,

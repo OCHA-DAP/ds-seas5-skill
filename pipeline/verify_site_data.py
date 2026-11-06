@@ -16,10 +16,12 @@ Checks (exit 1 on any failure):
    its own issuance honestly), FAIL if it is further behind, ahead, or the
    payloads disagree with each other. --strict-hnrp makes any lag a failure
    (use right after refreshing the adm1/adm2 stats).
-2. The latest issuance carries ALL expected trimesters (leads -2..4, seven of
-   them) in BOTH forecast.json and forecasts/<latest>.json — a missing
-   in-season trimester means the refresh ran before ERA5's elapsed month
-   landed; rerun after ERA5 arrives instead of shipping without them.
+2. The latest issuance carries ALL expected trimesters (leads -3..4, eight of
+   them: the fully observed one, two in season, five forecast) in BOTH
+   forecast.json and forecasts/<latest>.json — a missing observed or in-season
+   trimester means the refresh ran before ERA5's elapsed month landed; rerun
+   after ERA5 arrives instead of shipping without them. Only the observed
+   trimester (lead -3) is flagged `obs`, and it carries no skill r.
 3. forecast.json and forecasts/<latest>.json agree numerically (same pct for
    every country x trimester) — they are built by different exporters from
    the same blob and must never diverge.
@@ -29,7 +31,8 @@ Checks (exit 1 on any failure):
    trimester list, or lists a trimester outside the expected set.
 5. --check-signal (needs the dev blob SAS): the admin-0 HDX-signal table
    hdx_signal/signal_inputs_latest.parquet, rebuilt by the same refresh, shows
-   the same issuance as forecast.json with all expected trimesters, and its
+   the same issuance as forecast.json with all expected forecast trimesters (leads
+   -2..4: the HDX-signal tables carry no observed trimester), and its
    mm amounts (forecast_mm, hist_mean_mm) are never negative — they are clipped
    at 0 in the builder, a negative one means an unclipped rebuild was uploaded.
 
@@ -42,7 +45,8 @@ Checks (exit 1 on any failure):
    only WARNS otherwise (bundles published before the tab existed lack it).
 SEAS5-only partial refresh (docs/data/pending_inseason.json, written by the refresh
 job's `site` step when it runs with inseason=skip, before ERA5's elapsed month has
-landed): the in-season trimesters (leads -2/-1) of THAT issuance are pending. Checks
+landed): the observed and in-season trimesters (leads -3..-1, all needing that ERA5
+month) of THAT issuance are pending. Checks
 2, 4, 5 and 6 then expect the other trimesters to carry current data and the pending
 ones to carry NO data in any payload. The marker must name the bundle's own issuance;
 a marker left over from another issuance FAILS (it must never relax a later bundle).
@@ -82,12 +86,17 @@ def warn(msg):
 
 
 def lead(tri, im):
+    """Signed lead, as src.skill.trimester_lead: 0..6 ahead, else negative (-3 = the fully
+    observed trimester, -2/-1 = in season)."""
     o = (TRI_START[tri] - im) % 12
-    return o - 12 if o >= 10 else o
+    return o if o <= 6 else o - 12
+
+
+OBSERVED_LEAD = -3  # src.constants.OBSERVED_LEAD
 
 
 def expected_tris(im):
-    return {t for t in TRI_START if -2 <= lead(t, im) <= 4}
+    return {t for t in TRI_START if OBSERVED_LEAD <= lead(t, im) <= 4}
 
 
 def main():
@@ -165,6 +174,17 @@ def main():
                      f"{sorted(with_data & pending)} — stale (last year's) values?")
             if want - with_data:
                 fail(f"{name} has no data for {sorted(want - with_data)}")
+        # The fully observed trimester is ERA5's value: flagged obs, no skill r. Any other
+        # trimester flagged obs (or the observed one carrying an r) is a mislabelled row.
+        obs_t = {t for t in want_full if lead(t, im) == OBSERVED_LEAD}
+        for iso3, tris in payload["data"].items():
+            for t, v in tris.items():
+                if v.get("pct") is None:
+                    continue
+                if (t in obs_t) != bool(v.get("obs")) or (t in obs_t and v.get("r") is not None):
+                    fail(f"{name} {iso3} {t}: obs={v.get('obs')!r} r={v.get('r')!r} — only the "
+                         f"fully observed trimester {sorted(obs_t)} is obs, and it has no r")
+                    break
 
     # 3. The two country exporters must agree numerically.
     if hist:
@@ -201,6 +221,28 @@ def main():
         hnrp_vintages[hp.name] = (h_iy, h_im)
         lag = (iy * 12 + im) - (h_iy * 12 + h_im)
         if lag == 0:
+            # Same issuance: the same trimester set as forecast.json, only the fully
+            # observed trimester flagged obs (and with no r), nothing in pending ones.
+            h_tris = set(h.get("trimesters") or [])
+            if not want <= h_tris <= want_full:
+                fail(f"{hp.name} trimesters {sorted(h_tris)} != expected {sorted(want_full)}")
+            obs_t = {t for t in want_full if lead(t, im) == OBSERVED_LEAD}
+            bad = sorted({
+                (row.get("iso3") or row.get("country"), t)
+                for row in h.get("rows", []) for t, v in (row.get("tris") or {}).items()
+                if v.get("pct") is not None
+                and ((t in obs_t) != bool(v.get("obs"))
+                     or (t in obs_t and v.get("r") is not None) or t in pending)})
+            if bad:
+                fail(f"{hp.name}: {len(bad)} unit-trimester(s) mislabelled obs / with an r on "
+                     f"the observed trimester / carrying data while pending, e.g. {bad[:3]}")
+            # Listed is not enough: every expected (non-pending) trimester must carry data in
+            # some unit — e.g. admin skill tables computed without the observed rows would
+            # list the observed trimester (exporters list by issue month) but leave it empty.
+            with_data = {t for row in h.get("rows", []) for t, v in (row.get("tris") or {}).items()
+                         if v.get("pct") is not None}
+            if h.get("rows") and want - with_data:
+                fail(f"{hp.name} has no data for {sorted(want - with_data)} in any unit")
             continue
         msg = (f"{hp.name} is issuance {h_iy}-{h_im:02d}, country data is {iy}-{im:02d} "
                f"({lag:+d} month{'s' if abs(lag) != 1 else ''})")
@@ -225,6 +267,10 @@ def main():
                    f"data ({iy}-{im:02d}); the site disables Pixel mode for it")
             (fail if args.strict_raster else warn)(msg)
         r_tris = {t["key"] for t in meta["trimesters"]}
+        for t in meta["trimesters"]:
+            if bool(t.get("obs")) != (lead(t["key"], r_im) == OBSERVED_LEAD):
+                fail(f"raster meta {t['key']}: obs={t.get('obs')!r} — only the fully observed "
+                     f"trimester (lead {OBSERVED_LEAD}) is obs")
         bad = r_tris - expected_tris(r_im)
         if bad:
             fail(f"raster meta lists trimesters outside its issuance's lead window: {sorted(bad)}")
@@ -257,6 +303,10 @@ def main():
         have = {t["key"] for t in ex["trimesters"]}
         if have != want and not (pending and want <= have <= want_full):
             fail(f"explorer trimesters {sorted(have)} != expected {sorted(want)}")
+        ex_obs = {t["key"] for t in ex["trimesters"] if t.get("obs")}
+        want_obs = {t for t in have if lead(t, im) == OBSERVED_LEAD}
+        if ex_obs != want_obs:
+            fail(f"explorer index flags {sorted(ex_obs)} as observed, expected {sorted(want_obs)}")
         n_cmp = n_diff = n_missing = n_pres = 0
         ex_isos = {c["iso3"] for c in ex["countries"]}
         fc_isos = {i for i, tris in fc["data"].items()
@@ -296,8 +346,11 @@ def main():
                 if v.get("pct") is None:
                     continue
                 n_cmp += 1
-                # explorer rounds pct to 0.1 and r to 0.001; forecast.json to 0.01 / 0.001
-                if abs(v["pct"] - ev["pct"]) > 0.06 or abs(v["r"] - ev["r"]) > 0.0011:
+                # explorer rounds pct to 0.1 and r to 0.001; forecast.json to 0.01 / 0.001.
+                # The observed trimester has no r on either side (None == None).
+                r_off = ((v.get("r") is None) != (ev.get("r") is None)
+                         or (v.get("r") is not None and abs(v["r"] - ev["r"]) > 0.0011))
+                if abs(v["pct"] - ev["pct"]) > 0.06 or r_off:
                     n_diff += 1
                     if n_diff <= 5:
                         fail(f"explorer {c['iso3']} {t}: pct {ev['pct']} r {ev['r']} vs "
@@ -321,9 +374,12 @@ def main():
         if (s_iy, s_im) != (iy, im):
             fail(f"signal_inputs_latest is issuance {s_iy}-{s_im:02d} != forecast.json "
                  f"{iy}-{im:02d} — rerun build_hdx_signal_inputs.py --level 0")
+        # The HDX-signal tables are forecast-only (build_hdx_signal_inputs: leads -2..4); the
+        # fully observed trimester is a site-only addition.
+        sig_want = {t for t in want if lead(t, im) != OBSERVED_LEAD}
         have = set(sig["trimester"].astype(str))
-        if have != want:
-            fail(f"signal_inputs_latest trimesters {sorted(have)} != expected {sorted(want)}")
+        if have != sig_want:
+            fail(f"signal_inputs_latest trimesters {sorted(have)} != expected {sorted(sig_want)}")
         for col in ("forecast_mm", "hist_mean_mm"):
             n_neg = int((sig[col] < 0).sum())
             if n_neg:
