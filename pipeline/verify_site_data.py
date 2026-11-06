@@ -244,6 +244,10 @@ def main():
                    f"data ({iy}-{im:02d}); the site disables Pixel mode for it")
             (fail if args.strict_raster else warn)(msg)
         r_tris = {t["key"] for t in meta["trimesters"]}
+        for t in meta["trimesters"]:
+            if bool(t.get("obs")) != (lead(t["key"], r_im) == OBSERVED_LEAD):
+                fail(f"raster meta {t['key']}: obs={t.get('obs')!r} — only the fully observed "
+                     f"trimester (lead {OBSERVED_LEAD}) is obs")
         bad = r_tris - expected_tris(r_im)
         if bad:
             fail(f"raster meta lists trimesters outside its issuance's lead window: {sorted(bad)}")

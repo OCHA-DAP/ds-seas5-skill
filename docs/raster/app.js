@@ -206,7 +206,8 @@ Promise.all([
 
   const update = () => {
     const t = meta.trimesters[+slider.value];
-    label.textContent = `${t.key} (${t.label})`;
+    // The fully observed trimester (meta "obs": true) is ERA5's season, not a forecast.
+    label.textContent = `${t.key} (${t.label})${t.obs ? " · observed" : ""}`;
     loadCodeGrid();
   };
   slider.addEventListener("input", update);
