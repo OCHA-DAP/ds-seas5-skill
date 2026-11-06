@@ -31,7 +31,8 @@ Checks (exit 1 on any failure):
    trimester list, or lists a trimester outside the expected set.
 5. --check-signal (needs the dev blob SAS): the admin-0 HDX-signal table
    hdx_signal/signal_inputs_latest.parquet, rebuilt by the same refresh, shows
-   the same issuance as forecast.json with all expected trimesters, and its
+   the same issuance as forecast.json with all expected forecast trimesters (leads
+   -2..4: the HDX-signal tables carry no observed trimester), and its
    mm amounts (forecast_mm, hist_mean_mm) are never negative — they are clipped
    at 0 in the builder, a negative one means an unclipped rebuild was uploaded.
 
@@ -362,9 +363,12 @@ def main():
         if (s_iy, s_im) != (iy, im):
             fail(f"signal_inputs_latest is issuance {s_iy}-{s_im:02d} != forecast.json "
                  f"{iy}-{im:02d} — rerun build_hdx_signal_inputs.py --level 0")
+        # The HDX-signal tables are forecast-only (build_hdx_signal_inputs: leads -2..4); the
+        # fully observed trimester is a site-only addition.
+        sig_want = {t for t in want if lead(t, im) != OBSERVED_LEAD}
         have = set(sig["trimester"].astype(str))
-        if have != want:
-            fail(f"signal_inputs_latest trimesters {sorted(have)} != expected {sorted(want)}")
+        if have != sig_want:
+            fail(f"signal_inputs_latest trimesters {sorted(have)} != expected {sorted(sig_want)}")
         for col in ("forecast_mm", "hist_mean_mm"):
             n_neg = int((sig[col] < 0).sum())
             if n_neg:
