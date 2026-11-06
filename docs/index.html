@@ -70,10 +70,12 @@
       = low skill. Use the <strong>Issued</strong> year/month menus to browse past forecasts (in-sample
       reconstructions). The <strong>Country</strong>/<strong>Pixel</strong> toggle switches between
       country averages and the native SEAS5 0.4° grid — pixel level is only available for the most
-      recent issuance. By default, alerts are shown only for the rainy season. The first two
-      trimesters on the slider are <strong>in-season</strong>: they are already underway at issuance,
-      so their 1–2 elapsed months use ERA5 observations and only the remainder is forecast — a much
-      more confident (and higher-skill) estimate of how the season ends up.
+      recent issuance. By default, alerts are shown only for the rainy season. The first trimester
+      on the slider is <strong>observed</strong>: it ended the month before the issuance, so it shows
+      how that season actually turned out in ERA5, ranked against the earlier seasons — no forecast,
+      so no skill hatching. The next two are <strong>in-season</strong>: they are already underway at
+      issuance, so their 1–2 elapsed months use ERA5 observations and only the remainder is forecast —
+      a much more confident (and higher-skill) estimate of how the season ends up.
     </p>
   </section>
 
@@ -913,7 +915,10 @@
           and only the remaining month(s) from SEAS5 — each forecast month first bias-corrected
           against ERA5 for that calendar month (mean and spread matched in log space) so observed
           and forecast months can be blended without the forecast's month-specific bias leaking
-          into the trimester value.</li>
+          into the trimester value. The <strong>observed trimester</strong> (the one that ended the
+          month before the issue, e.g. a November issue → Aug–Sep–Oct) has no forecast at all: its
+          value is ERA5's season, placed among the earlier seasons the same way a forecast is placed
+          among past forecasts, so its colour shows how the season turned out.</li>
         <li><strong>Transform, normalise &amp; detrend.</strong> Values are log-transformed, and
           the forecast is rescaled to match the ERA5 mean and spread, so the two are comparable. A
           linear trend is then removed from both the forecast and the observations (in log space,
@@ -958,7 +963,8 @@
         observations and only the remainder is forecast. Their skill is computed the same way (blended
         series vs. the fully-observed trimester) and is naturally much higher, since 1–2 of the 3
         months are shared with the observations — read it as confidence in the season's final outcome,
-        not forecast skill per se. The <strong>Skill map</strong> and <strong>Skill by
+        not forecast skill per se. <strong>Leadtime −3</strong> is the observed trimester: ERA5 only,
+        so there is no skill to measure and it is drawn as certain (solid fill). The <strong>Skill map</strong> and <strong>Skill by
         country</strong> tabs show r for every trimester and leadtime, coloured at these same cutoffs
         (with negative r shown as its own category). Pixel-level layers cover the fully-forecast
         leadtimes only (0–4); in-season estimates are country-level.

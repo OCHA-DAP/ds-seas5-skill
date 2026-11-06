@@ -32,12 +32,12 @@
   const dispName = (iso3) => nameOf(iso3).replace(/\s*\(.+\)$/, "");
 
   // Signed lead from the issue month (matches src/skill.py trimester_lead):
-  // MJJ issued July -> -2 (in season), JAS -> 0, NDJ -> 4.
+  // AMJ issued July -> -3 (observed: ERA5 only), MJJ -> -2 (in season), JAS -> 0, NDJ -> 4.
   const TRI_START = { JFM: 1, FMA: 2, MAM: 3, AMJ: 4, MJJ: 5, JJA: 6,
                       JAS: 7, ASO: 8, SON: 9, OND: 10, NDJ: 11, DJF: 12 };
   const leadOf = (tri) => {
     const o = (TRI_START[tri] - fc.issued_month + 12) % 12;
-    return o >= 10 ? o - 12 : o;
+    return o <= 6 ? o : o - 12;
   };
 
   const skillSel = document.getElementById("alerts-skill");
@@ -50,8 +50,10 @@
 
   // ALL qualifying trimesters per country × hazard under the CURRENT filters,
   // plus the worst one. "Worst" ranks severity band, then skill band; among
-  // ties a season still ahead beats one already in progress, then raw return
-  // period. The row displays the worst tier and LISTS every trimester in it.
+  // ties a season still ahead beats one already in progress or observed, then raw
+  // return period. The row displays the worst tier and LISTS every trimester in it.
+  // The observed trimester (t.obs: ERA5's value, no forecast) has no r and is
+  // certain, so it counts in the high skill band under either skill filter.
   function beats(a, b) {
     if (a.sev !== b.sev) return a.sev > b.sev;
     if (a.skill !== b.skill) return a.skill > b.skill;
@@ -65,14 +67,14 @@
     const best = new Map(), all = new Map(); // "iso3|hazard" -> cand / [cands]
     for (const [iso3, tris] of Object.entries(fc.data)) {
       for (const [tri, t] of Object.entries(tris)) {
-        if (t.pct == null || t.r == null || t.r < rMin) continue;
+        if (t.pct == null || (!t.obs && (t.r == null || t.r < rMin))) continue;
         if (rainyChk.checked && !t.rainy) continue;
         const high = t.pct <= vsevM || t.pct >= 100 - vsevM;
         const modr = !high && (t.pct <= sevM || t.pct >= 100 - sevM);
         if (!high && (highOnly || !modr)) continue;
         const hazard = t.pct < 50 ? "drought" : "flood";
-        const cand = { sev: high ? 2 : 1, skill: t.r >= TH.r_high ? 2 : 1,
-                       rp: t.rp ?? 0, r: t.r, tri, lead: leadOf(tri) };
+        const cand = { sev: high ? 2 : 1, skill: t.obs || t.r >= TH.r_high ? 2 : 1,
+                       rp: t.rp ?? 0, r: t.r, obs: !!t.obs, tri, lead: leadOf(tri) };
         const k = iso3 + "|" + hazard;
         (all.get(k) ?? all.set(k, []).get(k)).push(cand);
         if (!best.has(k) || beats(cand, best.get(k))) best.set(k, cand);
@@ -113,7 +115,7 @@
 
   document.getElementById("alerts-title").textContent =
     `SEAS5 precipitation alerts — forecast issued ${fc.issued_label}, ` +
-    `worst country-level signal (in-season included)`;
+    `worst country-level signal (observed and in-season trimesters included)`;
 
   // ── Sortable header ──────────────────────────────────────────────────────────
   // Default order is the alert ranking (severity, skill, PiN); clicking a header
@@ -182,8 +184,9 @@
     for (const r of rows) {
       const [label, bg, ink] = SEV_CHIP[r.hazard][r.sev];
       const tris = r.tier.map((t) =>
-        `<span class="tri-code${t.lead < 0 ? " tri-ongoing" : ""}" title="${esc(
-          `${t.lead < 0 ? "in season — " : ""}RP ${t.rp.toFixed(1)} yr, r ${t.r.toFixed(2)}`)}">${t.tri}</span>`).join(" ");
+        `<span class="tri-code${t.lead < 0 ? " tri-ongoing" : ""}" title="${esc(t.obs
+          ? `observed (ERA5), no forecast — RP ${t.rp.toFixed(1)} yr`
+          : `${t.lead < 0 ? "in season — " : ""}RP ${t.rp.toFixed(1)} yr, r ${t.r.toFixed(2)}`)}">${t.tri}</span>`).join(" ");
       const pinTip = r.cl
         ? `${fmtN(r.cl.pin)} — ${r.cl.plan_name} ${r.cl.plan_year} plan headline (HPC API)` : "";
       const yrTag = r.cl && r.cl.plan_year < latestPlanYr
