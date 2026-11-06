@@ -7,6 +7,9 @@ pick a country, an admin-1 or an admin-2 unit and see, for the LATEST issuance,
 * every valid trimester's forecast percentile and skill (Pearson r), raw and detrended;
 * the hindcast scatter (normalised SEAS5 vs ERA5, one point per year) for any of them;
 * the forecast and observed series with their linear trends;
+* the fully observed trimester (lead -3, src.constants.OBSERVED_LEAD: it ended the month
+  before the issuance): ERA5's season, its percentile in its own record (raw and
+  detrended) and the ERA5 series. No forecast and no skill r; flagged `obs` in index.json;
 * the unit's skill for every issue month (leadtime x trimester heatmap) and its
   monthly ERA5 climatology.
 
@@ -51,10 +54,11 @@ from scipy.stats import linregress
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from src.constants import PROJECT_PREFIX, TRIMESTERS  # noqa: E402
+from src.constants import OBSERVED_LEAD, PROJECT_PREFIX, TRIMESTERS  # noqa: E402
 from src.skill import season_year_for, trimester_lead  # noqa: E402
 from export_static_site import (  # noqa: E402
-    SKILL_LEADS, THRESHOLDS, _min_signed, _tri_label, _tri_valid, compute_rainy_set,
+    SITE_MIN_LEAD, SKILL_LEADS, THRESHOLDS, _min_signed, _tri_label, _tri_valid,
+    compute_rainy_set,
 )
 
 DOCS_DATA = Path(__file__).resolve().parent.parent / "docs" / "data"
@@ -161,6 +165,7 @@ def build_unit(
     raw_at = sk_raw[sk_raw["issued_month"] == issued_month].set_index("trimester")
     dt_at = sk_dt[sk_dt["issued_month"] == issued_month].set_index("trimester")
     tris: dict[str, dict] = {}
+    obs_tris: list[str] = []
     for tri in valid_tris:
         g = paired[paired["trimester"] == tri].sort_values("season_year")
         if g.empty:
@@ -173,13 +178,19 @@ def build_unit(
         # A current forecast exists only if THIS issuance's season year has a value; a
         # pipeline run before the in-season ERA5 month landed leaves last year's vintage
         # as the newest row (see export_static_site.py, stale_idx) — never show that.
-        has_cur = y0 <= sy <= y1 and not np.isnan(fc[sy - y0])
+        # The observed trimester has no forecast: its "current" value is ERA5's season.
+        observed = trimester_lead(issued_month, TRIMESTERS[tri]) == OBSERVED_LEAD
+        if observed:
+            obs_tris.append(tri)
+        cur_vals = obs if observed else fc
+        has_cur = y0 <= sy <= y1 and not np.isnan(cur_vals[sy - y0])
         rr = raw_at.loc[tri] if tri in raw_at.index else None
         rd = dt_at.loc[tri] if tri in dt_at.index else None
         # The pipeline's "current" stats belong to its newest season year; they are this
         # issuance's only if that year is `sy`.
         cur_raw = has_cur and rr is not None and rr["current_forecast_year"] == sy
         cur_dt = has_cur and rd is not None and rd["current_forecast_year"] == sy
+        # forecast trend: overlap years (none for the observed trimester -> no fc trend)
         hist = ~np.isnan(fc) & ~np.isnan(obs)
         if has_cur:
             hist[sy - y0] = False
@@ -193,6 +204,12 @@ def build_unit(
             "trend": {"fc": _trend(years[hist], fc[hist]),
                       "obs": _trend(years[~np.isnan(obs)], obs[~np.isnan(obs)])},
         }
+    # The observed trimester shows only beside a forecast: a unit with no current
+    # (detrended, as forecast.json) value in any forecast trimester of this issuance --
+    # ERA5 but no SEAS5 -- gets no observed-only record (the site's rule).
+    if not any((tris[t]["dt"] or {}).get("pct") is not None for t in tris if t not in obs_tris):
+        for t in obs_tris:
+            tris.pop(t, None)
     return {
         "name": name,
         "clim_monthly": [_num(clim.get(m), 3) for m in range(1, 13)],
@@ -242,7 +259,7 @@ def main() -> None:
     fc_meta = json.loads((DOCS_DATA / "forecast.json").read_text())
     issued_year, issued_month = int(fc_meta["issued_year"]), int(fc_meta["issued_month"])
     valid_tris = sorted(
-        [t for t, m in TRIMESTERS.items() if _tri_valid(m, issued_month)],
+        [t for t, m in TRIMESTERS.items() if _tri_valid(m, issued_month, min_lead=SITE_MIN_LEAD)],
         key=lambda t: _min_signed(TRIMESTERS[t], issued_month),
     )
     print(f"Issuance {calendar.month_name[issued_month]} {issued_year}; trimesters {valid_tris}")
@@ -342,7 +359,8 @@ def main() -> None:
         "default_trimester": fc_meta.get("default_trimester"),
         "trimesters": [{"key": t, "label": _tri_label(TRIMESTERS[t]),
                         "lead": trimester_lead(issued_month, TRIMESTERS[t]),
-                        "season_year": season_year_for(issued_month, issued_year, TRIMESTERS[t])}
+                        "season_year": season_year_for(issued_month, issued_year, TRIMESTERS[t]),
+                        "obs": trimester_lead(issued_month, TRIMESTERS[t]) == OBSERVED_LEAD}
                        for t in valid_tris],
         "all_trimesters": [{"key": t, "label": _tri_label(TRIMESTERS[t])} for t in TRI_NAMES],
         "leads": SKILL_LEADS,
