@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import mannwhitneyu, norm
 
-from src.constants import MIN_YEARS, TRIMESTERS
+from src.constants import MIN_YEARS, OBSERVED_LEAD, TRIMESTERS
 
 
 def _assign_season_year(s: pd.Series, valid_months: list[int]) -> pd.Series:
@@ -215,6 +215,65 @@ def empirical_rp(
     return (n + 1) / rank
 
 
+def observed_trimester_stats(df_e_raw: pd.DataFrame, detrend: bool = False) -> dict:
+    """Position of the latest complete ERA5 season in its own record (OBSERVED_LEAD rows).
+
+    The fully observed trimester has no forecast: its value is ERA5's. It is ranked against
+    the EARLIER seasons the way a forecast is ranked against its hindcasts: in log1p
+    space, forecast_percentile = share of earlier seasons <= it, Weibull return periods,
+    and with `detrend` against a line fitted to the earlier seasons (the current season
+    is out of sample, as a forecast is). Its climatology (era5_mean/std, lower tercile)
+    is the earlier seasons', so prob_lower_tercile is 1.0 or 0.0: the season was or was
+    not in the lower tercile. The skill fields stay empty: there is nothing to verify.
+
+    `df_e_raw` is aggregate_era5_trimester's output (complete seasons only, mm/day). The
+    current season is the latest one there; when ERA5's last month has not landed yet it
+    is last year's, and the exporters drop it as stale like any other old vintage.
+    `series` is every season's log1p value (detrended with `detrend`) for the paired rows;
+    `observed_raw_mean` is the current season's log1p value NOT detrended, for displays of
+    the season's actual total (the detrended value is a rank-space quantity).
+    """
+    out: dict = dict(
+        n_years=None, era5_mean=None, era5_std=None, lower_tercile_mm=None,
+        current_forecast_year=None, current_forecast_mean=None, prob_lower_tercile=None,
+        forecast_rp=None, flood_rp=None, forecast_percentile=None,
+        series=pd.Series(dtype=float), observed_raw_mean=None,
+    )
+    if df_e_raw.empty:
+        return out
+    e = df_e_raw.sort_values("season_year")
+    yrs = e["season_year"].to_numpy(dtype=int)
+    vals = np.log1p(e["obs_mean"].clip(lower=0).to_numpy(dtype=float))
+    cur_year = int(yrs[-1])
+    hist_mask = yrs < cur_year
+    out["current_forecast_year"] = cur_year
+    out["observed_raw_mean"] = float(vals[-1])
+    if hist_mask.sum() < MIN_YEARS:
+        out["current_forecast_mean"] = float(vals[-1])
+        out["series"] = pd.Series(vals, index=yrs)
+        return out
+    if detrend:
+        x = yrs[hist_mask].astype(float)
+        a, b = np.linalg.lstsq(np.column_stack([x, np.ones(len(x))]), vals[hist_mask],
+                               rcond=None)[0]
+        vals = vals - (a * yrs + b) + vals[hist_mask].mean()
+    hist, cur = vals[hist_mask], float(vals[-1])
+    t_log = float(np.quantile(hist, 1 / 3))
+    out.update(
+        n_years=int(len(hist)),
+        era5_mean=float(hist.mean()),
+        era5_std=float(hist.std(ddof=1)),
+        lower_tercile_mm=float(np.expm1(t_log)),
+        current_forecast_mean=cur,
+        prob_lower_tercile=1.0 if cur <= t_log else 0.0,
+        forecast_rp=empirical_rp(cur, hist, higher_is_more_extreme=False),
+        flood_rp=empirical_rp(cur, hist, higher_is_more_extreme=True),
+        forecast_percentile=float(100.0 * np.sum(hist <= cur) / len(hist)),
+        series=pd.Series(vals, index=yrs),
+    )
+    return out
+
+
 def season_year_for(
     issued_month: int,
     issued_year: int,
@@ -227,13 +286,16 @@ def season_year_for(
     December; non-wrapping trimesters use the year of the last future (<=6 ahead) month.
     For in-season issuances (negative lead) the issue month falls inside the trimester:
     non-wrapping → same calendar year; wrapping → the anchor (Dec) year, which is the
-    issue year only while the issue month is still on the >6 side of the wrap.
+    issue year only while the issue month is still on the >6 side of the wrap. The fully
+    observed trimester (OBSERVED_LEAD) ended before the issue month: for a January
+    issuance that is OND of the previous year (the only non-wrapping negative-lead
+    trimester that starts later in the calendar than its issue month).
     """
     is_wrap = 12 in valid_months and 1 in valid_months
     if trimester_lead(issued_month, valid_months) < 0:
         if is_wrap:
             return issued_year if issued_month > 6 else issued_year - 1
-        return issued_year
+        return issued_year - (1 if valid_months[0] > issued_month else 0)
     if is_wrap:
         return issued_year
     future_offs = [o for m in valid_months if 1 <= (o := (m - issued_month) % 12) <= 6]
@@ -307,9 +369,56 @@ def run_all_combinations(
 
     for issued_month in range(1, 13):
         for trimester_name, valid_months in TRIMESTERS.items():
+            lead = trimester_lead(issued_month, valid_months)
+            # Fully observed trimester: no forecast, ERA5's season ranked in its own
+            # record. Its paired rows carry the observations only (forecast_mean empty).
+            if lead == OBSERVED_LEAD:
+                obs = observed_trimester_stats(
+                    aggregate_era5_trimester(df_era5, valid_months), detrend=detrend
+                )
+                for yr, v in obs["series"].items():
+                    paired_rows.append({
+                        "pcode": pcode,
+                        "iso3": iso3,
+                        "country_name": country_name,
+                        "issued_month": issued_month,
+                        "trimester": trimester_name,
+                        "season_year": int(yr),
+                        "forecast_mean": None,
+                        "obs_mean": float(v),
+                        "hist_prob": None,
+                    })
+                skill_rows.append({
+                    "pcode": pcode,
+                    "iso3": iso3,
+                    "country_name": country_name,
+                    "issued_month": issued_month,
+                    "trimester": trimester_name,
+                    "n_years": obs["n_years"],
+                    "pearson_r": None,
+                    "rmse": None,
+                    "sigma": None,
+                    "sigma_theoretical": None,
+                    "era5_mean": obs["era5_mean"],
+                    "era5_std": obs["era5_std"],
+                    "lower_tercile_mm": obs["lower_tercile_mm"],
+                    "current_forecast_year": obs["current_forecast_year"],
+                    "current_forecast_mean": obs["current_forecast_mean"],
+                    "is_predictive": False,
+                    "prob_lower_tercile": obs["prob_lower_tercile"],
+                    "forecast_rp": obs["forecast_rp"],
+                    "flood_rp": obs["flood_rp"],
+                    "prob_rp": None,
+                    "forecast_percentile": obs["forecast_percentile"],
+                    "is_observed": True,
+                    "observed_raw_mean": obs["observed_raw_mean"],
+                })
+                if progress is not None:
+                    progress.update(1)
+                continue
             # In-season (mixed) trimesters — issuance falls inside the trimester, so the
             # already-observed months come from ERA5 and only the rest is forecast.
-            if trimester_lead(issued_month, valid_months) in (-1, -2):
+            if lead in (-1, -2):
                 df_s_raw = aggregate_mixed_trimester(
                     df_seas5, df_era5, issued_month, valid_months
                 )
@@ -475,6 +584,8 @@ def run_all_combinations(
                 "flood_rp": flood_rp,
                 "prob_rp": prob_rp,
                 "forecast_percentile": forecast_percentile,
+                "is_observed": False,
+                "observed_raw_mean": None,
             })
 
             if progress is not None:

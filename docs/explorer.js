@@ -7,6 +7,9 @@
 //      raw series' linear trend;
 //   4. the unit's skill for every issue month (the Skill-by-country heatmap, reused
 //      from skill.js) + its monthly ERA5 climatology.
+// The fully observed trimester (index.json `obs`, lead -3: it ended the month before the
+// issuance) has no forecast: ERA5's season, its percentile in its own record, the ERA5
+// series. It has no skill r and no scatter.
 // Data: data/explorer/ (pipeline/export_explorer_site.py). Unit files are gzipped
 // JSON; detrended series are re-derived here (explorer_math.js `detrend`, checked
 // against the pipeline by pipeline/check_explorer_detrend.py). Every r, percentile
@@ -83,10 +86,12 @@
   // ── per-trimester derived series ───────────────────────────────────────────
   // For one unit × trimester: decoded raw + detrended series (log space), the
   // historical (overlap) years and the current forecast, all in mm/day.
-  function series(t) {
+  // For the observed trimester (`obsTri`) there are no pairs: `curO` is this season's
+  // ERA5 value and `normal` the earlier seasons' (the record it is ranked against).
+  function series(t, obsTri) {
     const fcR = M.decode(t.fc, IDX.scale), obsR = M.decode(t.obs, IDX.scale);
-    const d = M.detrend(t.y0, fcR, obsR);
-    const out = { y0: t.y0, cur: t.cur, n: t.fc.length };
+    const d = obsTri ? M.detrendObserved(t.y0, fcR, obsR) : M.detrend(t.y0, fcR, obsR);
+    const out = { y0: t.y0, cur: t.cur, n: t.fc.length, obsTri };
     for (const [k, fc, obs] of [["raw", fcR, obsR], ["dt", d.fc, d.obs]]) {
       const hist = [];
       for (let i = 0; i < fc.length; i++) {
@@ -96,12 +101,15 @@
         }
       }
       const curF = t.cur != null && fc[t.cur - t.y0] != null ? Math.expm1(fc[t.cur - t.y0]) : null;
+      const curO = obsTri && t.cur != null && obs[t.cur - t.y0] != null
+        ? Math.expm1(obs[t.cur - t.y0]) : null;
       // Normal = expm1(mean log obs over the overlap): the same "HNRP-identical"
-      // normal the Forecast × HNRP tab uses.
-      const normal = hist.length
-        ? Math.expm1(hist.reduce((s, h) => s + h.ol, 0) / hist.length) : null;
+      // normal the Forecast × HNRP tab uses. Observed trimester: the earlier seasons.
+      const ref = obsTri
+        ? obs.filter((v, i) => v != null && t.y0 + i !== t.cur) : hist.map((h) => h.ol);
+      const normal = ref.length ? Math.expm1(ref.reduce((a, v) => a + v, 0) / ref.length) : null;
       out[k] = {
-        hist, curF, normal,
+        hist, curF, curO, normal,
         fcAll: fc.map((v) => (v == null ? null : Math.expm1(v))),
         obsAll: obs.map((v) => (v == null ? null : Math.expm1(v))),
       };
@@ -109,13 +117,16 @@
     return out;
   }
 
-  // The Map tab's categorisation (app.js classify) for one stats record.
-  function category(st, rainy) {
-    if (!st || st.r == null || st.pct == null) return "No current forecast";
+  // The Map tab's categorisation (app.js classify) for one stats record. The observed
+  // trimester is categorised on its percentile alone (an observation, not a forecast).
+  function category(st, rainy, obsTri) {
+    if (obsTri ? !st || st.pct == null : !st || st.r == null || st.pct == null) {
+      return obsTri ? "No current observation" : "No current forecast";
+    }
     const T = IDX.thresholds;
     const vsev = 100 / T.vsev_rp, sev = 100 / T.sev_rp, p = st.pct;
-    if (st.r < T.r_mod) return "Low skill";
-    const sk = st.r >= T.r_high ? "high skill" : "moderate skill";
+    if (!obsTri && st.r < T.r_mod) return "Low skill";
+    const sk = obsTri ? "observed" : st.r >= T.r_high ? "high skill" : "moderate skill";
     let c = "Roughly normal";
     if (p <= vsev) c = "Strongly below normal";
     else if (p <= sev) c = "Below normal";
@@ -125,7 +136,10 @@
   }
 
   const triMeta = (key) => IDX.trimesters.find((t) => t.key === key);
-  const leadTxt = (lead) => (lead < 0 ? `in season, ${-lead} of 3 months observed` : `lead ${lead}`);
+  // `t` = an index.json trimester entry.
+  const leadTxt = (t) => (t.obs ? "observed, no forecast"
+    : t.lead < 0 ? `in season, ${-t.lead} of 3 months observed` : `lead ${t.lead}`);
+  const leadShort = (t) => (t.obs ? "observed" : t.lead < 0 ? "in season" : `lead ${t.lead}`);
   const isRainy = (key) => unit.rainy[IDX.all_trimesters.findIndex((t) => t.key === key)];
 
   // ── 1. outlook: percentile + skill per trimester, raw vs detrended ─────────
@@ -168,8 +182,11 @@
       svg.appendChild(el("text", { x: ML - 8, y: y1(p) + 4, "text-anchor": "end", class: "ex-muted" },
         String(Math.round(p))));
     });
+    const obsKeys = tris.filter((t) => t.obs).map((t) => t.key);
     svg.appendChild(el("text", { x: ML - 54, y: P1.top - 12, class: "ex-axttl" },
-      "Forecast percentile (below 50 = drier than usual)"));
+      obsKeys.length
+        ? `Percentile: forecast, or observed for ${obsKeys.join(", ")} (below 50 = drier than usual)`
+        : "Forecast percentile (below 50 = drier than usual)"));
 
     // Panel 2 — Pearson r, baseline 0, cutoffs at the moderate/high skill thresholds.
     const rMin = Math.min(-0.2, ...tris.flatMap((t) => {
@@ -207,7 +224,7 @@
 
     const hits = [];
     tris.forEach((t, j) => {
-      const v = unit.tri[t.key], s = series(v);
+      const v = unit.tri[t.key], s = series(v, t.obs);
       const cx = gx(j) + GW / 2;
       const xs = { dt: cx - BW - GAP / 2, raw: cx + GAP / 2 };
       const rainy = isRainy(t.key);
@@ -218,24 +235,33 @@
         bar(xs[k], y2(0), st?.r == null ? null : y2(st.r), COL[k]);
         const rp = st?.pct == null ? "" : st.pct < 50
           ? `, dry return period ${fmt(st.rp_dry, 1)} yr` : `, wet return period ${fmt(st.rp_wet, 1)} yr`;
-        lines.push(`${VER_LABEL[k]}: ` + (st?.pct == null ? "no current forecast"
-          : `${fmt(st.pct, 0)}th percentile, ${fmt(s[k].curF)} mm/day vs normal ${fmt(s[k].normal)}${rp}`) +
-          `; skill r ${fmt(st?.r)}`);
+        lines.push(t.obs
+          ? `${VER_LABEL[k]}: ` + (st?.pct == null ? "no current observation"
+            : `${fmt(st.pct, 0)}th percentile, observed ${fmt(s[k].curO)} mm/day vs normal ` +
+              `${fmt(s[k].normal)}${rp}`)
+          : `${VER_LABEL[k]}: ` + (st?.pct == null ? "no current forecast"
+            : `${fmt(st.pct, 0)}th percentile, ${fmt(s[k].curF)} mm/day vs normal ${fmt(s[k].normal)}${rp}`) +
+            `; skill r ${fmt(st?.r)}`);
       }
       if (v.cur == null) {
         svg.appendChild(el("text", { x: cx, y: y1(50) - 6, "text-anchor": "middle", class: "ex-muted" },
-          "no forecast"));
+          t.obs ? "no observation" : "no forecast"));
+      }
+      if (t.obs) {
+        // no skill to show: an observation is not a forecast
+        svg.appendChild(el("text", { x: cx, y: y2(0) - 6, "text-anchor": "middle", class: "ex-muted" },
+          "observed"));
       }
       // Column labels: trimester (bold blue = rainy season), then lead.
       svg.appendChild(el("text", { x: cx, y: P1.top + P1.h + 20, "text-anchor": "middle",
         class: "ex-trilbl", "font-weight": rainy ? 700 : 400, fill: rainy ? RAINY : INK }, t.key));
       svg.appendChild(el("text", { x: cx, y: P1.top + P1.h + 35, "text-anchor": "middle", class: "ex-muted" },
-        t.lead < 0 ? "in season" : `lead ${t.lead}`));
+        leadShort(t)));
       // Hit target: the whole column (bigger than the marks, on top of them) — one
       // tooltip with both versions; click selects the trimester for the charts below.
       const hit = el("rect", { x: gx(j) + 4, y: P1.top - 26, width: GW - 8,
         height: P2.top + P2.h - P1.top + 46, fill: "transparent", class: "ex-hit" });
-      tip(hit, `${t.label} ${t.season_year} (${leadTxt(t.lead)})` +
+      tip(hit, `${t.label} ${t.season_year} (${leadTxt(t)})` +
         `${rainy ? ", rainy season" : ""}\n${lines.join("\n")}\nClick to show this trimester below`);
       hit.addEventListener("click", () => { S.tri = t.key; update(); });
       hits.push(hit);
@@ -254,15 +280,17 @@
       "<th class='num'>Skill r<br>detrended</th><th class='num'>Skill r<br>raw</th>" +
       "<th>Map category (detrended)</th></tr></thead>";
     const rows = IDX.trimesters.filter((t) => unit.tri[t.key]).map((t) => {
-      const v = unit.tri[t.key], s = series(v), rainy = isRainy(t.key);
+      const v = unit.tri[t.key], s = series(v, t.obs), rainy = isRainy(t.key);
       const cls = t.key === S.tri ? " class='sel'" : "";
+      // the observed trimester has no forecast: its cells show ERA5's value, marked "obs."
+      const mm = (x) => (t.obs ? (x.curO == null ? "–" : `${fmt(x.curO)} obs.`) : fmt(x.curF));
       return `<tr${cls}><td><span class="${rainy ? "ex-rainy" : ""}">${t.key}</span> ${t.season_year}</td>` +
-        `<td>${t.lead < 0 ? "in season" : t.lead}</td>` +
-        `<td class='num'>${fmt(s.dt.curF)}</td><td class='num'>${fmt(s.raw.curF)}</td>` +
+        `<td>${t.obs ? "observed" : t.lead < 0 ? "in season" : t.lead}</td>` +
+        `<td class='num'>${mm(s.dt)}</td><td class='num'>${mm(s.raw)}</td>` +
         `<td class='num'>${fmt(s.raw.normal)}</td>` +
         `<td class='num'>${fmt(v.dt?.pct, 0)}</td><td class='num'>${fmt(v.raw?.pct, 0)}</td>` +
         `<td class='num'>${fmt(v.dt?.r)}</td><td class='num'>${fmt(v.raw?.r)}</td>` +
-        `<td>${category(v.dt, rainy)}</td></tr>`;
+        `<td>${category(v.dt, rainy, t.obs)}</td></tr>`;
     }).join("");
     tb.innerHTML = head + `<tbody>${rows}</tbody>`;
   }
@@ -272,6 +300,24 @@
     const host = $("ex-scatter"), stats = $("ex-scatter-stats");
     const t = triMeta(S.tri), v = unit.tri[S.tri];
     if (!t || !v) { host.textContent = "No data for this trimester."; stats.textContent = ""; return; }
+    if (t.obs) {
+      // No forecast to plot against the observations: say so instead of an empty chart.
+      const st = v[S.ver], so = series(v, true)[S.ver];
+      const msg = document.createElement("p");
+      msg.className = "ex-muted";
+      msg.textContent = `${t.label} ${t.season_year} is fully observed (ERA5): there is no ` +
+        "forecast for it, so there is nothing to plot against the observations. Its place in " +
+        "the record is in the chart below.";
+      host.replaceChildren(msg);
+      const rp = st?.pct == null ? "" : st.pct < 50
+        ? ` · dry return period <strong>${fmt(st.rp_dry, 1)} yr</strong>`
+        : ` · wet return period <strong>${fmt(st.rp_wet, 1)} yr</strong>`;
+      stats.innerHTML = st?.pct == null ? `<strong>${VER_LABEL[S.ver]}</strong> · no current observation`
+        : `<strong>${VER_LABEL[S.ver]}</strong> · observed <strong>${fmt(so.curO)} mm/day</strong>` +
+          ` vs normal ${fmt(so.normal)} · <strong>${fmt(st.pct, 0)}th percentile</strong> of the ` +
+          `${st.n ?? "earlier"} earlier seasons${rp}.`;
+      return;
+    }
     const s = series(v)[S.ver], hist = s.hist;
     if (hist.length < 3) { host.textContent = "Too few years to plot."; stats.textContent = ""; return; }
     const W = 600, H = 540, ML = 64, MR = 24, MT = 18, MB = 52;
@@ -380,11 +426,12 @@
     const host = $("ex-trend");
     const t = triMeta(S.tri), v = unit.tri[S.tri];
     if (!t || !v) { host.textContent = ""; return; }
-    const s = series(v);
+    const s = series(v, t.obs);
+    // The observed trimester has no forecast series: its ERA5 panel only.
     const panels = [
       ["fc", "SEAS5 forecast, matched to ERA5 (mm/day)", s.raw.fcAll, s.dt.fcAll],
       ["obs", "ERA5 observed (mm/day)", s.raw.obsAll, s.dt.obsAll],
-    ];
+    ].filter(([key]) => !(t.obs && key === "fc"));
     const W = 560, H = 230, ML = 52, MR = 14, MT = 34, MB = 30;
     const svgs = panels.map(([key, title, raw, dt]) => {
       const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "ex-svg", role: "img", "aria-label": title });
@@ -430,7 +477,8 @@
           const yr = s.y0 + i, isCur = yr === v.cur;
           const c = el("circle", { cx: X(yr), cy: Y(x), r: rad, fill: isCur ? "#fff" : COL[k],
             stroke: isCur ? COL[k] : "#fff", "stroke-width": isCur ? 2 : 1.5 });
-          tip(c, `${yr}${isCur ? " (this forecast)" : ""} — ${VER_LABEL[k]}: ${fmt(x)} mm/day`);
+          tip(c, `${yr}${isCur ? (t.obs ? " (this season)" : " (this forecast)") : ""} — ` +
+            `${VER_LABEL[k]}: ${fmt(x)} mm/day`);
           svg.appendChild(c);
         });
       }
@@ -534,13 +582,14 @@
       S.tri = avail.includes(IDX.default_trimester) ? IDX.default_trimester : avail[0];
     }
     fillSelect($("ex-tri"), IDX.trimesters.filter((t) => avail.includes(t.key))
-      .map((t) => [t.key, `${t.label} ${t.season_year} (${leadTxt(t.lead)})`]), S.tri);
+      .map((t) => [t.key, `${t.label} ${t.season_year} (${leadTxt(t)})`]), S.tri);
     document.querySelectorAll("#ex-ver .seg-btn").forEach((b) =>
       b.classList.toggle("active", b.dataset.v === S.ver));
     $("ex-title").textContent = `${unitName} — SEAS5 issued ${IDX.issued_label}`;
     $("ex-level").textContent = level;
-    $("ex-scatter-h").textContent =
-      `${triMeta(S.tri)?.label ?? ""}: forecast against observed, one point per year`;
+    $("ex-scatter-h").textContent = triMeta(S.tri)?.obs
+      ? `${triMeta(S.tri).label}: observed, no forecast`
+      : `${triMeta(S.tri)?.label ?? ""}: forecast against observed, one point per year`;
     $("ex-trend-h").textContent = `${triMeta(S.tri)?.label ?? ""}: the record, raw and detrended`;
     if (!avail.length) {
       ["ex-outlook", "ex-scatter", "ex-trend"].forEach((id) => { $(id).textContent = "No data for this unit."; });
